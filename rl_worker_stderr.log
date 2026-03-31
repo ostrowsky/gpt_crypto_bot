@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "D:\Projects\gpt_crypto_bot\files\rl_headless_worker.py", line 370, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "D:\Projects\gpt_crypto_bot\files\rl_headless_worker.py", line 361, in main
+    logging.FileHandler(LOG_FILE, encoding="utf-8"),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "logging\__init__.py", line 1181, in __init__
+  File "logging\__init__.py", line 1213, in _open
+PermissionError: [Errno 13] Permission denied: 'D:\\Projects\\gpt_crypto_bot\\rl_worker_stderr.log'
+2026-03-30 10:40:36,907  INFO      rl_headless_worker  Headless RL worker started: train_every=60m min_rows=500 min_new_rows=50
