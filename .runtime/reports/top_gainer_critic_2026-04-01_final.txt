@@ -1,0 +1,52 @@
+Top-gainer critic for 2026-04-01 (final)
+Window: 2026-04-01 00:00:00 CEST -> 2026-04-01 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 2/15
+  watchlist top bought: 10/15 (66.7%)
+  early captures: 3/15 (20.0%)
+  bot false-positive buys: 34/44
+
+Watchlist top gainers and bot reaction:
+1. BLURUSDT +29.97% status=bought
+   BUY 09:35 mode=impulse_speed entry=0.02309 capture=0.0%
+   EXIT 15:46 pnl=+10.70%
+2. ALGOUSDT +11.94% status=bought
+   BUY 03:05 mode=impulse_speed entry=0.0968 capture=57.3%
+   EXIT 06:04 pnl=+2.48%
+3. SEIUSDT +8.33% status=bought
+   BUY 02:34 mode=retest entry=0.0509 capture=88.1%
+   EXIT 03:18 pnl=+0.59%
+4. ZROUSDT +4.85% status=bought
+   BUY 02:32 mode=impulse_speed entry=1.91 capture=63.7%
+   EXIT 04:34 pnl=-1.15%
+5. GMTUSDT +4.50% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 78.2 > 70.0
+6. ILVUSDT +3.88% status=bought
+   BUY 02:02 mode=impulse_speed entry=4.01 capture=6.7%
+   EXIT 10:15 pnl=+2.01%
+7. FETUSDT +3.65% status=bought
+   BUY 13:37 mode=trend entry=0.2444 capture=0.0%
+8. ADAUSDT +3.48% status=blocked_rule
+   WHY trend quality guard: RSI 73.5 > 68.0
+9. APEUSDT +3.35% status=blocked_rule
+   WHY late impulse_speed rotation guard: RSI 77.3 >= 76.0, daily_range 8.26% >= 5.00%
+10. POLUSDT +3.20% status=bought
+   BUY 07:19 mode=alignment entry=0.0936 capture=0.0%
+   EXIT 08:17 pnl=+1.28%
+11. AVAXUSDT +3.15% status=bought
+   BUY 07:48 mode=impulse_speed entry=9.09 capture=32.1%
+   EXIT 08:16 pnl=+1.76%
+12. RENDERUSDT +2.96% status=bought
+   BUY 02:34 mode=impulse_speed entry=1.769 capture=9.8%
+   EXIT 04:34 pnl=-1.30%
+13. WIFUSDT +2.79% status=blocked_portfolio
+   WHY блок: портфель полон: 10/9 позиций
+14. LINKUSDT +2.74% status=blocked_rule
+   WHY 1h impulse_speed guard: daily_range 10.37% > 10.00%
+15. LDOUSDT +2.70% status=bought
+   BUY 12:20 mode=trend entry=0.3385 capture=0.0%
+   EXIT 15:17 pnl=-0.65%
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  1INCHUSDT, AMPUSDT, AUDIOUSDT, AXSUSDT, BATUSDT, BNTUSDT, C98USDT, CELOUSDT, DYDXUSDT, EGLDUSDT, ENSUSDT, FLOKIUSDT, FLUXUSDT, GRTUSDT, HBARUSDT

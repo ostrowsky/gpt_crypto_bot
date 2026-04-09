@@ -1,0 +1,42 @@
+Top-gainer critic for 2026-04-04 (final)
+Window: 2026-04-04 00:00:00 CEST -> 2026-04-04 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 0/15
+  watchlist top bought: 1/15 (6.7%)
+  early captures: 0/15 (0.0%)
+  bot false-positive buys: 1/2
+
+Watchlist top gainers and bot reaction:
+1. ETCUSDT +6.64% status=blocked_rule
+   WHY ranker hard veto: final -2.47 <= -1.50 for 1h trend
+2. AEVOUSDT +5.70% status=blocked_rule
+   WHY 1h impulse_speed guard: daily_range 10.09% > 10.00%
+3. PYRUSDT +5.10% status=blocked_rule
+   WHY ranker hard veto: final -5.58 <= -1.50 for 1h impulse
+4. CAKEUSDT +5.05% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 78.3 > 70.0
+5. NEARUSDT +4.21% status=blocked_rule
+   WHY ranker hard veto: final -2.94 <= -1.50 for 1h trend
+6. ICPUSDT +1.23% status=blocked_rule
+   WHY ranker hard veto: final -1.30 <= -0.75 and TG 0.00 <= 0.20
+7. CRVUSDT +1.18% status=blocked_rule
+   WHY 1h impulse_speed guard: ADX 15.5 < 22.0
+8. BNBUSDT +0.97% status=blocked_rule
+   WHY entry score 55.66 < floor 56.00
+9. FETUSDT +0.94% status=blocked_rule
+   WHY entry score 44.53 < floor 56.00
+10. TRXUSDT +0.89% status=bought
+   BUY 11:02 mode=breakout entry=0.3173 capture=14.3%
+11. ORDIUSDT +0.85% status=no_signal
+12. ZROUSDT +0.80% status=blocked_rule
+   WHY entry score 29.67 < floor 56.00
+13. AVAXUSDT +0.67% status=blocked_rule
+   WHY entry score 27.63 < floor 56.00
+14. DOTUSDT +0.64% status=blocked_rule
+   WHY entry score 32.11 < floor 56.00
+15. SOLUSDT +0.63% status=blocked_rule
+   WHY entry score 32.85 < floor 48.00
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  ALGOUSDT

@@ -1,0 +1,673 @@
+{
+  "generated_at_utc": "2026-04-07T14:22:09Z",
+  "worker_started_at": "2026-04-02T09:34:27Z",
+  "training_run_index": 108,
+  "model_name": "logistic",
+  "rows_total": 3235,
+  "top1_delta": 0.6419,
+  "critic_rows_total": 5180,
+  "ml_rows_total": 38293,
+  "collector_last_cycle_stats": {},
+  "top_gainer_critic": {
+    "last_phase": "midday",
+    "last_target_day_local": "2026-04-07",
+    "last_capture_rate_pct": 20.0,
+    "last_early_capture_rate_pct": 20.0,
+    "last_report_json": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\top_gainer_critic_2026-04-07_midday.json",
+    "last_report_txt": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\top_gainer_critic_2026-04-07_midday.txt"
+  },
+  "train_report": {
+    "dataset_file": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+    "rows_total": 3235,
+    "train_rows": 2264,
+    "val_rows": 485,
+    "test_rows": 486,
+    "feature_count": 76,
+    "catboost_available": true,
+    "catboost_import_error": "",
+    "require_catboost": true,
+    "positive_ret_threshold": 0.0,
+    "ev_lambda": 0.75,
+    "chosen_model": "logistic",
+    "regression_backend": "catboost",
+    "ranking_backend": "catboost",
+    "validation": {
+      "logistic": {
+        "quality": {
+          "threshold": 0.55,
+          "accuracy": 0.5897,
+          "precision": 0.6364,
+          "recall": 0.1935,
+          "f1": 0.2968,
+          "coverage": 0.1361,
+          "selected_count": 66,
+          "selected_ret5_avg": 0.3175,
+          "selected_win_rate": 0.6364,
+          "brier": 0.2351,
+          "auc": 0.6401
+        },
+        "group_ranking": {
+          "grouped_competitions": 26,
+          "top_n": [
+            {
+              "top_n": 1,
+              "eligible_groups": 26,
+              "baseline": {
+                "count": 26,
+                "avg_target_return": 0.2001,
+                "avg_ret5": 0.262,
+                "avg_ev": -0.2019,
+                "avg_drawdown": 0.6479,
+                "avg_exit_pnl": -0.1267,
+                "win_rate": 0.5769
+              },
+              "ranker": {
+                "count": 26,
+                "avg_target_return": 0.4182,
+                "avg_ret5": 0.4608,
+                "avg_ev": 0.1573,
+                "avg_drawdown": 0.3206,
+                "avg_exit_pnl": 0.3623,
+                "win_rate": 0.6154
+              },
+              "delta": {
+                "avg_target_return": 0.2181,
+                "avg_ret5": 0.1988,
+                "avg_ev": 0.3592,
+                "avg_drawdown": -0.3273,
+                "win_rate": 0.0385
+              },
+              "overlap_ratio": 0.1538
+            },
+            {
+              "top_n": 3,
+              "eligible_groups": 26,
+              "baseline": {
+                "count": 78,
+                "avg_target_return": 0.3705,
+                "avg_ret5": 0.383,
+                "avg_ev": -0.038,
+                "avg_drawdown": 0.5377,
+                "avg_exit_pnl": 0.7053,
+                "win_rate": 0.6026
+              },
+              "ranker": {
+                "count": 78,
+                "avg_target_return": 0.3085,
+                "avg_ret5": 0.3323,
+                "avg_ev": -0.0546,
+                "avg_drawdown": 0.4657,
+                "avg_exit_pnl": -0.0687,
+                "win_rate": 0.5641
+              },
+              "delta": {
+                "avg_target_return": -0.062,
+                "avg_ret5": -0.0507,
+                "avg_ev": -0.0166,
+                "avg_drawdown": -0.072,
+                "win_rate": -0.0385
+              },
+              "overlap_ratio": 0.3846
+            }
+          ],
+          "top1_head_to_head": {
+            "wins": 14,
+            "losses": 8,
+            "ties": 4,
+            "eligible_groups": 26
+          }
+        }
+      },
+      "mlp": {
+        "quality": {
+          "threshold": 0.45,
+          "accuracy": 0.4619,
+          "precision": 0.4399,
+          "recall": 0.7419,
+          "f1": 0.5523,
+          "coverage": 0.7546,
+          "selected_count": 366,
+          "selected_ret5_avg": -0.3403,
+          "selected_win_rate": 0.4399,
+          "brier": 0.251,
+          "auc": 0.4421
+        },
+        "group_ranking": {
+          "grouped_competitions": 26,
+          "top_n": [
+            {
+              "top_n": 1,
+              "eligible_groups": 26,
+              "baseline": {
+                "count": 26,
+                "avg_target_return": 0.2001,
+                "avg_ret5": 0.262,
+                "avg_ev": -0.2019,
+                "avg_drawdown": 0.6479,
+                "avg_exit_pnl": -0.1267,
+                "win_rate": 0.5769
+              },
+              "ranker": {
+                "count": 26,
+                "avg_target_return": 0.4081,
+                "avg_ret5": 0.4507,
+                "avg_ev": 0.1574,
+                "avg_drawdown": 0.3353,
+                "avg_exit_pnl": 0.3623,
+                "win_rate": 0.6154
+              },
+              "delta": {
+                "avg_target_return": 0.208,
+                "avg_ret5": 0.1887,
+                "avg_ev": 0.3593,
+                "avg_drawdown": -0.3126,
+                "win_rate": 0.0385
+              },
+              "overlap_ratio": 0.1538
+            },
+            {
+              "top_n": 3,
+              "eligible_groups": 26,
+              "baseline": {
+                "count": 78,
+                "avg_target_return": 0.3705,
+                "avg_ret5": 0.383,
+                "avg_ev": -0.038,
+                "avg_drawdown": 0.5377,
+                "avg_exit_pnl": 0.7053,
+                "win_rate": 0.6026
+              },
+              "ranker": {
+                "count": 78,
+                "avg_target_return": 0.2899,
+                "avg_ret5": 0.3137,
+                "avg_ev": -0.0795,
+                "avg_drawdown": 0.4778,
+                "avg_exit_pnl": -0.0687,
+                "win_rate": 0.5513
+              },
+              "delta": {
+                "avg_target_return": -0.0806,
+                "avg_ret5": -0.0693,
+                "avg_ev": -0.0415,
+                "avg_drawdown": -0.0599,
+                "win_rate": -0.0513
+              },
+              "overlap_ratio": 0.3718
+            }
+          ],
+          "top1_head_to_head": {
+            "wins": 14,
+            "losses": 8,
+            "ties": 4,
+            "eligible_groups": 26
+          }
+        }
+      },
+      "catboost": {
+        "quality": {
+          "threshold": 0.5,
+          "accuracy": 0.5567,
+          "precision": 0.5357,
+          "recall": 0.0691,
+          "f1": 0.1224,
+          "coverage": 0.0577,
+          "selected_count": 28,
+          "selected_ret5_avg": 0.3709,
+          "selected_win_rate": 0.5357,
+          "brier": 0.2444,
+          "auc": 0.5734
+        },
+        "group_ranking": {
+          "grouped_competitions": 26,
+          "top_n": [
+            {
+              "top_n": 1,
+              "eligible_groups": 26,
+              "baseline": {
+                "count": 26,
+                "avg_target_return": 0.2001,
+                "avg_ret5": 0.262,
+                "avg_ev": -0.2019,
+                "avg_drawdown": 0.6479,
+                "avg_exit_pnl": -0.1267,
+                "win_rate": 0.5769
+              },
+              "ranker": {
+                "count": 26,
+                "avg_target_return": 0.4148,
+                "avg_ret5": 0.4575,
+                "avg_ev": 0.1729,
+                "avg_drawdown": 0.324,
+                "avg_exit_pnl": 0.3623,
+                "win_rate": 0.6154
+              },
+              "delta": {
+                "avg_target_return": 0.2147,
+                "avg_ret5": 0.1955,
+                "avg_ev": 0.3748,
+                "avg_drawdown": -0.3239,
+                "win_rate": 0.0385
+              },
+              "overlap_ratio": 0.1538
+            },
+            {
+              "top_n": 3,
+              "eligible_groups": 26,
+              "baseline": {
+                "count": 78,
+                "avg_target_return": 0.3705,
+                "avg_ret5": 0.383,
+                "avg_ev": -0.038,
+                "avg_drawdown": 0.5377,
+                "avg_exit_pnl": 0.7053,
+                "win_rate": 0.6026
+              },
+              "ranker": {
+                "count": 78,
+                "avg_target_return": 0.3064,
+                "avg_ret5": 0.3357,
+                "avg_ev": -0.0463,
+                "avg_drawdown": 0.4694,
+                "avg_exit_pnl": -0.1966,
+                "win_rate": 0.5641
+              },
+              "delta": {
+                "avg_target_return": -0.0641,
+                "avg_ret5": -0.0473,
+                "avg_ev": -0.0083,
+                "avg_drawdown": -0.0683,
+                "win_rate": -0.0385
+              },
+              "overlap_ratio": 0.3718
+            }
+          ],
+          "top1_head_to_head": {
+            "wins": 14,
+            "losses": 8,
+            "ties": 4,
+            "eligible_groups": 26
+          }
+        }
+      }
+    },
+    "test_baseline_candidates": {
+      "threshold": 0.5,
+      "accuracy": 0.214,
+      "precision": 0.214,
+      "recall": 1.0,
+      "f1": 0.3525,
+      "coverage": 1.0,
+      "selected_count": 486,
+      "selected_ret5_avg": -0.9213,
+      "selected_win_rate": 0.214,
+      "brier": 0.786,
+      "auc": 0.6041
+    },
+    "test_ranker": {
+      "threshold": 0.55,
+      "accuracy": 0.7819,
+      "precision": 0.4375,
+      "recall": 0.0673,
+      "f1": 0.1167,
+      "coverage": 0.0329,
+      "selected_count": 16,
+      "selected_ret5_avg": -0.2745,
+      "selected_win_rate": 0.4375,
+      "brier": 0.1895,
+      "auc": 0.5333
+    },
+    "test_group_ranking": {
+      "grouped_competitions": 29,
+      "top_n": [
+        {
+          "top_n": 1,
+          "eligible_groups": 29,
+          "baseline": {
+            "count": 29,
+            "avg_target_return": -0.1052,
+            "avg_ret5": 0.0137,
+            "avg_ev": -1.0948,
+            "avg_drawdown": 1.148,
+            "avg_exit_pnl": -0.4575,
+            "win_rate": 0.4138
+          },
+          "ranker": {
+            "count": 29,
+            "avg_target_return": -0.1289,
+            "avg_ret5": -0.2518,
+            "avg_ev": -0.8188,
+            "avg_drawdown": 0.7865,
+            "avg_exit_pnl": 0.1187,
+            "win_rate": 0.4138
+          },
+          "delta": {
+            "avg_target_return": -0.0237,
+            "avg_ret5": -0.2655,
+            "avg_ev": 0.276,
+            "avg_drawdown": -0.3615,
+            "win_rate": 0.0
+          },
+          "overlap_ratio": 0.2069
+        },
+        {
+          "top_n": 3,
+          "eligible_groups": 22,
+          "baseline": {
+            "count": 66,
+            "avg_target_return": -0.2006,
+            "avg_ret5": -0.2193,
+            "avg_ev": -1.1336,
+            "avg_drawdown": 1.1176,
+            "avg_exit_pnl": 0.1358,
+            "win_rate": 0.3485
+          },
+          "ranker": {
+            "count": 66,
+            "avg_target_return": -0.2477,
+            "avg_ret5": -0.2553,
+            "avg_ev": -0.9953,
+            "avg_drawdown": 0.9079,
+            "avg_exit_pnl": -0.1049,
+            "win_rate": 0.3485
+          },
+          "delta": {
+            "avg_target_return": -0.0471,
+            "avg_ret5": -0.036,
+            "avg_ev": 0.1383,
+            "avg_drawdown": -0.2097,
+            "win_rate": 0.0
+          },
+          "overlap_ratio": 0.4394
+        },
+        {
+          "top_n": 5,
+          "eligible_groups": 15,
+          "baseline": {
+            "count": 75,
+            "avg_target_return": -0.1976,
+            "avg_ret5": -0.1831,
+            "avg_ev": -1.0201,
+            "avg_drawdown": 0.9614,
+            "avg_exit_pnl": 0.2102,
+            "win_rate": 0.32
+          },
+          "ranker": {
+            "count": 75,
+            "avg_target_return": -0.3131,
+            "avg_ret5": -0.3101,
+            "avg_ev": -0.9845,
+            "avg_drawdown": 0.8241,
+            "avg_exit_pnl": -0.6528,
+            "win_rate": 0.32
+          },
+          "delta": {
+            "avg_target_return": -0.1155,
+            "avg_ret5": -0.127,
+            "avg_ev": 0.0356,
+            "avg_drawdown": -0.1373,
+            "win_rate": 0.0
+          },
+          "overlap_ratio": 0.3733
+        }
+      ],
+      "top1_head_to_head": {
+        "wins": 13,
+        "losses": 9,
+        "ties": 7,
+        "eligible_groups": 29
+      }
+    },
+    "test_calibration": [
+      {
+        "bucket": 1,
+        "rows": 97,
+        "proba_min": 0.4173,
+        "proba_max": 0.6939,
+        "avg_quality": 0.299,
+        "avg_target_return": -0.773
+      },
+      {
+        "bucket": 2,
+        "rows": 97,
+        "proba_min": 0.3667,
+        "proba_max": 0.4171,
+        "avg_quality": 0.2165,
+        "avg_target_return": -0.7736
+      },
+      {
+        "bucket": 3,
+        "rows": 97,
+        "proba_min": 0.3181,
+        "proba_max": 0.3654,
+        "avg_quality": 0.134,
+        "avg_target_return": -1.0886
+      },
+      {
+        "bucket": 4,
+        "rows": 97,
+        "proba_min": 0.2789,
+        "proba_max": 0.3179,
+        "avg_quality": 0.1443,
+        "avg_target_return": -1.2121
+      },
+      {
+        "bucket": 5,
+        "rows": 98,
+        "proba_min": 0.1381,
+        "proba_max": 0.2783,
+        "avg_quality": 0.2755,
+        "avg_target_return": -0.7611
+      }
+    ],
+    "improvement_delta": {
+      "ret5_avg_delta": -0.2655,
+      "win_rate_delta": 0.0,
+      "coverage_delta": -0.9671,
+      "ev_avg_delta": 0.276,
+      "target_return_delta": -0.0237
+    },
+    "top_feature_importance": [
+      {
+        "feature": "seq_trend_slope",
+        "importance": 2.8211
+      },
+      {
+        "feature": "seq_trend_close_norm",
+        "importance": 2.5799
+      },
+      {
+        "feature": "seq_mean_macd_hist_norm",
+        "importance": 2.1521
+      },
+      {
+        "feature": "today_change_pct",
+        "importance": 2.1176
+      },
+      {
+        "feature": "is_bull_day",
+        "importance": 1.8617
+      },
+      {
+        "feature": "dow_cos",
+        "importance": 1.8503
+      },
+      {
+        "feature": "flag_alignment_ok",
+        "importance": 1.4928
+      },
+      {
+        "feature": "dow_sin",
+        "importance": 1.4762
+      },
+      {
+        "feature": "seq_trend_rsi",
+        "importance": 1.3204
+      },
+      {
+        "feature": "signal_impulse_speed",
+        "importance": 1.2223
+      },
+      {
+        "feature": "candidate_score",
+        "importance": 1.2223
+      },
+      {
+        "feature": "ml_proba",
+        "importance": 1.2223
+      }
+    ],
+    "suggestions": [
+      "Использовать ranker сначала как quality-score bonus для top-N кандидатов, а не как hard-block движок.",
+      "Собирать disagreement samples: bot_take vs ranker_skip и bot_skip vs ranker_take.",
+      "Отдельно обучать future exit/hold model, не смешивая её с entry ranker."
+    ]
+  },
+  "shadow_report": {
+    "dataset_file": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+    "model_name": "logistic",
+    "rows_total": 3235,
+    "payload_version": 2,
+    "grouped_bar_competitions": 313,
+    "data_health": {
+      "action_counts": {
+        "take": 1750,
+        "candidate": 1063,
+        "blocked": 422
+      },
+      "signal_counts": {
+        "impulse_speed": 586,
+        "alignment": 1345,
+        "trend": 626,
+        "breakout": 148,
+        "strong_trend": 49,
+        "retest": 460,
+        "impulse": 21
+      },
+      "blocked_like_rows": 1485
+    },
+    "top_n": [
+      {
+        "top_n": 1,
+        "eligible_groups": 313,
+        "baseline": {
+          "count": 313,
+          "avg_target_return": -0.3115,
+          "avg_ret5": -0.2486,
+          "avg_exit_pnl": -0.4822,
+          "win_rate": 0.4281
+        },
+        "ranker": {
+          "count": 313,
+          "avg_target_return": 0.3304,
+          "avg_ret5": 0.3398,
+          "avg_exit_pnl": 0.2371,
+          "win_rate": 0.5527
+        },
+        "delta": {
+          "avg_target_return": 0.6419,
+          "avg_ret5": 0.5884,
+          "win_rate": 0.1246
+        },
+        "overlap_ratio": 0.2748
+      },
+      {
+        "top_n": 3,
+        "eligible_groups": 247,
+        "baseline": {
+          "count": 741,
+          "avg_target_return": -0.1902,
+          "avg_ret5": -0.17,
+          "avg_exit_pnl": -0.218,
+          "win_rate": 0.4211
+        },
+        "ranker": {
+          "count": 741,
+          "avg_target_return": 0.1331,
+          "avg_ret5": 0.1474,
+          "avg_exit_pnl": -0.0902,
+          "win_rate": 0.5061
+        },
+        "delta": {
+          "avg_target_return": 0.3233,
+          "avg_ret5": 0.3174,
+          "win_rate": 0.085
+        },
+        "overlap_ratio": 0.4885
+      },
+      {
+        "top_n": 5,
+        "eligible_groups": 173,
+        "baseline": {
+          "count": 865,
+          "avg_target_return": -0.1486,
+          "avg_ret5": -0.1298,
+          "avg_exit_pnl": -0.1347,
+          "win_rate": 0.4335
+        },
+        "ranker": {
+          "count": 865,
+          "avg_target_return": 0.1019,
+          "avg_ret5": 0.1202,
+          "avg_exit_pnl": -0.0484,
+          "win_rate": 0.504
+        },
+        "delta": {
+          "avg_target_return": 0.2505,
+          "avg_ret5": 0.25,
+          "win_rate": 0.0705
+        },
+        "overlap_ratio": 0.4879
+      }
+    ],
+    "top1_head_to_head": {
+      "wins": 166,
+      "losses": 62,
+      "ties": 85,
+      "eligible_groups": 313
+    },
+    "calibration": [
+      {
+        "bucket": 1,
+        "rows": 647,
+        "proba_min": 0.5112,
+        "proba_max": 0.7562,
+        "avg_target_return": 0.2704,
+        "win_rate": 0.5889
+      },
+      {
+        "bucket": 2,
+        "rows": 647,
+        "proba_min": 0.4371,
+        "proba_max": 0.5108,
+        "avg_target_return": 0.0552,
+        "win_rate": 0.4637
+      },
+      {
+        "bucket": 3,
+        "rows": 647,
+        "proba_min": 0.3807,
+        "proba_max": 0.4369,
+        "avg_target_return": -0.0558,
+        "win_rate": 0.4065
+      },
+      {
+        "bucket": 4,
+        "rows": 647,
+        "proba_min": 0.3179,
+        "proba_max": 0.3806,
+        "avg_target_return": -0.3374,
+        "win_rate": 0.3014
+      },
+      {
+        "bucket": 5,
+        "rows": 647,
+        "proba_min": 0.0827,
+        "proba_max": 0.3178,
+        "avg_target_return": -0.4464,
+        "win_rate": 0.3014
+      }
+    ],
+    "warnings": []
+  }
+}

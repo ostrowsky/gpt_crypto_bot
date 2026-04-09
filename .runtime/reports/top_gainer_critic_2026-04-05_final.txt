@@ -1,0 +1,45 @@
+Top-gainer critic for 2026-04-05 (final)
+Window: 2026-04-05 00:00:00 CEST -> 2026-04-05 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 2/15
+  watchlist top bought: 3/15 (20.0%)
+  early captures: 0/15 (0.0%)
+  bot false-positive buys: 5/8
+
+Watchlist top gainers and bot reaction:
+1. TRUUSDT +17.78% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 76.5 > 70.0
+2. CELOUSDT +3.12% status=blocked_rule
+   WHY 1h impulse_speed guard: ADX 21.5 < 22.0
+3. QNTUSDT +2.87% status=bought
+   BUY 07:01 mode=trend entry=74.99 capture=1.9%
+   EXIT 15:01 pnl=-1.71%
+4. ALGOUSDT +2.65% status=blocked_rule
+   WHY 1h impulse_speed guard: ADX 13.3 < 22.0
+5. AUDIOUSDT +2.33% status=blocked_rule
+   WHY ranker hard veto: final -1.55 <= -1.50 for 1h impulse
+6. TONUSDT +0.97% status=bought
+   BUY 17:31 mode=retest entry=1.247 capture=0.0%
+   EXIT 20:02 pnl=-0.40%
+7. TRXUSDT +0.41% status=blocked_rule
+   EXIT 02:01 pnl=+0.10%
+   WHY entry score 48.06 < floor 56.00
+8. BTCUSDT +0.29% status=bought
+   BUY 17:32 mode=breakout entry=67499.99 capture=27.5%
+   EXIT 18:16 pnl=-0.30%
+9. RUNEUSDT +0.27% status=blocked_rule
+   WHY ranker hard veto: final -1.98 <= -0.75 and TG 0.00 <= 0.20
+10. LTCUSDT +0.06% status=blocked_rule
+   WHY entry score 44.81 < floor 48.00
+11. ETCUSDT +0.00% status=blocked_rule
+   WHY 1h impulse_speed guard: daily_range 11.15% > 10.00%
+12. XAIUSDT -0.11% status=blocked_rule
+   WHY entry score 28.41 < floor 56.00
+13. ETHUSDT -0.43% status=blocked_rule
+   WHY entry score 36.13 < floor 48.00
+14. PAXGUSDT -0.46% status=no_signal
+15. BNBUSDT -0.54% status=no_signal
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  ADAUSDT, AMPUSDT, APEUSDT, KSMUSDT, MDTUSDT

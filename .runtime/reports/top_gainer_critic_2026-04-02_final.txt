@@ -1,0 +1,41 @@
+Top-gainer critic for 2026-04-02 (final)
+Window: 2026-04-02 00:00:00 CEST -> 2026-04-02 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 0/15
+  watchlist top bought: 6/15 (40.0%)
+  early captures: 3/15 (20.0%)
+  bot false-positive buys: 12/18
+
+Watchlist top gainers and bot reaction:
+1. RENDERUSDT +4.57% status=bought
+   BUY 18:16 mode=alignment entry=1.775 capture=98.8%
+   EXIT 18:47 pnl=+0.79%
+2. ALGOUSDT +3.49% status=bought
+   BUY 12:11 mode=retest entry=0.1038 capture=80.6%
+   EXIT 12:46 pnl=+0.19%
+3. QNTUSDT +2.23% status=bought
+   BUY 04:07 mode=retest entry=71.66 capture=55.7%
+   EXIT 21:00 pnl=+0.36%
+4. TRXUSDT -0.16% status=no_signal
+5. TONUSDT -0.48% status=bought
+   BUY 03:19 mode=breakout entry=1.238 capture=n/a
+   EXIT 03:31 pnl=-0.56%
+6. ATOMUSDT -1.13% status=blocked_rule
+   WHY entry score 43.68 < floor 48.00
+7. PAXGUSDT -1.70% status=bought
+   BUY 19:02 mode=retest entry=4651.92 capture=n/a
+   EXIT 20:04 pnl=-0.29%
+8. POLUSDT -2.04% status=no_signal
+9. BTCUSDT -2.09% status=no_signal
+10. BCHUSDT -2.40% status=bought
+   BUY 16:46 mode=breakout entry=447.1 capture=n/a
+   EXIT 17:34 pnl=-0.63%
+11. ICPUSDT -2.62% status=no_signal
+12. WIFUSDT -2.72% status=no_signal
+13. HBARUSDT -2.73% status=no_signal
+14. DOGEUSDT -2.81% status=no_signal
+15. SHIBUSDT -2.82% status=no_signal
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  AAVEUSDT, AEVOUSDT, AVAXUSDT, CELRUSDT, COTIUSDT, ETHUSDT, FETUSDT, FLUXUSDT, LINKUSDT, LQTYUSDT, OXTUSDT, QIUSDT

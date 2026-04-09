@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T190016Z_ad69a5bc",
+  "job_type": "run_trade_bot",
+  "state": "failed",
+  "requested_at": "2026-04-01T19:00:16Z",
+  "updated_at": "2026-04-01T19:00:44Z",
+  "request": {
+    "job_id": "20260401T190016Z_ad69a5bc",
+    "job_type": "run_trade_bot",
+    "requested_at": "2026-04-01T19:00:16Z"
+  },
+  "error": "",
+  "result": {
+    "ok": false,
+    "summary": "bot_not_confirmed",
+    "exit_code": 1,
+    "output_tail": "Traceback (most recent call last):\n  File \"D:\\Projects\\gpt_crypto_bot\\files\\bot.py\", line 15, in <module>\n    import asyncio\n  File \"asyncio\\__init__.py\", line 8, in <module>\n  File \"asyncio\\base_events.py\", line 18, in <module>\n  File \"concurrent\\futures\\__init__.py\", line 8, in <module>\n  File \"concurrent\\futures\\_base.py\", line 7, in <module>\n  File \"logging\\__init__.py\", line 43, in <module>\n  File \"threading.py\", line 805, in <module>\nKeyboardInterrupt\n^C",
+    "spawned_pid": 26324
+  }
+}

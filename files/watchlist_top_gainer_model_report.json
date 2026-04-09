@@ -1,0 +1,580 @@
+{
+  "dataset_file": "files\\ml_dataset.jsonl",
+  "teacher_key": "watchlist_top_gainer_final_proxy",
+  "timezone": "Europe/Budapest",
+  "max_local_hour": 22,
+  "top_n": 15,
+  "rows_total": 4754,
+  "days_total": 7,
+  "positive_rate_pct": 16.24,
+  "split_days": {
+    "train": [
+      "2026-04-01",
+      "2026-04-02",
+      "2026-04-03",
+      "2026-04-04"
+    ],
+    "val": [
+      "2026-04-05"
+    ],
+    "test": [
+      "2026-04-06",
+      "2026-04-07"
+    ]
+  },
+  "train_rows": 4704,
+  "val_rows": 7,
+  "test_rows": 43,
+  "chosen_model": "logistic",
+  "validation": {
+    "logistic": {
+      "threshold_metrics": {
+        "threshold": 0.5,
+        "accuracy": 0.5714,
+        "precision": 0.5,
+        "recall": 0.3333,
+        "f1": 0.4,
+        "coverage": 0.2857,
+        "selected_count": 2,
+        "selected_ret5_avg": 0.5,
+        "selected_win_rate": 0.5,
+        "brier": 0.2667,
+        "auc": 0.5
+      },
+      "ranking": {
+        "primary_score": 66.67,
+        "checkpoint_metrics": [
+          {
+            "hour_local": 1,
+            "days_evaluated": 0,
+            "mean_recall_pct": 0.0,
+            "mean_precision_pct": 0.0
+          },
+          {
+            "hour_local": 4,
+            "days_evaluated": 0,
+            "mean_recall_pct": 0.0,
+            "mean_precision_pct": 0.0
+          },
+          {
+            "hour_local": 8,
+            "days_evaluated": 1,
+            "mean_recall_pct": 33.33,
+            "mean_precision_pct": 100.0
+          },
+          {
+            "hour_local": 12,
+            "days_evaluated": 1,
+            "mean_recall_pct": 33.33,
+            "mean_precision_pct": 100.0
+          },
+          {
+            "hour_local": 18,
+            "days_evaluated": 1,
+            "mean_recall_pct": 100.0,
+            "mean_precision_pct": 75.0
+          },
+          {
+            "hour_local": 22,
+            "days_evaluated": 1,
+            "mean_recall_pct": 100.0,
+            "mean_precision_pct": 42.86
+          }
+        ]
+      }
+    },
+    "mlp": {
+      "threshold_metrics": {
+        "threshold": 0.5,
+        "accuracy": 0.5714,
+        "precision": 0.5,
+        "recall": 0.3333,
+        "f1": 0.4,
+        "coverage": 0.2857,
+        "selected_count": 2,
+        "selected_ret5_avg": 0.5,
+        "selected_win_rate": 0.5,
+        "brier": 0.2391,
+        "auc": 0.8333
+      },
+      "ranking": {
+        "primary_score": 66.67,
+        "checkpoint_metrics": [
+          {
+            "hour_local": 1,
+            "days_evaluated": 0,
+            "mean_recall_pct": 0.0,
+            "mean_precision_pct": 0.0
+          },
+          {
+            "hour_local": 4,
+            "days_evaluated": 0,
+            "mean_recall_pct": 0.0,
+            "mean_precision_pct": 0.0
+          },
+          {
+            "hour_local": 8,
+            "days_evaluated": 1,
+            "mean_recall_pct": 33.33,
+            "mean_precision_pct": 100.0
+          },
+          {
+            "hour_local": 12,
+            "days_evaluated": 1,
+            "mean_recall_pct": 33.33,
+            "mean_precision_pct": 100.0
+          },
+          {
+            "hour_local": 18,
+            "days_evaluated": 1,
+            "mean_recall_pct": 100.0,
+            "mean_precision_pct": 75.0
+          },
+          {
+            "hour_local": 22,
+            "days_evaluated": 1,
+            "mean_recall_pct": 100.0,
+            "mean_precision_pct": 42.86
+          }
+        ]
+      }
+    }
+  },
+  "test_threshold_metrics": {
+    "threshold": 0.5,
+    "accuracy": 0.7209,
+    "precision": 0.3333,
+    "recall": 0.0909,
+    "f1": 0.1429,
+    "coverage": 0.0698,
+    "selected_count": 3,
+    "selected_ret5_avg": 0.3333,
+    "selected_win_rate": 0.3333,
+    "brier": 0.2057,
+    "auc": 0.5398
+  },
+  "test_ranking": {
+    "timezone": "Europe/Budapest",
+    "top_n": 15,
+    "checkpoint_metrics": [
+      {
+        "hour_local": 1,
+        "days_evaluated": 1,
+        "mean_recall_pct": 0.0,
+        "mean_precision_pct": 0.0
+      },
+      {
+        "hour_local": 4,
+        "days_evaluated": 1,
+        "mean_recall_pct": 0.0,
+        "mean_precision_pct": 0.0
+      },
+      {
+        "hour_local": 8,
+        "days_evaluated": 2,
+        "mean_recall_pct": 0.0,
+        "mean_precision_pct": 0.0
+      },
+      {
+        "hour_local": 12,
+        "days_evaluated": 2,
+        "mean_recall_pct": 78.57,
+        "mean_precision_pct": 28.89
+      },
+      {
+        "hour_local": 18,
+        "days_evaluated": 2,
+        "mean_recall_pct": 92.86,
+        "mean_precision_pct": 31.67
+      },
+      {
+        "hour_local": 22,
+        "days_evaluated": 2,
+        "mean_recall_pct": 85.71,
+        "mean_precision_pct": 23.33
+      }
+    ],
+    "days": [
+      "2026-04-06",
+      "2026-04-07"
+    ],
+    "primary_score": 42.86,
+    "day_details": [
+      {
+        "target_day_local": "2026-04-06",
+        "checkpoint_hour_local": 1,
+        "positives_total": 2,
+        "predicted_top_n": 15,
+        "hits": 0,
+        "recall_pct": 0.0,
+        "precision_pct": 0.0,
+        "predicted_symbols": [
+          "STRKUSDT",
+          "METISUSDT",
+          "AAVEUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-06",
+        "checkpoint_hour_local": 4,
+        "positives_total": 2,
+        "predicted_top_n": 15,
+        "hits": 0,
+        "recall_pct": 0.0,
+        "precision_pct": 0.0,
+        "predicted_symbols": [
+          "AUDIOUSDT",
+          "STRKUSDT",
+          "XLMUSDT",
+          "METISUSDT",
+          "DOGEUSDT",
+          "GRTUSDT",
+          "AAVEUSDT",
+          "BNBUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-06",
+        "checkpoint_hour_local": 8,
+        "positives_total": 2,
+        "predicted_top_n": 15,
+        "hits": 0,
+        "recall_pct": 0.0,
+        "precision_pct": 0.0,
+        "predicted_symbols": [
+          "AUDIOUSDT",
+          "BATUSDT",
+          "STRKUSDT",
+          "XLMUSDT",
+          "METISUSDT",
+          "DOGEUSDT",
+          "QNTUSDT",
+          "GRTUSDT",
+          "AAVEUSDT",
+          "BTCUSDT",
+          "LTCUSDT",
+          "BNBUSDT",
+          "PAXGUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-07",
+        "checkpoint_hour_local": 8,
+        "positives_total": 7,
+        "predicted_top_n": 15,
+        "hits": 0,
+        "recall_pct": 0.0,
+        "precision_pct": 0.0,
+        "predicted_symbols": [
+          "SNXUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-06",
+        "checkpoint_hour_local": 12,
+        "positives_total": 2,
+        "predicted_top_n": 15,
+        "hits": 2,
+        "recall_pct": 100.0,
+        "precision_pct": 13.33,
+        "predicted_symbols": [
+          "AUDIOUSDT",
+          "BATUSDT",
+          "STRKUSDT",
+          "AXLUSDT",
+          "XLMUSDT",
+          "RUNEUSDT",
+          "METISUSDT",
+          "ENAUSDT",
+          "QNTUSDT",
+          "GRTUSDT",
+          "DOGEUSDT",
+          "LTCUSDT",
+          "KSMUSDT",
+          "AAVEUSDT",
+          "BTCUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-07",
+        "checkpoint_hour_local": 12,
+        "positives_total": 7,
+        "predicted_top_n": 15,
+        "hits": 4,
+        "recall_pct": 57.14,
+        "precision_pct": 44.44,
+        "predicted_symbols": [
+          "INJUSDT",
+          "CELOUSDT",
+          "CAKEUSDT",
+          "SNXUSDT",
+          "FETUSDT",
+          "ARBUSDT",
+          "BNBUSDT",
+          "APEUSDT",
+          "PAXGUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-06",
+        "checkpoint_hour_local": 18,
+        "positives_total": 2,
+        "predicted_top_n": 15,
+        "hits": 2,
+        "recall_pct": 100.0,
+        "precision_pct": 13.33,
+        "predicted_symbols": [
+          "AUDIOUSDT",
+          "AXSUSDT",
+          "BATUSDT",
+          "STRKUSDT",
+          "AXLUSDT",
+          "XLMUSDT",
+          "RUNEUSDT",
+          "METISUSDT",
+          "ENAUSDT",
+          "QNTUSDT",
+          "GRTUSDT",
+          "MANAUSDT",
+          "DOGEUSDT",
+          "LTCUSDT",
+          "KSMUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-07",
+        "checkpoint_hour_local": 18,
+        "positives_total": 7,
+        "predicted_top_n": 15,
+        "hits": 6,
+        "recall_pct": 85.71,
+        "precision_pct": 50.0,
+        "predicted_symbols": [
+          "COTIUSDT",
+          "CAKEUSDT",
+          "ZROUSDT",
+          "INJUSDT",
+          "CELOUSDT",
+          "SNXUSDT",
+          "FETUSDT",
+          "ARBUSDT",
+          "BNBUSDT",
+          "APEUSDT",
+          "RENDERUSDT",
+          "PAXGUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-06",
+        "checkpoint_hour_local": 22,
+        "positives_total": 2,
+        "predicted_top_n": 15,
+        "hits": 2,
+        "recall_pct": 100.0,
+        "precision_pct": 13.33,
+        "predicted_symbols": [
+          "AUDIOUSDT",
+          "AXSUSDT",
+          "BATUSDT",
+          "STRKUSDT",
+          "AXLUSDT",
+          "XLMUSDT",
+          "RUNEUSDT",
+          "METISUSDT",
+          "ENAUSDT",
+          "QIUSDT",
+          "QNTUSDT",
+          "GRTUSDT",
+          "MANAUSDT",
+          "DOGEUSDT",
+          "LTCUSDT"
+        ]
+      },
+      {
+        "target_day_local": "2026-04-07",
+        "checkpoint_hour_local": 22,
+        "positives_total": 7,
+        "predicted_top_n": 15,
+        "hits": 5,
+        "recall_pct": 71.43,
+        "precision_pct": 33.33,
+        "predicted_symbols": [
+          "AEVOUSDT",
+          "WLDUSDT",
+          "COTIUSDT",
+          "CAKEUSDT",
+          "SOLUSDT",
+          "ZROUSDT",
+          "PAXGUSDT",
+          "INJUSDT",
+          "CELOUSDT",
+          "ARBUSDT",
+          "SNXUSDT",
+          "SEIUSDT",
+          "DOTUSDT",
+          "FETUSDT",
+          "ENSUSDT"
+        ]
+      }
+    ]
+  },
+  "backfill": {
+    "dataset_file": "files\\ml_dataset.jsonl",
+    "report_dir": ".runtime\\reports",
+    "phase": "final",
+    "teacher_key": "watchlist_top_gainer_final_proxy",
+    "reports_processed": 7,
+    "rows_annotated_total": 1105,
+    "summaries": [
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-01",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 3718,
+        "rows_annotated": 0,
+        "positive_rows": 578,
+        "symbols_in_window": 97,
+        "positive_symbols_with_rows": 15,
+        "positive_symbols_missing_rows": [],
+        "mandatory_positive_coverage_pct": 100.0
+      },
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-02",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 1009,
+        "rows_annotated": 1009,
+        "positive_rows": 178,
+        "symbols_in_window": 96,
+        "positive_symbols_with_rows": 15,
+        "positive_symbols_missing_rows": [],
+        "mandatory_positive_coverage_pct": 100.0
+      },
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-03",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 41,
+        "rows_annotated": 41,
+        "positive_rows": 11,
+        "symbols_in_window": 36,
+        "positive_symbols_with_rows": 9,
+        "positive_symbols_missing_rows": [
+          "ACHUSDT",
+          "DYDXUSDT",
+          "NEARUSDT",
+          "QNTUSDT",
+          "SANDUSDT",
+          "TAOUSDT"
+        ],
+        "mandatory_positive_coverage_pct": 60.0
+      },
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-04",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 2,
+        "rows_annotated": 2,
+        "positive_rows": 1,
+        "symbols_in_window": 2,
+        "positive_symbols_with_rows": 1,
+        "positive_symbols_missing_rows": [
+          "AEVOUSDT",
+          "AVAXUSDT",
+          "BNBUSDT",
+          "CAKEUSDT",
+          "CRVUSDT",
+          "DOTUSDT",
+          "ETCUSDT",
+          "FETUSDT",
+          "ICPUSDT",
+          "NEARUSDT",
+          "ORDIUSDT",
+          "PYRUSDT",
+          "SOLUSDT",
+          "ZROUSDT"
+        ],
+        "mandatory_positive_coverage_pct": 6.67
+      },
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-05",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 8,
+        "rows_annotated": 8,
+        "positive_rows": 3,
+        "symbols_in_window": 8,
+        "positive_symbols_with_rows": 3,
+        "positive_symbols_missing_rows": [
+          "ALGOUSDT",
+          "AUDIOUSDT",
+          "BNBUSDT",
+          "CELOUSDT",
+          "ETCUSDT",
+          "ETHUSDT",
+          "LTCUSDT",
+          "PAXGUSDT",
+          "RUNEUSDT",
+          "TRUUSDT",
+          "TRXUSDT",
+          "XAIUSDT"
+        ],
+        "mandatory_positive_coverage_pct": 20.0
+      },
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-06",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 23,
+        "rows_annotated": 23,
+        "positive_rows": 2,
+        "symbols_in_window": 20,
+        "positive_symbols_with_rows": 2,
+        "positive_symbols_missing_rows": [
+          "ARBUSDT",
+          "AVAXUSDT",
+          "BONKUSDT",
+          "FILUSDT",
+          "INJUSDT",
+          "OPUSDT",
+          "SANDUSDT",
+          "SUIUSDT",
+          "TAOUSDT",
+          "TIAUSDT",
+          "TRUUSDT",
+          "WIFUSDT",
+          "ZRXUSDT"
+        ],
+        "mandatory_positive_coverage_pct": 13.33
+      },
+      {
+        "teacher_key": "watchlist_top_gainer_final_proxy",
+        "target_day_local": "2026-04-07",
+        "source_phase": "final",
+        "rows_scanned": 38332,
+        "rows_in_window": 22,
+        "rows_annotated": 22,
+        "positive_rows": 9,
+        "symbols_in_window": 19,
+        "positive_symbols_with_rows": 7,
+        "positive_symbols_missing_rows": [
+          "ARUSDT",
+          "BONKUSDT",
+          "ENAUSDT",
+          "NEARUSDT",
+          "OPUSDT",
+          "TAOUSDT",
+          "TIAUSDT",
+          "WIFUSDT"
+        ],
+        "mandatory_positive_coverage_pct": 46.67
+      }
+    ]
+  }
+}

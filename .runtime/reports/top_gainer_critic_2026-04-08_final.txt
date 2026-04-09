@@ -1,0 +1,50 @@
+Top-gainer critic for 2026-04-08 (final)
+Window: 2026-04-08 00:00:00 CEST -> 2026-04-08 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 2/15
+  watchlist top bought: 8/15 (53.3%)
+  early captures: 3/15 (20.0%)
+  bot false-positive buys: 24/32
+
+Watchlist top gainers and bot reaction:
+1. BLURUSDT +10.16% status=bought
+   BUY 20:35 mode=alignment entry=0.01855 capture=81.6%
+   EXIT 20:46 pnl=-0.43%
+2. COMPUSDT +7.94% status=bought
+   BUY 15:00 mode=alignment entry=17.71 capture=38.1%
+   EXIT 19:46 pnl=+7.68%
+3. FLUXUSDT +7.55% status=bought
+   BUY 12:47 mode=impulse_speed entry=0.0575 capture=21.9%
+   EXIT 16:45 pnl=+1.04%
+4. ARBUSDT +5.73% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -1.25, EV -1.17, Q 0.31, TG 0.00, CAP 0.00)
+5. ICPUSDT +4.16% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 74.4 > 70.0
+6. ENAUSDT +3.93% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 74.9 > 70.0
+7. ALGOUSDT +3.78% status=blocked_rule
+   WHY ranker hard veto: final -2.64 <= -1.50 for 1h impulse
+8. XAIUSDT +3.66% status=bought
+   BUY 22:45 mode=trend entry=0.00961 capture=2.9%
+9. NEARUSDT +3.52% status=bought
+   BUY 08:46 mode=strong_trend entry=1.336 capture=37.0%
+   EXIT 09:34 pnl=+0.37%
+10. ETHUSDT +3.24% status=blocked_rule
+   WHY trend quality guard: RSI 75.6 > 68.0
+11. AAVEUSDT +2.40% status=bought
+   BUY 01:28 mode=impulse entry=95.23 capture=0.0%
+   EXIT 10:02 pnl=+0.80%
+12. ATOMUSDT +2.35% status=blocked_rule
+   WHY clone signal guard: recent similar 15m setups already 2/2 (DOTUSDT, DOGEUSDT)
+13. QNTUSDT +2.33% status=bought
+   BUY 20:35 mode=alignment entry=76.58 capture=0.0%
+   EXIT 21:31 pnl=-1.75%
+14. RENDERUSDT +2.32% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 73.4 > 70.0
+15. BTCUSDT +2.32% status=bought
+   BUY 15:01 mode=retest entry=72071.95 capture=0.0%
+   EXIT 15:47 pnl=-0.55%
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  1INCHUSDT, APTUSDT, AUDIOUSDT, AXSUSDT, BATUSDT, BCHUSDT, C98USDT, CAKEUSDT, CHZUSDT, DOGEUSDT, GMTUSDT, ILVUSDT, KSMUSDT, LQTYUSDT, MANAUSDT

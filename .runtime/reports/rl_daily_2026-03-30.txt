@@ -1,0 +1,31 @@
+RL daily report for 2026-03-30
+Generated: 2026-03-31 00:05:07 CEST
+
+Datasets:
+  critic_dataset: +261 rows today, total 1800
+  ml_dataset: +2053 rows today, total 28985
+
+Training:
+  chosen_model: logistic
+  train_rows: 1150 val_rows: 247 test_rows: 247
+  test_ret5_delta: 0.0066
+  test_win_rate_delta: 0.0078
+
+Shadow disagreements:
+  total: 25
+  bot_take vs ranker_skip: 22
+  bot_blocked vs ranker_take: 3
+  top symbols: SHIBUSDT=2, BCHUSDT=2, XAIUSDT=1, EGLDUSDT=1, FLUXUSDT=1, LRCUSDT=1, SUSHIUSDT=1, UNIUSDT=1, PYRUSDT=1, OPUSDT=1
+  blocked reasons: =3
+
+Worst bot takes (ranker wanted skip):
+  SUSHIUSDT 1h impulse_speed score=103.9723 proba=0.001029 reason=candidate accepted
+  SHIBUSDT 1h trend score=81.4226 proba=0.001033 reason=candidate accepted
+  EGLDUSDT 1h retest score=71.1894 proba=0.001041 reason=candidate accepted
+  UNIUSDT 1h impulse_speed score=100.9751 proba=0.001131 reason=candidate accepted
+  FLUXUSDT 1h retest score=80.3268 proba=0.001716 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  SHIBUSDT 15m trend score=54.5721 proba=0.843304 reason=портфель полон: 9/9 позиций
+  BCHUSDT 15m alignment score=68.0676 proba=0.808771 reason=портфель полон: 9/9 позиций
+  QNTUSDT 15m trend score=48.1074 proba=0.80259 reason=портфель полон: 9/9 позиций

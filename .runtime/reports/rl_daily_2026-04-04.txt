@@ -1,0 +1,29 @@
+RL daily report for 2026-04-04
+Generated: 2026-04-05 00:05:06 CEST
+
+Datasets:
+  critic_dataset: +358 rows today, total 4059
+  ml_dataset: +2 rows today, total 38251
+
+Training:
+  chosen_model: logistic
+  train_rows: 2250 val_rows: 482 test_rows: 483
+  test_ret5_delta: -0.5134
+  test_win_rate_delta: -0.1072
+
+Shadow disagreements:
+  total: 347
+  bot_take vs ranker_skip: 1
+  bot_blocked vs ranker_take: 346
+  top symbols: MANAUSDT=74, GLMUSDT=74, YFIUSDT=33, ACHUSDT=23, FETUSDT=21, ALGOUSDT=21, SANDUSDT=20, NEARUSDT=18, LQTYUSDT=18, ETCUSDT=13
+  blocked reasons: =346
+
+Worst bot takes (ranker wanted skip):
+  TRXUSDT 1h breakout score=68.853 proba=0.392954 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  GLMUSDT 1h trend score=38.2213 proba=0.648234 reason=entry score 38.22 < floor 56.00
+  GLMUSDT 1h trend score=38.2213 proba=0.648234 reason=entry score 38.22 < floor 56.00
+  GLMUSDT 1h trend score=38.2213 proba=0.648234 reason=entry score 38.22 < floor 56.00
+  GLMUSDT 1h trend score=38.2213 proba=0.648234 reason=entry score 38.22 < floor 56.00
+  GLMUSDT 1h trend score=38.2213 proba=0.648234 reason=entry score 38.22 < floor 56.00

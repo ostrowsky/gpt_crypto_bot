@@ -1,0 +1,38 @@
+Top-gainer critic for 2026-04-09 (midday)
+Window: 2026-04-09 00:00:00 CEST -> 2026-04-09 12:00:00 CEST
+
+Summary:
+  exchange top in watchlist: 2/15
+  watchlist top bought: 2/15 (13.3%)
+  early captures: 1/15 (6.7%)
+  bot false-positive buys: 5/7
+
+Watchlist top gainers and bot reaction:
+1. BLURUSDT +19.75% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 76.9 > 70.0
+2. MANAUSDT +5.42% status=bought
+   BUY 07:01 mode=impulse_speed entry=0.0894 capture=83.3%
+   EXIT 00:02 pnl=-0.11%
+3. CHZUSDT +2.55% status=blocked_rule
+   WHY ranker hard veto: final -0.93 <= -0.75 and TG 0.00 <= 0.20
+4. COMPUSDT +2.14% status=blocked_rule
+   WHY entry score 36.84 < floor 48.00
+5. ICPUSDT +1.13% status=no_signal
+6. RENDERUSDT +0.94% status=no_signal
+7. ATOMUSDT +0.67% status=blocked_rule
+   WHY entry score 24.22 < floor 48.00
+8. WLDUSDT +0.46% status=no_signal
+9. AUDIOUSDT +0.23% status=blocked_rule
+   WHY ranker hard veto: final -1.55 <= -0.75 and TG 0.00 <= 0.20
+10. PAXGUSDT +0.14% status=no_signal
+11. FLOKIUSDT +0.14% status=no_signal
+12. AXSUSDT +0.09% status=no_signal
+13. BCHUSDT +0.04% status=blocked_rule
+   WHY ranker hard veto: final -0.90 <= -0.75 and TG 0.00 <= 0.20
+14. ENSUSDT +0.00% status=bought
+   BUY 09:31 mode=retest entry=5.74 capture=n/a
+   EXIT 10:30 pnl=-0.17%
+15. BTCUSDT -0.02% status=no_signal
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  ADAUSDT, BNTUSDT, DYDXUSDT, FLUXUSDT, XAIUSDT

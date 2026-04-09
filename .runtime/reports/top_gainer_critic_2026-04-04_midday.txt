@@ -1,0 +1,37 @@
+Top-gainer critic for 2026-04-04 (midday)
+Window: 2026-04-04 00:00:00 CEST -> 2026-04-04 12:00:00 CEST
+
+Summary:
+  exchange top in watchlist: 0/15
+  watchlist top bought: 1/15 (6.7%)
+  early captures: 0/15 (0.0%)
+  bot false-positive buys: 1/2
+
+Watchlist top gainers and bot reaction:
+1. CAKEUSDT +3.49% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 78.3 > 70.0
+2. AEVOUSDT +2.63% status=no_signal
+3. ETCUSDT +1.84% status=blocked_rule
+   WHY ranker hard veto: final -2.47 <= -1.50 for 1h trend
+4. ZROUSDT +1.59% status=blocked_rule
+   WHY trend quality guard: RSI 73.4 > 68.0
+5. NEARUSDT +1.32% status=blocked_rule
+   WHY entry score 34.35 < floor 48.00
+6. FETUSDT +0.90% status=blocked_rule
+   WHY entry score 44.53 < floor 56.00
+7. BLURUSDT +0.86% status=no_signal
+8. TRXUSDT +0.79% status=bought
+   BUY 11:02 mode=breakout entry=0.3173 capture=4.0%
+9. SANDUSDT +0.78% status=blocked_rule
+   WHY entry score 35.47 < floor 48.00
+10. ICPUSDT +0.57% status=blocked_rule
+   WHY ranker hard veto: final -1.30 <= -0.75 and TG 0.00 <= 0.20
+11. DYDXUSDT +0.29% status=no_signal
+12. BNBUSDT +0.24% status=blocked_rule
+   WHY entry score 25.43 < floor 48.00
+13. POLUSDT +0.22% status=no_signal
+14. LDOUSDT +0.19% status=no_signal
+15. PAXGUSDT +0.07% status=no_signal
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  ALGOUSDT

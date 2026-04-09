@@ -1,0 +1,33 @@
+RL daily report for 2026-04-03
+Generated: 2026-04-04 00:05:08 CEST
+
+Datasets:
+  critic_dataset: +475 rows today, total 3697
+  ml_dataset: +41 rows today, total 38249
+
+Training:
+  chosen_model: logistic
+  train_rows: 2249 val_rows: 482 test_rows: 483
+  test_ret5_delta: -0.5536
+  test_win_rate_delta: -0.1429
+
+Shadow disagreements:
+  total: 558
+  bot_take vs ranker_skip: 20
+  bot_blocked vs ranker_take: 538
+  top symbols: ATOMUSDT=77, HBARUSDT=52, SNXUSDT=49, WIFUSDT=39, SEIUSDT=32, XLMUSDT=28, DOTUSDT=25, SUSHIUSDT=22, ORDIUSDT=20, CELOUSDT=19
+  blocked reasons: =538
+
+Worst bot takes (ranker wanted skip):
+  AMPUSDT 15m impulse score=52.3085 proba=0.26228 reason=candidate accepted
+  CELOUSDT 1h impulse_speed score=115.2031 proba=0.276631 reason=candidate accepted
+  BNTUSDT 1h retest score=63.4216 proba=0.280935 reason=candidate accepted
+  YFIUSDT 1h retest score=72.5431 proba=0.298363 reason=candidate accepted
+  ORDIUSDT 15m strong_trend score=121.7074 proba=0.305569 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  WIFUSDT 15m trend score=47.6358 proba=0.511073 reason=entry score 47.64 < floor 48.00
+  WIFUSDT 15m trend score=47.6358 proba=0.511073 reason=entry score 47.64 < floor 48.00
+  WIFUSDT 15m trend score=47.6358 proba=0.511073 reason=entry score 47.64 < floor 48.00
+  WIFUSDT 15m trend score=47.6358 proba=0.511073 reason=entry score 47.64 < floor 48.00
+  WIFUSDT 15m trend score=47.6358 proba=0.511073 reason=entry score 47.64 < floor 48.00

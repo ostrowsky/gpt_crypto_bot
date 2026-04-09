@@ -1,0 +1,8 @@
+RL training session 2 at 2026-04-02T02:43:45Z
+model: logistic
+rows_total: 3174
+top1_delta: 0.3071
+critic_rows_total: 3181
+ml_rows_total: 37525
+improvement: ret5_delta=-0.7107 target_return_delta=-0.4961 win_rate_delta=-0.1905
+shadow_top1: avg_target_return_delta=0.3071 ret5_avg_delta=None

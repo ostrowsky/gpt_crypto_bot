@@ -1,0 +1,44 @@
+Top-gainer critic for 2026-04-06 (final)
+Window: 2026-04-06 00:00:00 CEST -> 2026-04-06 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 1/15
+  watchlist top bought: 2/15 (13.3%)
+  early captures: 1/15 (6.7%)
+  bot false-positive buys: 18/20
+
+Watchlist top gainers and bot reaction:
+1. TRUUSDT +79.25% status=blocked_rule
+   WHY 1h impulse_speed guard: daily_range 66.67% > 10.00%
+2. AXLUSDT +7.67% status=bought
+   BUY 09:46 mode=impulse_speed entry=0.0453 capture=30.3%
+   EXIT 11:53 pnl=+7.95%
+3. ENAUSDT +7.32% status=bought
+   BUY 10:49 mode=retest entry=0.0814 capture=38.6%
+   EXIT 14:35 pnl=+1.35%
+4. BONKUSDT +6.81% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 71.6 > 70.0
+5. FILUSDT +5.95% status=blocked_rule
+   WHY ranker hard veto: final -2.67 <= -0.75 and TG 0.00 <= 0.20
+6. SUIUSDT +5.33% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 71.9 > 70.0
+7. TAOUSDT +5.04% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 71.6 > 70.0
+8. AVAXUSDT +4.74% status=no_signal
+9. WIFUSDT +4.54% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -2.27, EV -1.61, Q 0.36, TG 0.00, CAP 0.00)
+10. ARBUSDT +4.50% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 77.7 > 70.0
+11. OPUSDT +4.40% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 77.8 > 70.0
+12. ZRXUSDT +4.28% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 74.2 > 70.0
+13. TIAUSDT +4.20% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 73.6 > 70.0
+14. SANDUSDT +4.16% status=blocked_rule
+   WHY ranker hard veto: final -1.88 <= -0.75 and TG 0.00 <= 0.20
+15. INJUSDT +4.04% status=blocked_rule
+   WHY ranker hard veto: final -1.58 <= -0.75 and TG 0.00 <= 0.20
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  AAVEUSDT, AUDIOUSDT, AXSUSDT, BATUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, GRTUSDT, KSMUSDT, LTCUSDT, MANAUSDT, METISUSDT, PAXGUSDT, QIUSDT, QNTUSDT

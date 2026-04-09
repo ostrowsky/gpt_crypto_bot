@@ -1,0 +1,8 @@
+RL training session 1 at 2026-04-01T13:33:01Z
+model: mlp
+rows_total: 2950
+top1_delta: 0.3204
+critic_rows_total: 3153
+ml_rows_total: 36922
+improvement: ret5_delta=0.1945 target_return_delta=0.2576 win_rate_delta=0.0
+shadow_top1: avg_target_return_delta=0.3204 ret5_avg_delta=None

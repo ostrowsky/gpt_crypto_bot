@@ -1,0 +1,38 @@
+Top-gainer critic for 2026-04-07 (midday)
+Window: 2026-04-07 00:00:00 CEST -> 2026-04-07 12:00:00 CEST
+
+Summary:
+  exchange top in watchlist: 1/15
+  watchlist top bought: 3/15 (20.0%)
+  early captures: 3/15 (20.0%)
+  bot false-positive buys: 4/7
+
+Watchlist top gainers and bot reaction:
+1. FETUSDT +3.89% status=blocked_rule
+   WHY trend quality guard: weak 15m trend (forecast 0.000 < 0.250, vol 0.68, ADX 33.8, slope 0.531)
+2. RENDERUSDT +1.05% status=blocked_rule
+   WHY entry score 46.83 < floor 48.00
+3. TAOUSDT +0.76% status=no_signal
+4. CAKEUSDT +0.63% status=bought
+   BUY 11:35 mode=breakout entry=1.435 capture=44.4%
+5. ARUSDT +0.60% status=no_signal
+6. PAXGUSDT +0.40% status=blocked_rule
+   WHY entry score 28.48 < floor 48.00
+7. ARBUSDT +0.32% status=bought
+   BUY 11:06 mode=retest entry=0.0952 capture=100.0%
+   EXIT 11:32 pnl=+0.53%
+8. XLMUSDT +0.13% status=no_signal
+9. INJUSDT +0.10% status=bought
+   BUY 09:30 mode=breakout entry=2.868 capture=150.0%
+   EXIT 10:30 pnl=-0.77%
+10. ICPUSDT +0.04% status=blocked_rule
+   WHY ranker hard veto: final -0.96 <= -0.75 and TG 0.00 <= 0.20
+11. FILUSDT +0.00% status=no_signal
+12. ORDIUSDT +0.00% status=no_signal
+13. BNBUSDT -0.01% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -0.59, EV -0.64, Q 0.36, TG 0.00, CAP 0.00)
+14. WLDUSDT -0.12% status=no_signal
+15. DOGEUSDT -0.17% status=no_signal
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  APEUSDT, BATUSDT, CELOUSDT, SNXUSDT

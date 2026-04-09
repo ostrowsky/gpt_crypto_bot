@@ -1,0 +1,11 @@
+@"
+.venv/
+pyembed/
+__pycache__/
+*.pyc
+*.log
+files/ml_dataset.jsonl
+files/*.jsonl
+.runtime/*.json
+.runtime/*.log
+"@ | Set-Content .gitignore

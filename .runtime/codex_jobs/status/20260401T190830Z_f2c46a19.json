@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T190830Z_f2c46a19",
+  "job_type": "check_telegram_connectivity",
+  "state": "completed",
+  "requested_at": "2026-04-01T19:08:30Z",
+  "updated_at": "2026-04-01T19:10:22Z",
+  "request": {
+    "job_id": "20260401T190830Z_f2c46a19",
+    "job_type": "check_telegram_connectivity",
+    "requested_at": "2026-04-01T19:08:30Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "exit=0",
+    "exit_code": 0,
+    "output_tail": "{\n    \"tcp_success\":  true,\n    \"http\":  {\n                 \"ok\":  true,\n                 \"status\":  200\n             },\n    \"remote_address\":  \"149.154.166.110\",\n    \"computer\":  \"api.telegram.org\",\n    \"remote_port\":  443\n}",
+    "spawned_pid": 0
+  }
+}

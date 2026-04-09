@@ -1,0 +1,33 @@
+RL daily report for 2026-04-02
+Generated: 2026-04-03 00:05:04 CEST
+
+Datasets:
+  critic_dataset: +49 rows today, total 3222
+  ml_dataset: +1009 rows today, total 38208
+
+Training:
+  chosen_model: logistic
+  train_rows: 2229 val_rows: 478 test_rows: 478
+  test_ret5_delta: -0.6323
+  test_win_rate_delta: -0.1304
+
+Shadow disagreements:
+  total: 86
+  bot_take vs ranker_skip: 6
+  bot_blocked vs ranker_take: 80
+  top symbols: GLMUSDT=37, QNTUSDT=20, AEVOUSDT=12, COTIUSDT=10, QIUSDT=3, RENDERUSDT=2, OXTUSDT=1, FETUSDT=1
+  blocked reasons: =80
+
+Worst bot takes (ranker wanted skip):
+  AEVOUSDT 15m impulse_speed score=95.2624 proba=0.459095 reason=candidate accepted
+  RENDERUSDT 15m trend score=82.7497 proba=0.461001 reason=candidate accepted
+  RENDERUSDT 15m alignment score=50.4058 proba=0.462594 reason=candidate accepted
+  COTIUSDT 15m impulse_speed score=140.9821 proba=0.464918 reason=candidate accepted
+  FETUSDT 15m retest score=70.4116 proba=0.466148 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  COTIUSDT 15m trend score=50.1908 proba=0.497578 reason=trend quality guard: weak 15m trend (forecast 0.000 < 0.250, vol 4.02, ADX 19.8, slope 0.544)
+  COTIUSDT 15m trend score=50.1908 proba=0.497578 reason=trend quality guard: weak 15m trend (forecast 0.000 < 0.250, vol 4.02, ADX 19.8, slope 0.544)
+  COTIUSDT 15m trend score=50.1908 proba=0.497578 reason=trend quality guard: weak 15m trend (forecast 0.000 < 0.250, vol 4.02, ADX 19.8, slope 0.544)
+  COTIUSDT 15m trend score=50.1908 proba=0.497578 reason=trend quality guard: weak 15m trend (forecast 0.000 < 0.250, vol 4.02, ADX 19.8, slope 0.544)
+  COTIUSDT 15m trend score=50.1908 proba=0.497578 reason=trend quality guard: weak 15m trend (forecast 0.000 < 0.250, vol 4.02, ADX 19.8, slope 0.544)

@@ -1,0 +1,43 @@
+Top-gainer critic for 2026-04-06 (midday)
+Window: 2026-04-06 00:00:00 CEST -> 2026-04-06 12:00:00 CEST
+
+Summary:
+  exchange top in watchlist: 4/15
+  watchlist top bought: 1/15 (6.7%)
+  early captures: 1/15 (6.7%)
+  bot false-positive buys: 14/15
+
+Watchlist top gainers and bot reaction:
+1. TRUUSDT +135.85% status=blocked_rule
+   WHY 1h impulse_speed guard: daily_range 66.67% > 10.00%
+2. AXLUSDT +13.26% status=bought
+   BUY 09:46 mode=impulse_speed entry=0.0453 capture=59.7%
+   EXIT 11:53 pnl=+7.95%
+3. TAOUSDT +8.54% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 71.6 > 70.0
+4. BONKUSDT +7.37% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -2.26, EV -2.08, Q 0.38, TG 0.00, CAP 0.00)
+5. ARBUSDT +7.13% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 77.7 > 70.0
+6. ZRXUSDT +6.67% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 74.2 > 70.0
+7. AVAXUSDT +6.66% status=no_signal
+8. SUIUSDT +6.40% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 71.9 > 70.0
+9. FILUSDT +6.19% status=blocked_rule
+   WHY ranker hard veto: final -2.67 <= -0.75 and TG 0.00 <= 0.20
+10. RENDERUSDT +6.12% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 77.9 > 70.0
+11. OPUSDT +5.89% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -1.58, EV -1.59, Q 0.37, TG 0.00, CAP 0.00)
+12. TIAUSDT +5.77% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -2.01, EV -1.65, Q 0.36, TG 0.00, CAP 0.00)
+13. CRVUSDT +5.75% status=blocked_rule
+   WHY ranker hard veto: final -2.47 <= -0.75 and TG 0.00 <= 0.20
+14. WIFUSDT +5.68% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -2.27, EV -1.61, Q 0.36, TG 0.00, CAP 0.00)
+15. INJUSDT +5.63% status=blocked_rule
+   WHY ranker hard veto: final -1.58 <= -0.75 and TG 0.00 <= 0.20
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  AAVEUSDT, AUDIOUSDT, BATUSDT, BNBUSDT, BTCUSDT, DOGEUSDT, ENAUSDT, GRTUSDT, LTCUSDT, METISUSDT, PAXGUSDT, QNTUSDT, STRKUSDT, XLMUSDT

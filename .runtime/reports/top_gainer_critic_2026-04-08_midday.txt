@@ -1,0 +1,46 @@
+Top-gainer critic for 2026-04-08 (midday)
+Window: 2026-04-08 00:00:00 CEST -> 2026-04-08 12:00:00 CEST
+
+Summary:
+  exchange top in watchlist: 4/15
+  watchlist top bought: 3/15 (20.0%)
+  early captures: 2/15 (13.3%)
+  bot false-positive buys: 15/18
+
+Watchlist top gainers and bot reaction:
+1. ICPUSDT +8.52% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 74.4 > 70.0
+2. ENAUSDT +8.20% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 74.9 > 70.0
+3. ALGOUSDT +7.64% status=blocked_rule
+   WHY ranker hard veto: final -2.64 <= -1.50 for 1h impulse
+4. RENDERUSDT +6.72% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 73.4 > 70.0
+5. TAOUSDT +5.22% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 75.8 > 70.0
+6. NEARUSDT +4.90% status=bought
+   BUY 08:46 mode=strong_trend entry=1.336 capture=54.7%
+   EXIT 09:34 pnl=+0.37%
+7. CRVUSDT +4.89% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -2.95, EV -2.38, Q 0.29, TG 0.00, CAP 0.00)
+8. ETHUSDT +4.87% status=blocked_rule
+   WHY trend quality guard: RSI 75.6 > 68.0
+9. AAVEUSDT +4.62% status=bought
+   BUY 01:28 mode=impulse entry=95.23 capture=6.2%
+   EXIT 10:02 pnl=+0.80%
+10. SEIUSDT +4.53% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -1.23, EV -0.89, Q 0.40, TG 0.00, CAP 0.00)
+11. WIFUSDT +4.17% status=blocked_rule
+   WHY ranker hard veto: final -2.00 <= -0.75 and TG 0.00 <= 0.20
+12. DOTUSDT +3.84% status=no_signal
+   EXIT 00:50 pnl=+5.60%
+13. TRUUSDT +3.75% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -8.18, EV -6.47, Q 0.29, TG 0.00, CAP 0.00)
+14. COMPUSDT +3.73% status=blocked_rule
+   WHY entry score 46.00 < floor 48.00
+15. SUIUSDT +3.72% status=bought
+   BUY 00:15 mode=strong_trend entry=0.9165 capture=92.1%
+   EXIT 00:51 pnl=+1.45%
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  1INCHUSDT, APTUSDT, AUDIOUSDT, AXSUSDT, BATUSDT, BCHUSDT, CAKEUSDT, CHZUSDT, DOGEUSDT, GMTUSDT, ILVUSDT, LQTYUSDT, OXTUSDT, SHIBUSDT, ZRXUSDT

@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T173707Z_822b3e7d",
+  "job_type": "run_rl_train_once",
+  "state": "completed",
+  "requested_at": "2026-04-01T17:37:07Z",
+  "updated_at": "2026-04-01T17:39:08Z",
+  "request": {
+    "job_id": "20260401T173707Z_822b3e7d",
+    "job_type": "run_rl_train_once",
+    "requested_at": "2026-04-01T17:37:07Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "exit=0",
+    "exit_code": 0,
+    "output_tail": "ML Candidate Ranker\nRows: 2972 (train=2080, val=446, test=446)\nChosen model: mlp\nObjective: EV = expected_return - 0.75 * expected_drawdown\n\nValidation:\n  logistic: thr=0.55 f1=0.697 prec=0.612 cov=0.758 ret=+0.1960% top1=+0.1360% delta=+0.2330%\n  mlp: thr=0.53 f1=0.718 prec=0.581 cov=0.930 ret=+0.1241% top1=+0.1574% delta=+0.2544%\n\nTest quality filter:\n  all candidates: cov=1.000 wr=0.186 ret=-0.9716%\n  ranker: cov=0.946 wr=0.182 ret=-0.9550%\n  delta: ret=+0.0166% wr=-0.0036 cov=-0.0538\n\nTest grouped top-1:\n  baseline: ev=-1.5328 ret=-0.7069% ret5=-0.6485% wr=0.267\n  ranker: ev=-0.7430 ret=-0.2037% ret5=-0.2084% wr=0.333\n  delta: ev=+0.7898 ret=+0.5032% ret5=+0.4401% wr=+0.0666\n\nTop features:\n  candidate_score: +1.416800\n  adx: +1.062300\n  flag_impulse_ok: +0.357300\n  seq_mean_atr_pct: +0.284800\n  seq_trend_macd_hist_norm: +0.242200\n  seq_mean_adx: +0.078000\n  seq_trend_slope: +0.070100\n  continuation_profile: +0.058500\n  seq_mean_rsi: +0.023800\n  seq_trend_vol_x: +0.007900\n  seq_mean_slope: +0.007900\n  seq_trend_atr_pct: +0.007900\n\nSuggestions:\n  - ������������ ranker ������� ��� quality-score bonus ��� top-N ����������, � �� ��� hard-block ������.\n  - �������� disagreement samples: bot_take vs ranker_skip � bot_skip vs ranker_take.\n  - �������� ������� future exit/hold model, �� �������� � � entry ranker.\n\nCandidate Ranker Shadow Report\nRows: 2972\nGrouped competitions: 294\n\nTop-N comparison:\n  top-1 groups=294 baseline=-0.3431% ranker=-0.0322% delta=+0.3109% overlap=0.279\n  top-3 groups=233 baseline=-0.1887% ranker=-0.0028% delta=+0.1859% overlap=0.508\n  top-5 groups=166 baseline=-0.1456% ranker=-0.0156% delta=+0.1300% overlap=0.529\n\nTop-1 head-to-head: groups=294 wins=128 losses=84 ties=82\n\nCalibration:\n  bucket 1: rows=594 proba=0.608-0.658 target=-0.0475% wr=0.436\n  bucket 2: rows=594 proba=0.594-0.608 target=-0.0710% wr=0.407\n  bucket 3: rows=594 proba=0.579-0.594 target=-0.0848% wr=0.386\n  bucket 4: rows=594 proba=0.556-0.579 target=+0.0092% wr=0.455\n  bucket 5: rows=596 proba=0.201-0.556 target=-0.3397% wr=0.361\n\nModel saved to: D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker.json\nTrain report saved to: D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker_report.json\nShadow report saved to: D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker_shadow_report.json",
+    "spawned_pid": 0
+  }
+}

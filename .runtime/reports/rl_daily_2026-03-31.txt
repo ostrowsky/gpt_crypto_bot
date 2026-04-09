@@ -1,0 +1,33 @@
+RL daily report for 2026-03-31
+Generated: 2026-04-01 00:05:11 CEST
+
+Datasets:
+  critic_dataset: +391 rows today, total 2191
+  ml_dataset: +4206 rows today, total 33308
+
+Training:
+  chosen_model: logistic
+  train_rows: 1491 val_rows: 319 test_rows: 320
+  test_ret5_delta: 0.3563
+  test_win_rate_delta: 0.0
+
+Shadow disagreements:
+  total: 74
+  bot_take vs ranker_skip: 59
+  bot_blocked vs ranker_take: 15
+  top symbols: NEARUSDT=11, DYDXUSDT=3, ETHUSDT=3, LDOUSDT=3, UNIUSDT=3, COMPUSDT=2, CELRUSDT=2, PAXGUSDT=2, FILUSDT=2, SUSHIUSDT=2
+  blocked reasons: =15
+
+Worst bot takes (ranker wanted skip):
+  EGLDUSDT 15m impulse_speed score=64.8572 proba=0.174094 reason=candidate accepted
+  RENDERUSDT 15m impulse_speed score=64.2488 proba=0.176537 reason=candidate accepted
+  GMTUSDT 15m breakout score=85.4034 proba=0.187619 reason=candidate accepted
+  CAKEUSDT 15m retest score=64.0049 proba=0.190785 reason=candidate accepted
+  BNBUSDT 15m retest score=70.241 proba=0.198012 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  QNTUSDT 15m impulse_speed score=74.5787 proba=0.851172 reason=портфель полон: 10/10 позиций
+  UNIUSDT 15m trend score=48.3228 proba=0.826334 reason=портфель полон: 10/9 позиций
+  UNIUSDT 15m alignment score=49.1152 proba=0.821883 reason=группа 'DeFi_amm' уже 2/2 позиций (LDOUSDT, SUSHIUSDT)
+  PAXGUSDT 15m impulse_speed score=70.6528 proba=0.817671 reason=портфель полон: 10/10 позиций
+  EGLDUSDT 15m impulse_speed score=78.74 proba=0.362709 reason=портфель полон: 10/10 позиций

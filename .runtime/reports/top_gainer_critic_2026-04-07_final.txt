@@ -1,0 +1,50 @@
+Top-gainer critic for 2026-04-07 (final)
+Window: 2026-04-07 00:00:00 CEST -> 2026-04-07 23:59:59 CEST
+
+Summary:
+  exchange top in watchlist: 3/15
+  watchlist top bought: 7/15 (46.7%)
+  early captures: 7/15 (46.7%)
+  bot false-positive buys: 12/19
+
+Watchlist top gainers and bot reaction:
+1. ZROUSDT +11.08% status=bought
+   BUY 18:15 mode=impulse_speed entry=1.84 capture=82.5%
+   EXIT 20:16 pnl=+4.35%
+2. FETUSDT +7.91% status=bought
+   BUY 12:34 mode=alignment entry=0.2345 capture=69.1%
+   EXIT 13:16 pnl=-0.09%
+3. WLDUSDT +6.88% status=bought
+   BUY 20:45 mode=impulse_speed entry=0.2536 capture=69.6%
+   EXIT 22:01 pnl=+0.87%
+4. ARBUSDT +4.41% status=bought
+   BUY 11:06 mode=retest entry=0.0952 capture=100.0%
+   EXIT 23:46 pnl=+3.66%
+5. WIFUSDT +4.35% status=blocked_rule
+   WHY clone signal guard: recent similar 15m setups already 3/2 (ZROUSDT, CAKEUSDT, PAXGUSDT)
+6. APEUSDT +4.26% status=bought
+   BUY 09:31 mode=retest entry=0.0839 capture=113.9%
+   EXIT 12:46 pnl=-0.36%
+7. TAOUSDT +4.04% status=blocked_rule
+   WHY entry score 44.86 < floor 48.00
+8. NEARUSDT +3.98% status=blocked_rule
+   WHY trend quality guard: price edge 2.64% > 2.40%
+9. RENDERUSDT +3.78% status=bought
+   BUY 13:18 mode=retest entry=1.89 capture=123.6%
+   EXIT 13:30 pnl=-0.48%
+10. ENAUSDT +3.59% status=blocked_rule
+   WHY ranker hard veto: final -1.42 <= -0.75 and TG 0.00 <= 0.20
+11. CAKEUSDT +3.50% status=bought
+   BUY 11:35 mode=breakout entry=1.435 capture=90.0%
+   EXIT 21:46 pnl=+0.28%
+12. OPUSDT +3.23% status=blocked_rule
+   WHY clone signal guard: recent 15m setups in group 'L2_eth' already 1/1 (ARBUSDT)
+13. ARUSDT +3.01% status=blocked_rule
+   WHY ranker hard veto: weak 15m impulse (final -0.96, EV -0.71, Q 0.49, TG 0.00, CAP 0.00)
+14. TIAUSDT +2.94% status=blocked_rule
+   WHY clone signal guard: recent similar 15m setups already 2/2 (CAKEUSDT, BNBUSDT)
+15. BONKUSDT +2.93% status=blocked_rule
+   WHY clone signal guard: recent similar 15m setups already 2/2 (APEUSDT, ARBUSDT)
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  AEVOUSDT, BATUSDT, BNBUSDT, CELOUSDT, COTIUSDT, DOTUSDT, ENSUSDT, INJUSDT, PAXGUSDT, SEIUSDT, SNXUSDT, SOLUSDT

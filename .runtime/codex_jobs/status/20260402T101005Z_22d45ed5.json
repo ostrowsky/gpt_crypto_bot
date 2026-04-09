@@ -1,0 +1,20 @@
+{
+  "job_id": "20260402T101005Z_22d45ed5",
+  "job_type": "stop_trade_bot",
+  "state": "completed",
+  "requested_at": "2026-04-02T10:10:05Z",
+  "updated_at": "2026-04-02T10:10:17Z",
+  "request": {
+    "job_id": "20260402T101005Z_22d45ed5",
+    "job_type": "stop_trade_bot",
+    "requested_at": "2026-04-02T10:10:05Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "exit=0",
+    "exit_code": 0,
+    "output_tail": "Stopped trade bot PIDs: 28796, 12972",
+    "spawned_pid": 0
+  }
+}

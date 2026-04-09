@@ -1,0 +1,1123 @@
+{
+  "target_day_local": "2026-04-03",
+  "generated_at_local": "2026-04-04 00:05:08 CEST",
+  "datasets": {
+    "critic_rows_total": 3697,
+    "critic_rows_day": 475,
+    "ml_rows_total": 38249,
+    "ml_rows_day": 41
+  },
+  "worker_status": {
+    "worker": {
+      "started_at": "2026-04-02T09:34:27Z",
+      "last_heartbeat": "2026-04-03T22:05:19Z",
+      "mode": "headless_rl"
+    },
+    "collector": {
+      "enabled": false,
+      "running": false,
+      "last_cycle_started_at": null,
+      "last_cycle_finished_at": null,
+      "last_cycle_stats": {},
+      "last_error": "disabled (bot-owned datasets)"
+    },
+    "training": {
+      "interval_sec": 3600,
+      "min_rows": 500,
+      "min_new_rows": 50,
+      "runs_total": 22,
+      "runs_ok": 22,
+      "runs_failed": 0,
+      "last_started_at": "2026-04-03T21:21:24Z",
+      "last_finished_at": "2026-04-03T21:23:37Z",
+      "last_error": "",
+      "last_rows_total": 3214,
+      "last_dataset_mtime": 1775251391.8934946,
+      "last_model_name": "catboost",
+      "last_top1_delta": 0.6925,
+      "model_file": "D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker.json",
+      "report_file": "D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker_report.json",
+      "shadow_file": "D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker_shadow_report.json"
+    },
+    "datasets": {
+      "ml_dataset_rows": 38249,
+      "critic_dataset": {
+        "path": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+        "exists": true,
+        "rows_total": 3697,
+        "rows_last_24h": 474,
+        "size_bytes": 12788736,
+        "last_write_time": 1775253916.1447825,
+        "labeled_rows": 3229,
+        "trade_taken_rows": 1760,
+        "trade_outcome_rows": 445,
+        "actions": {
+          "take": 1758,
+          "candidate": 1084,
+          "blocked": 855
+        },
+        "signal_types": {
+          "impulse_speed": 698,
+          "alignment": 1468,
+          "trend": 747,
+          "breakout": 150,
+          "strong_trend": 56,
+          "retest": 546,
+          "impulse": 32
+        }
+      }
+    },
+    "top_gainer_critic": {
+      "enabled": true,
+      "runs_total": 4,
+      "runs_ok": 4,
+      "runs_failed": 0,
+      "last_slot_key": "2026-04-03::final",
+      "last_started_at": "2026-04-03T22:00:32Z",
+      "last_finished_at": "2026-04-03T22:00:38Z",
+      "last_error": "",
+      "last_phase": "final",
+      "last_target_day_local": "2026-04-03",
+      "last_report_json": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\top_gainer_critic_2026-04-03_final.json",
+      "last_report_txt": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\top_gainer_critic_2026-04-03_final.txt",
+      "last_watchlist_top_capture_rate_pct": 66.67,
+      "last_watchlist_top_early_capture_rate_pct": 46.67
+    },
+    "latest_training_report": {
+      "json": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\rl_train_20260403T212341Z.json",
+      "txt": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\rl_train_20260403T212341Z.txt",
+      "latest_json": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\rl_train_latest.json",
+      "latest_txt": "D:\\Projects\\gpt_crypto_bot\\.runtime\\reports\\rl_train_latest.txt"
+    }
+  },
+  "train_report": {
+    "dataset_file": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+    "rows_total": 3214,
+    "train_rows": 2249,
+    "val_rows": 482,
+    "test_rows": 483,
+    "feature_count": 76,
+    "positive_ret_threshold": 0.0,
+    "ev_lambda": 0.75,
+    "chosen_model": "logistic",
+    "validation": {
+      "logistic": {
+        "quality": {
+          "threshold": 0.5,
+          "accuracy": 0.5851,
+          "precision": 0.5705,
+          "recall": 0.3846,
+          "f1": 0.4595,
+          "coverage": 0.3091,
+          "selected_count": 149,
+          "selected_ret5_avg": 0.2144,
+          "selected_win_rate": 0.5705,
+          "brier": 0.239,
+          "auc": 0.6163
+        },
+        "group_ranking": {
+          "grouped_competitions": 28,
+          "top_n": [
+            {
+              "top_n": 1,
+              "eligible_groups": 28,
+              "baseline": {
+                "count": 28,
+                "avg_target_return": 0.0992,
+                "avg_ret5": 0.1735,
+                "avg_ev": -0.3078,
+                "avg_drawdown": 0.7223,
+                "avg_exit_pnl": -0.2731,
+                "win_rate": 0.5357
+              },
+              "ranker": {
+                "count": 28,
+                "avg_target_return": 0.4209,
+                "avg_ret5": 0.3676,
+                "avg_ev": 0.0073,
+                "avg_drawdown": 0.431,
+                "avg_exit_pnl": 1.9457,
+                "win_rate": 0.6429
+              },
+              "delta": {
+                "avg_target_return": 0.3217,
+                "avg_ret5": 0.1941,
+                "avg_ev": 0.3151,
+                "avg_drawdown": -0.2913,
+                "win_rate": 0.1072
+              },
+              "overlap_ratio": 0.0357
+            },
+            {
+              "top_n": 3,
+              "eligible_groups": 28,
+              "baseline": {
+                "count": 84,
+                "avg_target_return": 0.3377,
+                "avg_ret5": 0.3501,
+                "avg_ev": -0.0929,
+                "avg_drawdown": 0.5862,
+                "avg_exit_pnl": 0.5551,
+                "win_rate": 0.6071
+              },
+              "ranker": {
+                "count": 84,
+                "avg_target_return": 0.3589,
+                "avg_ret5": 0.3501,
+                "avg_ev": 0.0015,
+                "avg_drawdown": 0.4442,
+                "avg_exit_pnl": 0.6174,
+                "win_rate": 0.631
+              },
+              "delta": {
+                "avg_target_return": 0.0212,
+                "avg_ret5": 0.0,
+                "avg_ev": 0.0944,
+                "avg_drawdown": -0.142,
+                "win_rate": 0.0239
+              },
+              "overlap_ratio": 0.3571
+            }
+          ],
+          "top1_head_to_head": {
+            "wins": 15,
+            "losses": 12,
+            "ties": 1,
+            "eligible_groups": 28
+          }
+        }
+      },
+      "mlp": {
+        "quality": {
+          "threshold": 0.45,
+          "accuracy": 0.4896,
+          "precision": 0.4682,
+          "recall": 0.8326,
+          "f1": 0.5993,
+          "coverage": 0.8154,
+          "selected_count": 393,
+          "selected_ret5_avg": -0.2543,
+          "selected_win_rate": 0.4682,
+          "brier": 0.2517,
+          "auc": 0.4513
+        },
+        "group_ranking": {
+          "grouped_competitions": 28,
+          "top_n": [
+            {
+              "top_n": 1,
+              "eligible_groups": 28,
+              "baseline": {
+                "count": 28,
+                "avg_target_return": 0.0992,
+                "avg_ret5": 0.1735,
+                "avg_ev": -0.3078,
+                "avg_drawdown": 0.7223,
+                "avg_exit_pnl": -0.2731,
+                "win_rate": 0.5357
+              },
+              "ranker": {
+                "count": 28,
+                "avg_target_return": 0.4054,
+                "avg_ret5": 0.3521,
+                "avg_ev": -0.0156,
+                "avg_drawdown": 0.4444,
+                "avg_exit_pnl": 1.9457,
+                "win_rate": 0.6071
+              },
+              "delta": {
+                "avg_target_return": 0.3062,
+                "avg_ret5": 0.1786,
+                "avg_ev": 0.2922,
+                "avg_drawdown": -0.2779,
+                "win_rate": 0.0714
+              },
+              "overlap_ratio": 0.0357
+            },
+            {
+              "top_n": 3,
+              "eligible_groups": 28,
+              "baseline": {
+                "count": 84,
+                "avg_target_return": 0.3377,
+                "avg_ret5": 0.3501,
+                "avg_ev": -0.0929,
+                "avg_drawdown": 0.5862,
+                "avg_exit_pnl": 0.5551,
+                "win_rate": 0.6071
+              },
+              "ranker": {
+                "count": 84,
+                "avg_target_return": 0.3589,
+                "avg_ret5": 0.3501,
+                "avg_ev": 0.0015,
+                "avg_drawdown": 0.4442,
+                "avg_exit_pnl": 0.6174,
+                "win_rate": 0.631
+              },
+              "delta": {
+                "avg_target_return": 0.0212,
+                "avg_ret5": 0.0,
+                "avg_ev": 0.0944,
+                "avg_drawdown": -0.142,
+                "win_rate": 0.0239
+              },
+              "overlap_ratio": 0.3571
+            }
+          ],
+          "top1_head_to_head": {
+            "wins": 15,
+            "losses": 12,
+            "ties": 1,
+            "eligible_groups": 28
+          }
+        }
+      }
+    },
+    "test_baseline_candidates": {
+      "threshold": 0.5,
+      "accuracy": 0.2008,
+      "precision": 0.2008,
+      "recall": 1.0,
+      "f1": 0.3345,
+      "coverage": 1.0,
+      "selected_count": 483,
+      "selected_ret5_avg": -0.9768,
+      "selected_win_rate": 0.2008,
+      "brier": 0.7992,
+      "auc": 0.5924
+    },
+    "test_ranker": {
+      "threshold": 0.5,
+      "accuracy": 0.766,
+      "precision": 0.1667,
+      "recall": 0.0412,
+      "f1": 0.0661,
+      "coverage": 0.0497,
+      "selected_count": 24,
+      "selected_ret5_avg": -0.8779,
+      "selected_win_rate": 0.1667,
+      "brier": 0.1904,
+      "auc": 0.5005
+    },
+    "test_group_ranking": {
+      "grouped_competitions": 28,
+      "top_n": [
+        {
+          "top_n": 1,
+          "eligible_groups": 28,
+          "baseline": {
+            "count": 28,
+            "avg_target_return": -0.0871,
+            "avg_ret5": -0.0094,
+            "avg_ev": -1.0905,
+            "avg_drawdown": 1.1529,
+            "avg_exit_pnl": -0.4395,
+            "win_rate": 0.4286
+          },
+          "ranker": {
+            "count": 28,
+            "avg_target_return": -0.4535,
+            "avg_ret5": -0.563,
+            "avg_ev": -1.304,
+            "avg_drawdown": 1.0758,
+            "avg_exit_pnl": -0.0892,
+            "win_rate": 0.2857
+          },
+          "delta": {
+            "avg_target_return": -0.3664,
+            "avg_ret5": -0.5536,
+            "avg_ev": -0.2135,
+            "avg_drawdown": -0.0771,
+            "win_rate": -0.1429
+          },
+          "overlap_ratio": 0.1429
+        },
+        {
+          "top_n": 3,
+          "eligible_groups": 22,
+          "baseline": {
+            "count": 66,
+            "avg_target_return": -0.2534,
+            "avg_ret5": -0.2721,
+            "avg_ev": -1.2034,
+            "avg_drawdown": 1.1582,
+            "avg_exit_pnl": 0.0301,
+            "win_rate": 0.3182
+          },
+          "ranker": {
+            "count": 66,
+            "avg_target_return": -0.4804,
+            "avg_ret5": -0.4905,
+            "avg_ev": -1.2873,
+            "avg_drawdown": 1.036,
+            "avg_exit_pnl": -0.3254,
+            "win_rate": 0.2727
+          },
+          "delta": {
+            "avg_target_return": -0.227,
+            "avg_ret5": -0.2184,
+            "avg_ev": -0.0839,
+            "avg_drawdown": -0.1222,
+            "win_rate": -0.0455
+          },
+          "overlap_ratio": 0.4091
+        },
+        {
+          "top_n": 5,
+          "eligible_groups": 16,
+          "baseline": {
+            "count": 80,
+            "avg_target_return": -0.1561,
+            "avg_ret5": -0.1529,
+            "avg_ev": -0.9621,
+            "avg_drawdown": 0.9382,
+            "avg_exit_pnl": 0.4396,
+            "win_rate": 0.3375
+          },
+          "ranker": {
+            "count": 80,
+            "avg_target_return": -0.4627,
+            "avg_ret5": -0.4561,
+            "avg_ev": -1.1727,
+            "avg_drawdown": 0.9147,
+            "avg_exit_pnl": -0.5677,
+            "win_rate": 0.2625
+          },
+          "delta": {
+            "avg_target_return": -0.3066,
+            "avg_ret5": -0.3032,
+            "avg_ev": -0.2106,
+            "avg_drawdown": -0.0235,
+            "win_rate": -0.075
+          },
+          "overlap_ratio": 0.4
+        }
+      ],
+      "top1_head_to_head": {
+        "wins": 12,
+        "losses": 12,
+        "ties": 4,
+        "eligible_groups": 28
+      }
+    },
+    "test_calibration": [
+      {
+        "bucket": 1,
+        "rows": 96,
+        "proba_min": 0.4176,
+        "proba_max": 0.6133,
+        "avg_quality": 0.2396,
+        "avg_target_return": -0.925
+      },
+      {
+        "bucket": 2,
+        "rows": 96,
+        "proba_min": 0.3725,
+        "proba_max": 0.4176,
+        "avg_quality": 0.1979,
+        "avg_target_return": -0.8076
+      },
+      {
+        "bucket": 3,
+        "rows": 96,
+        "proba_min": 0.3259,
+        "proba_max": 0.3722,
+        "avg_quality": 0.1667,
+        "avg_target_return": -1.1544
+      },
+      {
+        "bucket": 4,
+        "rows": 96,
+        "proba_min": 0.2886,
+        "proba_max": 0.3252,
+        "avg_quality": 0.1458,
+        "avg_target_return": -1.2362
+      },
+      {
+        "bucket": 5,
+        "rows": 99,
+        "proba_min": 0.1544,
+        "proba_max": 0.2886,
+        "avg_quality": 0.2525,
+        "avg_target_return": -0.7671
+      }
+    ],
+    "improvement_delta": {
+      "ret5_avg_delta": -0.5536,
+      "win_rate_delta": -0.1429,
+      "coverage_delta": -0.9503,
+      "ev_avg_delta": -0.2135,
+      "target_return_delta": -0.3664
+    },
+    "top_feature_importance": [
+      {
+        "feature": "seq_trend_close_norm",
+        "importance": 5.6842
+      },
+      {
+        "feature": "is_bull_day",
+        "importance": 2.1899
+      },
+      {
+        "feature": "flag_entry_ok",
+        "importance": 0.6089
+      },
+      {
+        "feature": "signal_breakout",
+        "importance": 0.406
+      },
+      {
+        "feature": "atr_pct",
+        "importance": 0.0
+      },
+      {
+        "feature": "body_pct",
+        "importance": 0.0
+      },
+      {
+        "feature": "btc_momentum_4h",
+        "importance": 0.0
+      },
+      {
+        "feature": "btc_vs_ema50",
+        "importance": 0.0
+      },
+      {
+        "feature": "close_vs_ema20",
+        "importance": 0.0
+      },
+      {
+        "feature": "close_vs_ema200",
+        "importance": 0.0
+      },
+      {
+        "feature": "close_vs_ema50",
+        "importance": 0.0
+      },
+      {
+        "feature": "ema50_vs_ema200",
+        "importance": 0.0
+      }
+    ],
+    "suggestions": [
+      "Использовать ranker сначала как quality-score bonus для top-N кандидатов, а не как hard-block движок.",
+      "Собирать disagreement samples: bot_take vs ranker_skip и bot_skip vs ranker_take.",
+      "Отдельно обучать future exit/hold model, не смешивая её с entry ranker."
+    ]
+  },
+  "shadow_report": {
+    "dataset_file": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+    "model_name": "logistic",
+    "rows_total": 3214,
+    "payload_version": 2,
+    "grouped_bar_competitions": 311,
+    "data_health": {
+      "action_counts": {
+        "take": 1729,
+        "candidate": 1063,
+        "blocked": 422
+      },
+      "signal_counts": {
+        "impulse_speed": 583,
+        "alignment": 1336,
+        "trend": 623,
+        "breakout": 146,
+        "strong_trend": 49,
+        "retest": 456,
+        "impulse": 21
+      },
+      "blocked_like_rows": 1485
+    },
+    "top_n": [
+      {
+        "top_n": 1,
+        "eligible_groups": 311,
+        "baseline": {
+          "count": 311,
+          "avg_target_return": -0.3126,
+          "avg_ret5": -0.2534,
+          "avg_exit_pnl": -0.4805,
+          "win_rate": 0.4277
+        },
+        "ranker": {
+          "count": 311,
+          "avg_target_return": -0.0014,
+          "avg_ret5": -0.0005,
+          "avg_exit_pnl": -0.0645,
+          "win_rate": 0.4598
+        },
+        "delta": {
+          "avg_target_return": 0.3112,
+          "avg_ret5": 0.2529,
+          "win_rate": 0.0321
+        },
+        "overlap_ratio": 0.2251
+      },
+      {
+        "top_n": 3,
+        "eligible_groups": 246,
+        "baseline": {
+          "count": 738,
+          "avg_target_return": -0.1944,
+          "avg_ret5": -0.1741,
+          "avg_exit_pnl": -0.2352,
+          "win_rate": 0.4187
+        },
+        "ranker": {
+          "count": 738,
+          "avg_target_return": -0.0171,
+          "avg_ret5": -0.0059,
+          "avg_exit_pnl": -0.224,
+          "win_rate": 0.4485
+        },
+        "delta": {
+          "avg_target_return": 0.1773,
+          "avg_ret5": 0.1682,
+          "win_rate": 0.0298
+        },
+        "overlap_ratio": 0.4783
+      },
+      {
+        "top_n": 5,
+        "eligible_groups": 173,
+        "baseline": {
+          "count": 865,
+          "avg_target_return": -0.1486,
+          "avg_ret5": -0.1298,
+          "avg_exit_pnl": -0.1347,
+          "win_rate": 0.4335
+        },
+        "ranker": {
+          "count": 865,
+          "avg_target_return": -0.0282,
+          "avg_ret5": -0.0139,
+          "avg_exit_pnl": -0.126,
+          "win_rate": 0.459
+        },
+        "delta": {
+          "avg_target_return": 0.1204,
+          "avg_ret5": 0.1159,
+          "win_rate": 0.0255
+        },
+        "overlap_ratio": 0.5098
+      }
+    ],
+    "top1_head_to_head": {
+      "wins": 146,
+      "losses": 96,
+      "ties": 69,
+      "eligible_groups": 311
+    },
+    "calibration": [
+      {
+        "bucket": 1,
+        "rows": 642,
+        "proba_min": 0.515,
+        "proba_max": 0.7447,
+        "avg_target_return": 0.2767,
+        "win_rate": 0.5935
+      },
+      {
+        "bucket": 2,
+        "rows": 642,
+        "proba_min": 0.4457,
+        "proba_max": 0.515,
+        "avg_target_return": 0.0185,
+        "win_rate": 0.4486
+      },
+      {
+        "bucket": 3,
+        "rows": 642,
+        "proba_min": 0.3911,
+        "proba_max": 0.4455,
+        "avg_target_return": -0.0656,
+        "win_rate": 0.4003
+      },
+      {
+        "bucket": 4,
+        "rows": 642,
+        "proba_min": 0.3289,
+        "proba_max": 0.391,
+        "avg_target_return": -0.3264,
+        "win_rate": 0.3069
+      },
+      {
+        "bucket": 5,
+        "rows": 646,
+        "proba_min": 0.0941,
+        "proba_max": 0.3288,
+        "avg_target_return": -0.4326,
+        "win_rate": 0.3096
+      }
+    ],
+    "warnings": []
+  },
+  "ranker_shadow": {
+    "events_total": 558,
+    "bot_take_ranker_skip": 20,
+    "bot_blocked_ranker_take": 538,
+    "top_symbols": [
+      [
+        "ATOMUSDT",
+        77
+      ],
+      [
+        "HBARUSDT",
+        52
+      ],
+      [
+        "SNXUSDT",
+        49
+      ],
+      [
+        "WIFUSDT",
+        39
+      ],
+      [
+        "SEIUSDT",
+        32
+      ],
+      [
+        "XLMUSDT",
+        28
+      ],
+      [
+        "DOTUSDT",
+        25
+      ],
+      [
+        "SUSHIUSDT",
+        22
+      ],
+      [
+        "ORDIUSDT",
+        20
+      ],
+      [
+        "CELOUSDT",
+        19
+      ]
+    ],
+    "top_modes": [
+      [
+        "trend",
+        367
+      ],
+      [
+        "alignment",
+        101
+      ],
+      [
+        "impulse_speed",
+        74
+      ],
+      [
+        "retest",
+        10
+      ],
+      [
+        "strong_trend",
+        4
+      ],
+      [
+        "breakout",
+        1
+      ],
+      [
+        "impulse",
+        1
+      ]
+    ],
+    "blocked_reason_counts": [
+      [
+        "",
+        538
+      ]
+    ],
+    "worst_bot_takes": [
+      {
+        "event": "ranker_shadow",
+        "sym": "AMPUSDT",
+        "tf": "15m",
+        "mode": "impulse",
+        "price": 0.000993,
+        "candidate_score": 52.3085,
+        "score_floor": 48.0,
+        "ranker_proba": 0.26228,
+        "ranker_threshold": 0.5,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -1.218541,
+        "ranker_ev": -1.67452,
+        "ranker_expected_return": -0.120102,
+        "ranker_expected_drawdown": 2.072557,
+        "ts": "2026-04-03T14:17:03Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "CELOUSDT",
+        "tf": "1h",
+        "mode": "impulse_speed",
+        "price": 0.083,
+        "candidate_score": 115.2031,
+        "score_floor": 56.0,
+        "ranker_proba": 0.276631,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -4.401516,
+        "ranker_ev": -3.773332,
+        "ranker_expected_return": -1.330347,
+        "ranker_expected_drawdown": 3.257313,
+        "ts": "2026-04-03T09:03:13Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "BNTUSDT",
+        "tf": "1h",
+        "mode": "retest",
+        "price": 0.2859,
+        "candidate_score": 63.4216,
+        "score_floor": 56.0,
+        "ranker_proba": 0.280935,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -2.452599,
+        "ranker_ev": -2.225548,
+        "ranker_expected_return": -0.982242,
+        "ranker_expected_drawdown": 1.657741,
+        "ts": "2026-04-03T09:29:14Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "YFIUSDT",
+        "tf": "1h",
+        "mode": "retest",
+        "price": 2460.0,
+        "candidate_score": 72.5431,
+        "score_floor": 56.0,
+        "ranker_proba": 0.298363,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -2.233195,
+        "ranker_ev": -2.043237,
+        "ranker_expected_return": -0.77827,
+        "ranker_expected_drawdown": 1.686623,
+        "ts": "2026-04-03T09:48:25Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "ORDIUSDT",
+        "tf": "15m",
+        "mode": "strong_trend",
+        "price": 2.405,
+        "candidate_score": 121.7074,
+        "score_floor": 48.0,
+        "ranker_proba": 0.305569,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -3.512324,
+        "ranker_ev": -3.166441,
+        "ranker_expected_return": -1.218247,
+        "ranker_expected_drawdown": 2.597593,
+        "ts": "2026-04-03T08:51:35Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "AEVOUSDT",
+        "tf": "15m",
+        "mode": "impulse_speed",
+        "price": 0.0245,
+        "candidate_score": 163.7222,
+        "score_floor": 48.0,
+        "ranker_proba": 0.317737,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -4.862263,
+        "ranker_ev": -4.207491,
+        "ranker_expected_return": -1.710642,
+        "ranker_expected_drawdown": 3.329131,
+        "ts": "2026-04-03T08:51:30Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "OPUSDT",
+        "tf": "15m",
+        "mode": "strong_trend",
+        "price": 0.1108,
+        "candidate_score": 91.1635,
+        "score_floor": 48.0,
+        "ranker_proba": 0.319677,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -2.676164,
+        "ranker_ev": -2.307468,
+        "ranker_expected_return": -0.912707,
+        "ranker_expected_drawdown": 1.859681,
+        "ts": "2026-04-03T10:10:35Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "ETCUSDT",
+        "tf": "15m",
+        "mode": "alignment",
+        "price": 8.09,
+        "candidate_score": 49.2659,
+        "score_floor": 48.0,
+        "ranker_proba": 0.36896,
+        "ranker_threshold": 0.5,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -0.555786,
+        "ranker_ev": -0.842768,
+        "ranker_expected_return": -0.254375,
+        "ranker_expected_drawdown": 0.784523,
+        "ts": "2026-04-03T14:30:31Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "XTZUSDT",
+        "tf": "15m",
+        "mode": "strong_trend",
+        "price": 0.3536,
+        "candidate_score": 93.2751,
+        "score_floor": 48.0,
+        "ranker_proba": 0.38026,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -2.07217,
+        "ranker_ev": -1.923432,
+        "ranker_expected_return": -0.701552,
+        "ranker_expected_drawdown": 1.629173,
+        "ts": "2026-04-03T10:06:53Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "C98USDT",
+        "tf": "15m",
+        "mode": "impulse_speed",
+        "price": 0.0251,
+        "candidate_score": 60.1474,
+        "score_floor": 48.0,
+        "ranker_proba": 0.458054,
+        "ranker_threshold": 0.475,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ranker_final_score": -0.678994,
+        "ranker_ev": -0.798967,
+        "ranker_expected_return": -0.166847,
+        "ranker_expected_drawdown": 0.842827,
+        "ts": "2026-04-03T03:02:26Z"
+      }
+    ],
+    "missed_bot_blocks": [
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:01:25Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:02:31Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:03:36Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:04:42Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:05:47Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:06:53Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:07:59Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:09:04Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:10:07Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "WIFUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 0.18,
+        "candidate_score": 47.6358,
+        "score_floor": 48.0,
+        "ranker_proba": 0.511073,
+        "ranker_threshold": 0.475,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "entry score 47.64 < floor 48.00",
+        "ranker_final_score": -1.232439,
+        "ranker_ev": -1.028989,
+        "ranker_expected_return": -0.170967,
+        "ranker_expected_drawdown": 1.14403,
+        "ts": "2026-04-02T23:11:13Z"
+      }
+    ]
+  }
+}

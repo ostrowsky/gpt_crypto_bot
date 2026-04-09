@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T173516Z_f96d9f2c",
+  "job_type": "run_rl_headless",
+  "state": "completed",
+  "requested_at": "2026-04-01T17:35:16Z",
+  "updated_at": "2026-04-01T17:35:22Z",
+  "request": {
+    "job_id": "20260401T173516Z_f96d9f2c",
+    "job_type": "run_rl_headless",
+    "requested_at": "2026-04-01T17:35:16Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "exit=0",
+    "exit_code": 0,
+    "output_tail": "WrapperPid : 24292\nPythonPid  : 0\nStdout     : D:\\Projects\\gpt_crypto_bot\\.runtime\\rl_worker_wrapper_stdout.log\nStderr     : D:\\Projects\\gpt_crypto_bot\\.runtime\\rl_worker_wrapper_stderr.log",
+    "spawned_pid": 0
+  }
+}

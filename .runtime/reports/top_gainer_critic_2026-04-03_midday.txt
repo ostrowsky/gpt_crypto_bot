@@ -1,0 +1,50 @@
+Top-gainer critic for 2026-04-03 (midday)
+Window: 2026-04-03 00:00:00 CEST -> 2026-04-03 12:00:00 CEST
+
+Summary:
+  exchange top in watchlist: 4/15
+  watchlist top bought: 8/15 (53.3%)
+  early captures: 6/15 (40.0%)
+  bot false-positive buys: 25/33
+
+Watchlist top gainers and bot reaction:
+1. AEVOUSDT +16.96% status=bought
+   BUY 10:51 mode=impulse_speed entry=0.0245 capture=44.7%
+   EXIT 11:19 pnl=+5.31%
+2. ALGOUSDT +13.23% status=bought
+   BUY 03:16 mode=impulse_speed entry=0.1117 capture=63.8%
+   EXIT 04:15 pnl=+0.27%
+3. APEUSDT +10.39% status=bought
+   BUY 02:17 mode=breakout entry=0.0832 capture=83.5%
+   EXIT 06:47 pnl=+2.50%
+4. DYDXUSDT +9.56% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 77.7 > 70.0
+5. ORDIUSDT +6.38% status=bought
+   BUY 06:49 mode=impulse_speed entry=2.325 capture=53.5%
+   EXIT 08:16 pnl=+1.46%
+6. BLURUSDT +6.28% status=bought
+   BUY 10:01 mode=retest entry=0.02042 capture=33.3%
+   EXIT 11:47 pnl=+2.35%
+7. SANDUSDT +6.16% status=blocked_rule
+   WHY entry score 38.71 < floor 48.00
+8. SEIUSDT +5.89% status=bought
+   BUY 08:53 mode=impulse_speed entry=0.0537 capture=6.7%
+   EXIT 10:49 pnl=+0.37%
+9. QNTUSDT +5.62% status=bought
+   BUY 00:01 mode=impulse_speed entry=72.54 capture=100.0%
+   EXIT 07:15 pnl=+4.25%
+10. NEARUSDT +5.35% status=blocked_rule
+   WHY 1h impulse_speed guard: RSI 75.9 > 70.0
+11. ZROUSDT +4.69% status=blocked_rule
+   WHY trend quality guard: RSI 72.8 > 68.0
+12. TIAUSDT +4.46% status=bought
+   BUY 10:00 mode=alignment entry=0.2916 capture=44.1%
+   EXIT 10:18 pnl=+0.72%
+13. ARUSDT +4.22% status=no_signal
+14. OPUSDT +4.13% status=blocked_rule
+   WHY entry score 46.07 < floor 48.00
+15. ARBUSDT +3.96% status=blocked_rule
+   WHY clone signal guard: recent similar 15m setups already 4/2 (DOTUSDT, BLURUSDT, XAIUSDT, DOGEUSDT)
+
+Bot bought, but symbol did not finish in watchlist top gainers:
+  1INCHUSDT, ADAUSDT, AVAXUSDT, AXSUSDT, BNTUSDT, C98USDT, CELOUSDT, CHZUSDT, COTIUSDT, CRVUSDT, DOGEUSDT, DOTUSDT, ENSUSDT, FILUSDT, MANAUSDT

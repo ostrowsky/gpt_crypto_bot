@@ -1,0 +1,20 @@
+{
+  "job_id": "20260403T104253Z_a0bde295",
+  "job_type": "run_trade_bot",
+  "state": "completed",
+  "requested_at": "2026-04-03T10:42:53Z",
+  "updated_at": "2026-04-03T10:43:07Z",
+  "request": {
+    "job_id": "20260403T104253Z_a0bde295",
+    "job_type": "run_trade_bot",
+    "requested_at": "2026-04-03T10:42:53Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "spawned_and_confirmed",
+    "exit_code": 0,
+    "output_tail": "{\"wrapper_pid\": 33360, \"python_pid\": 17352, \"started_at\": \"2026-04-03T12:43:06.2583469+02:00\"}",
+    "spawned_pid": 17352
+  }
+}

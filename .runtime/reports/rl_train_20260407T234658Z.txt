@@ -1,0 +1,9 @@
+RL training session 117 at 2026-04-07T23:46:58Z
+model: mlp
+rows_total: 3243
+top1_delta: 0.2961
+critic_rows_total: 5700
+ml_rows_total: 38312
+top_gainer_critic: final 2026-04-07 capture=46.67% early=46.67%
+improvement: ret5_delta=-0.4277 target_return_delta=-0.3168 win_rate_delta=-0.0666
+shadow_top1: avg_target_return_delta=0.2961 ret5_avg_delta=None

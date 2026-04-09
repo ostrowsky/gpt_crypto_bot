@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T190830Z_cb2b4274",
+  "job_type": "run_trade_bot",
+  "state": "failed",
+  "requested_at": "2026-04-01T19:08:30Z",
+  "updated_at": "2026-04-01T19:10:11Z",
+  "request": {
+    "job_id": "20260401T190830Z_cb2b4274",
+    "job_type": "run_trade_bot",
+    "requested_at": "2026-04-01T19:08:30Z"
+  },
+  "error": "",
+  "result": {
+    "ok": false,
+    "summary": "bot_not_confirmed",
+    "exit_code": 1,
+    "output_tail": "WrapperPid : 12320\nPythonPid  : 23400\nStdout     : D:\\Projects\\gpt_crypto_bot\\bot_stdout.log\nStderr     : D:\\Projects\\gpt_crypto_bot\\bot_stderr.log\n\n﻿2026-04-01T21:10:08.7325503+02:00 start_bot_bg: launch requested\n2026-04-01T21:10:08.7670746+02:00 start_bot_bg: runner file written: D:\\Projects\\gpt_crypto_bot\\.runtime\\bot_bg_runner.cmd\n2026-04-01T21:10:08.9245271+02:00 start_bot_bg: wrapper launched pid=12320\n2026-04-01T21:10:11.2030977+02:00 start_bot_bg: bot python confirmed pid=23400\n2026-04-01T21:10:11.3346676+02:00 start_bot_bg: pid file written wrapper=12320 python=23400",
+    "spawned_pid": 0
+  }
+}

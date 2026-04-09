@@ -1,0 +1,33 @@
+RL daily report for 2026-04-06
+Generated: 2026-04-07 00:05:10 CEST
+
+Datasets:
+  critic_dataset: +829 rows today, total 5105
+  ml_dataset: +23 rows today, total 38282
+
+Training:
+  chosen_model: logistic
+  train_rows: 2263 val_rows: 485 test_rows: 485
+  test_ret5_delta: -0.3371
+  test_win_rate_delta: 0.0
+
+Shadow disagreements:
+  total: 667
+  bot_take vs ranker_skip: 14
+  bot_blocked vs ranker_take: 653
+  top symbols: TONUSDT=87, BATUSDT=42, TRUUSDT=41, ATOMUSDT=33, LDOUSDT=32, LQTYUSDT=32, XTZUSDT=30, ALGOUSDT=29, LTCUSDT=26, UNIUSDT=25
+  blocked reasons: =653
+
+Worst bot takes (ranker wanted skip):
+  KSMUSDT 1h retest score=70.5986 proba=0.289767 reason=candidate accepted
+  BTCUSDT 1h alignment score=86.0892 proba=0.366631 reason=candidate accepted
+  LTCUSDT 1h alignment score=62.9097 proba=0.370108 reason=candidate accepted
+  LTCUSDT 1h alignment score=62.2869 proba=0.393069 reason=candidate accepted
+  PAXGUSDT 15m retest score=58.2292 proba=0.411599 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  TRUUSDT 15m impulse_speed score=129.482 proba=0.855305 reason=ranker hard veto: final -7.04 <= -0.75 and TG 0.00 <= 0.20
+  TRUUSDT 15m impulse_speed score=129.482 proba=0.855305 reason=ranker hard veto: final -7.04 <= -0.75 and TG 0.00 <= 0.20
+  TRUUSDT 15m impulse_speed score=129.482 proba=0.855305 reason=ranker hard veto: final -7.04 <= -0.75 and TG 0.00 <= 0.20
+  TRUUSDT 15m impulse_speed score=129.482 proba=0.855305 reason=ranker hard veto: final -7.04 <= -0.75 and TG 0.00 <= 0.20
+  TRUUSDT 15m impulse_speed score=129.482 proba=0.855305 reason=ranker hard veto: final -7.04 <= -0.75 and TG 0.00 <= 0.20

@@ -1,0 +1,9 @@
+RL training session 115 at 2026-04-07T21:37:11Z
+model: catboost
+rows_total: 3242
+top1_delta: 0.7166
+critic_rows_total: 5411
+ml_rows_total: 38303
+top_gainer_critic: midday 2026-04-07 capture=20.0% early=20.0%
+improvement: ret5_delta=-0.3915 target_return_delta=-0.2344 win_rate_delta=-0.0666
+shadow_top1: avg_target_return_delta=0.7166 ret5_avg_delta=None

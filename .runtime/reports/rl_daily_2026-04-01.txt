@@ -1,0 +1,33 @@
+RL daily report for 2026-04-01
+Generated: 2026-04-02 00:05:06 CEST
+
+Datasets:
+  critic_dataset: +975 rows today, total 3173
+  ml_dataset: +3676 rows today, total 37145
+
+Training:
+  chosen_model: mlp
+  train_rows: 2191 val_rows: 469 test_rows: 470
+  test_ret5_delta: -0.3961
+  test_win_rate_delta: -0.15
+
+Shadow disagreements:
+  total: 88
+  bot_take vs ranker_skip: 46
+  bot_blocked vs ranker_take: 42
+  top symbols: AVAXUSDT=12, 1INCHUSDT=12, ADAUSDT=9, CAKEUSDT=8, MANAUSDT=3, PAXGUSDT=3, ILVUSDT=2, CELOUSDT=2, FLUXUSDT=2, POLUSDT=2
+  blocked reasons: =42
+
+Worst bot takes (ranker wanted skip):
+  QIUSDT 15m breakout score=93.4991 proba=0.099833 reason=candidate accepted
+  FETUSDT 1h trend score=85.9613 proba=0.124577 reason=candidate accepted
+  BLURUSDT 15m impulse_speed score=174.5888 proba=0.127956 reason=candidate accepted
+  C98USDT 15m breakout score=75.2372 proba=0.133842 reason=candidate accepted
+  SEIUSDT 15m retest score=66.2435 proba=0.151324 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  ADAUSDT 15m impulse score=68.7216 proba=0.776721 reason=портфель полон: 10/9 позиций
+  1INCHUSDT 15m trend score=58.799 proba=0.398403 reason=trend quality guard: RSI 73.9 > 68.0
+  1INCHUSDT 15m trend score=58.799 proba=0.398403 reason=trend quality guard: RSI 73.9 > 68.0
+  1INCHUSDT 15m trend score=58.799 proba=0.398403 reason=trend quality guard: RSI 73.9 > 68.0
+  1INCHUSDT 15m trend score=58.799 proba=0.398403 reason=trend quality guard: RSI 73.9 > 68.0

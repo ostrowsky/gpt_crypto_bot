@@ -1,0 +1,33 @@
+RL daily report for 2026-04-07
+Generated: 2026-04-08 22:00:08 CEST
+
+Datasets:
+  critic_dataset: +413 rows today, total 5978
+  ml_dataset: +22 rows today, total 38334
+
+Training:
+  chosen_model: mlp
+  train_rows: 2278 val_rows: 488 test_rows: 489
+  test_ret5_delta: -0.4365
+  test_win_rate_delta: -0.0588
+
+Shadow disagreements:
+  total: 517
+  bot_take vs ranker_skip: 10
+  bot_blocked vs ranker_take: 507
+  top symbols: SOLUSDT=58, DOGEUSDT=58, WIFUSDT=42, FLOKIUSDT=21, BONKUSDT=20, EGLDUSDT=19, ZRXUSDT=18, ADAUSDT=18, AEVOUSDT=17, FETUSDT=16
+  blocked reasons: =507
+
+Worst bot takes (ranker wanted skip):
+  CELOUSDT 15m breakout score=77.6734 proba=0.288762 reason=candidate accepted
+  CAKEUSDT 15m breakout score=72.2567 proba=0.322591 reason=candidate accepted
+  ARBUSDT 15m retest score=67.9195 proba=0.333581 reason=candidate accepted
+  FETUSDT 15m alignment score=81.3667 proba=0.342612 reason=candidate accepted
+  APEUSDT 15m retest score=59.0285 proba=0.357026 reason=candidate accepted
+
+Missed bot blocks (ranker wanted take):
+  HBARUSDT 15m breakout score=86.8596 proba=0.706906 reason=open cluster cap: 15m_short_bounce already 2/2 (ENSUSDT, DOTUSDT)
+  HBARUSDT 15m breakout score=86.8596 proba=0.706906 reason=open cluster cap: 15m_short_bounce already 2/2 (ENSUSDT, DOTUSDT)
+  HBARUSDT 15m breakout score=86.8596 proba=0.706906 reason=open cluster cap: 15m_short_bounce already 2/2 (ENSUSDT, DOTUSDT)
+  CHZUSDT 15m trend score=50.2431 proba=0.686307 reason=trend quality guard: RSI 73.8 > 68.0
+  CHZUSDT 15m trend score=50.2431 proba=0.686307 reason=trend quality guard: RSI 73.8 > 68.0

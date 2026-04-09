@@ -1,0 +1,9 @@
+RL training session 40 at 2026-04-04T14:21:15Z
+model: logistic
+rows_total: 3215
+top1_delta: 0.3126
+critic_rows_total: 3921
+ml_rows_total: 38251
+top_gainer_critic: midday 2026-04-04 capture=6.67% early=0.0%
+improvement: ret5_delta=-0.5134 target_return_delta=-0.3262 win_rate_delta=-0.1072
+shadow_top1: avg_target_return_delta=0.3126 ret5_avg_delta=None

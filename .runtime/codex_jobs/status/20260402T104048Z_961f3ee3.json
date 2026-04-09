@@ -1,0 +1,20 @@
+{
+  "job_id": "20260402T104048Z_961f3ee3",
+  "job_type": "stop_rl_headless",
+  "state": "completed",
+  "requested_at": "2026-04-02T10:40:48Z",
+  "updated_at": "2026-04-02T10:40:51Z",
+  "request": {
+    "job_id": "20260402T104048Z_961f3ee3",
+    "job_type": "stop_rl_headless",
+    "requested_at": "2026-04-02T10:40:48Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "exit=0",
+    "exit_code": 0,
+    "output_tail": "Stopped RL worker PIDs: 31616, 27980",
+    "spawned_pid": 0
+  }
+}

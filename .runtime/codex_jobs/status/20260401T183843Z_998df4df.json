@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T183843Z_998df4df",
+  "job_type": "run_trade_bot",
+  "state": "completed",
+  "requested_at": "2026-04-01T18:38:43Z",
+  "updated_at": "2026-04-01T18:38:45Z",
+  "request": {
+    "job_id": "20260401T183843Z_998df4df",
+    "job_type": "run_trade_bot",
+    "requested_at": "2026-04-01T18:38:43Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "spawned",
+    "exit_code": 0,
+    "output_tail": "",
+    "spawned_pid": 10532
+  }
+}

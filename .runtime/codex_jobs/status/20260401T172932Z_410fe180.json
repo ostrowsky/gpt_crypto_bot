@@ -1,0 +1,20 @@
+{
+  "job_id": "20260401T172932Z_410fe180",
+  "job_type": "run_rl_headless",
+  "state": "completed",
+  "requested_at": "2026-04-01T17:29:32Z",
+  "updated_at": "2026-04-01T17:29:33Z",
+  "request": {
+    "job_id": "20260401T172932Z_410fe180",
+    "job_type": "run_rl_headless",
+    "requested_at": "2026-04-01T17:29:32Z"
+  },
+  "error": "",
+  "result": {
+    "ok": true,
+    "summary": "spawned",
+    "exit_code": 0,
+    "output_tail": "",
+    "spawned_pid": 18676
+  }
+}

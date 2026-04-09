@@ -1,0 +1,615 @@
+{
+  "target_day_local": "2026-03-30",
+  "generated_at_local": "2026-03-31 00:05:07 CEST",
+  "datasets": {
+    "critic_rows_total": 1800,
+    "critic_rows_day": 261,
+    "ml_rows_total": 28985,
+    "ml_rows_day": 2053
+  },
+  "worker_status": {
+    "worker": {
+      "started_at": "2026-03-30T12:38:45Z",
+      "last_heartbeat": "2026-03-30T15:04:18Z",
+      "mode": "headless_rl"
+    },
+    "collector": {
+      "running": true,
+      "last_cycle_started_at": "2026-03-30T13:45:05Z",
+      "last_cycle_finished_at": "2026-03-30T15:04:15Z",
+      "last_cycle_stats": {
+        "ok": 206,
+        "fail": 0,
+        "total": 206,
+        "bull": true
+      },
+      "last_error": ""
+    },
+    "training": {
+      "interval_sec": 3600,
+      "min_rows": 500,
+      "min_new_rows": 50,
+      "runs_total": 3,
+      "runs_ok": 3,
+      "runs_failed": 0,
+      "last_started_at": "2026-03-30T14:40:51Z",
+      "last_finished_at": "2026-03-30T14:41:48Z",
+      "last_error": "",
+      "last_rows_total": 1644,
+      "last_dataset_mtime": 1774881581.466467,
+      "last_model_name": "logistic",
+      "last_top1_delta": 0.1792,
+      "model_file": "D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker.json",
+      "report_file": "D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker_report.json",
+      "shadow_file": "D:\\Projects\\gpt_crypto_bot\\files\\ml_candidate_ranker_shadow_report.json"
+    },
+    "datasets": {
+      "ml_dataset_rows": 27916,
+      "critic_dataset": {
+        "path": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+        "exists": true,
+        "rows_total": 1753,
+        "rows_last_24h": 214,
+        "size_bytes": 5742623,
+        "last_write_time": 1774883055.2498858,
+        "labeled_rows": 1711,
+        "trade_taken_rows": 1554,
+        "trade_outcome_rows": 215,
+        "actions": {
+          "take": 1554,
+          "candidate": 108,
+          "blocked": 91
+        },
+        "signal_types": {
+          "impulse_speed": 237,
+          "alignment": 757,
+          "trend": 334,
+          "breakout": 116,
+          "strong_trend": 25,
+          "retest": 277,
+          "impulse": 7
+        }
+      }
+    }
+  },
+  "train_report": {
+    "dataset_file": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+    "rows_total": 1644,
+    "train_rows": 1150,
+    "val_rows": 247,
+    "test_rows": 247,
+    "feature_count": 76,
+    "positive_ret_threshold": 0.0,
+    "chosen_model": "logistic",
+    "validation": {
+      "logistic": {
+        "threshold": 0.8,
+        "accuracy": 0.6478,
+        "precision": 0.4507,
+        "recall": 0.4,
+        "f1": 0.4238,
+        "coverage": 0.2874,
+        "selected_count": 71,
+        "selected_ret5_avg": 0.0879,
+        "selected_win_rate": 0.4507,
+        "brier": 0.4015,
+        "auc": 0.4838
+      },
+      "mlp": {
+        "threshold": 0.5,
+        "accuracy": 0.5992,
+        "precision": 0.1935,
+        "recall": 0.075,
+        "f1": 0.1081,
+        "coverage": 0.1255,
+        "selected_count": 31,
+        "selected_ret5_avg": -0.2206,
+        "selected_win_rate": 0.1935,
+        "brier": 0.2398,
+        "auc": 0.4398
+      }
+    },
+    "test_baseline_candidates": {
+      "threshold": 0.5,
+      "accuracy": 0.3765,
+      "precision": 0.3765,
+      "recall": 1.0,
+      "f1": 0.5471,
+      "coverage": 1.0,
+      "selected_count": 247,
+      "selected_ret5_avg": -0.4277,
+      "selected_win_rate": 0.3765,
+      "brier": 0.6235,
+      "auc": 0.4906
+    },
+    "test_ranker": {
+      "threshold": 0.8,
+      "accuracy": 0.3968,
+      "precision": 0.3843,
+      "recall": 1.0,
+      "f1": 0.5552,
+      "coverage": 0.9798,
+      "selected_count": 242,
+      "selected_ret5_avg": -0.4211,
+      "selected_win_rate": 0.3843,
+      "brier": 0.5616,
+      "auc": 0.5767
+    },
+    "improvement_delta": {
+      "ret5_avg_delta": 0.0066,
+      "win_rate_delta": 0.0078,
+      "coverage_delta": -0.0202
+    },
+    "top_feature_importance": [
+      {
+        "feature": "seq_trend_slope",
+        "importance": 0.0182
+      },
+      {
+        "feature": "hour_sin",
+        "importance": 0.0097
+      },
+      {
+        "feature": "seq_tail_rsi",
+        "importance": 0.0078
+      },
+      {
+        "feature": "seq_mean_macd_hist_norm",
+        "importance": 0.0073
+      },
+      {
+        "feature": "seq_trend_adx",
+        "importance": 0.0068
+      },
+      {
+        "feature": "seq_mean_rsi",
+        "importance": 0.0065
+      },
+      {
+        "feature": "daily_range",
+        "importance": 0.005
+      },
+      {
+        "feature": "ema20_vs_ema50",
+        "importance": 0.005
+      },
+      {
+        "feature": "signal_retest",
+        "importance": 0.005
+      },
+      {
+        "feature": "seq_tail_close_norm",
+        "importance": 0.0049
+      },
+      {
+        "feature": "dow_cos",
+        "importance": 0.0044
+      },
+      {
+        "feature": "seq_trend_macd_hist_norm",
+        "importance": 0.0035
+      }
+    ],
+    "suggestions": [
+      "Использовать ranker сначала как quality-score bonus для top-N кандидатов, а не как hard-block движок.",
+      "Собирать disagreement samples: bot_take vs ranker_skip и bot_skip vs ranker_take.",
+      "Отдельно обучать future exit/hold model, не смешивая её с entry ranker."
+    ]
+  },
+  "shadow_report": {
+    "dataset_file": "D:\\Projects\\gpt_crypto_bot\\files\\critic_dataset.jsonl",
+    "model_name": "logistic",
+    "rows_total": 1644,
+    "grouped_bar_competitions": 208,
+    "data_health": {
+      "action_counts": {
+        "take": 1553,
+        "candidate": 23,
+        "blocked": 68
+      },
+      "signal_counts": {
+        "impulse_speed": 220,
+        "alignment": 671,
+        "trend": 328,
+        "breakout": 116,
+        "strong_trend": 25,
+        "retest": 277,
+        "impulse": 7
+      },
+      "blocked_like_rows": 91
+    },
+    "top_n": [
+      {
+        "top_n": 1,
+        "eligible_groups": 208,
+        "baseline": {
+          "count": 208,
+          "avg_target_return": -0.2948,
+          "avg_ret5": -0.2733,
+          "avg_exit_pnl": -0.3294,
+          "win_rate": 0.4519
+        },
+        "ranker": {
+          "count": 208,
+          "avg_target_return": -0.1156,
+          "avg_ret5": -0.0801,
+          "avg_exit_pnl": -0.327,
+          "win_rate": 0.4615
+        },
+        "delta": {
+          "avg_target_return": 0.1792,
+          "avg_ret5": 0.1932,
+          "win_rate": 0.0096
+        },
+        "overlap_ratio": 0.3269
+      },
+      {
+        "top_n": 3,
+        "eligible_groups": 152,
+        "baseline": {
+          "count": 456,
+          "avg_target_return": -0.146,
+          "avg_ret5": -0.1492,
+          "avg_exit_pnl": -0.1421,
+          "win_rate": 0.4364
+        },
+        "ranker": {
+          "count": 456,
+          "avg_target_return": -0.0935,
+          "avg_ret5": -0.0939,
+          "avg_exit_pnl": -0.0852,
+          "win_rate": 0.432
+        },
+        "delta": {
+          "avg_target_return": 0.0525,
+          "avg_ret5": 0.0553,
+          "win_rate": -0.0044
+        },
+        "overlap_ratio": 0.5241
+      },
+      {
+        "top_n": 5,
+        "eligible_groups": 100,
+        "baseline": {
+          "count": 500,
+          "avg_target_return": -0.0816,
+          "avg_ret5": -0.0805,
+          "avg_exit_pnl": -0.1099,
+          "win_rate": 0.448
+        },
+        "ranker": {
+          "count": 500,
+          "avg_target_return": -0.0286,
+          "avg_ret5": -0.0265,
+          "avg_exit_pnl": -0.0018,
+          "win_rate": 0.468
+        },
+        "delta": {
+          "avg_target_return": 0.053,
+          "avg_ret5": 0.054,
+          "win_rate": 0.02
+        },
+        "overlap_ratio": 0.562
+      }
+    ],
+    "top1_head_to_head": {
+      "wins": 78,
+      "losses": 59,
+      "ties": 71,
+      "eligible_groups": 208
+    },
+    "calibration": [
+      {
+        "bucket": 1,
+        "rows": 328,
+        "proba_min": 0.7881,
+        "proba_max": 0.9985,
+        "avg_target_return": -0.2694,
+        "win_rate": 0.4055
+      },
+      {
+        "bucket": 2,
+        "rows": 328,
+        "proba_min": 0.569,
+        "proba_max": 0.7871,
+        "avg_target_return": 0.1275,
+        "win_rate": 0.5549
+      },
+      {
+        "bucket": 3,
+        "rows": 328,
+        "proba_min": 0.4642,
+        "proba_max": 0.5686,
+        "avg_target_return": 0.0358,
+        "win_rate": 0.4848
+      },
+      {
+        "bucket": 4,
+        "rows": 328,
+        "proba_min": 0.3457,
+        "proba_max": 0.464,
+        "avg_target_return": -0.1503,
+        "win_rate": 0.378
+      },
+      {
+        "bucket": 5,
+        "rows": 332,
+        "proba_min": 0.0705,
+        "proba_max": 0.3456,
+        "avg_target_return": -0.2998,
+        "win_rate": 0.262
+      }
+    ],
+    "warnings": []
+  },
+  "ranker_shadow": {
+    "events_total": 25,
+    "bot_take_ranker_skip": 22,
+    "bot_blocked_ranker_take": 3,
+    "top_symbols": [
+      [
+        "SHIBUSDT",
+        2
+      ],
+      [
+        "BCHUSDT",
+        2
+      ],
+      [
+        "XAIUSDT",
+        1
+      ],
+      [
+        "EGLDUSDT",
+        1
+      ],
+      [
+        "FLUXUSDT",
+        1
+      ],
+      [
+        "LRCUSDT",
+        1
+      ],
+      [
+        "SUSHIUSDT",
+        1
+      ],
+      [
+        "UNIUSDT",
+        1
+      ],
+      [
+        "PYRUSDT",
+        1
+      ],
+      [
+        "OPUSDT",
+        1
+      ]
+    ],
+    "top_modes": [
+      [
+        "alignment",
+        8
+      ],
+      [
+        "retest",
+        7
+      ],
+      [
+        "trend",
+        5
+      ],
+      [
+        "impulse_speed",
+        5
+      ]
+    ],
+    "blocked_reason_counts": [
+      [
+        "",
+        3
+      ]
+    ],
+    "worst_bot_takes": [
+      {
+        "event": "ranker_shadow",
+        "sym": "SUSHIUSDT",
+        "tf": "1h",
+        "mode": "impulse_speed",
+        "price": 0.1958,
+        "candidate_score": 103.9723,
+        "score_floor": 56.0,
+        "ranker_proba": 0.001029,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T10:01:27Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "SHIBUSDT",
+        "tf": "1h",
+        "mode": "trend",
+        "price": 6.11e-06,
+        "candidate_score": 81.4226,
+        "score_floor": 56.0,
+        "ranker_proba": 0.001033,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T09:36:50Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "EGLDUSDT",
+        "tf": "1h",
+        "mode": "retest",
+        "price": 3.84,
+        "candidate_score": 71.1894,
+        "score_floor": 56.0,
+        "ranker_proba": 0.001041,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T09:36:49Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "UNIUSDT",
+        "tf": "1h",
+        "mode": "impulse_speed",
+        "price": 3.512,
+        "candidate_score": 100.9751,
+        "score_floor": 56.0,
+        "ranker_proba": 0.001131,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T10:01:29Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "FLUXUSDT",
+        "tf": "1h",
+        "mode": "retest",
+        "price": 0.0515,
+        "candidate_score": 80.3268,
+        "score_floor": 56.0,
+        "ranker_proba": 0.001716,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T09:36:53Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "PYRUSDT",
+        "tf": "15m",
+        "mode": "impulse_speed",
+        "price": 0.264,
+        "candidate_score": 72.9327,
+        "score_floor": 48.0,
+        "ranker_proba": 0.001779,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T10:05:47Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "OXTUSDT",
+        "tf": "15m",
+        "mode": "impulse_speed",
+        "price": 0.0145,
+        "candidate_score": 77.3461,
+        "score_floor": 48.0,
+        "ranker_proba": 0.003014,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T11:47:36Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "OPUSDT",
+        "tf": "1h",
+        "mode": "alignment",
+        "price": 0.1068,
+        "candidate_score": 61.1759,
+        "score_floor": 56.0,
+        "ranker_proba": 0.004405,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T10:11:09Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "LRCUSDT",
+        "tf": "15m",
+        "mode": "retest",
+        "price": 0.02199,
+        "candidate_score": 67.4141,
+        "score_floor": 48.0,
+        "ranker_proba": 0.005192,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T10:01:26Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "XAIUSDT",
+        "tf": "15m",
+        "mode": "alignment",
+        "price": 0.00923,
+        "candidate_score": 61.7187,
+        "score_floor": 48.0,
+        "ranker_proba": 0.013001,
+        "ranker_threshold": 0.55,
+        "ranker_take": false,
+        "bot_action": "take",
+        "reason": "candidate accepted",
+        "ts": "2026-03-30T09:36:48Z"
+      }
+    ],
+    "missed_bot_blocks": [
+      {
+        "event": "ranker_shadow",
+        "sym": "SHIBUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 6.12e-06,
+        "candidate_score": 54.5721,
+        "score_floor": 48.0,
+        "ranker_proba": 0.843304,
+        "ranker_threshold": 0.8,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "портфель полон: 9/9 позиций",
+        "ts": "2026-03-30T17:01:01Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "BCHUSDT",
+        "tf": "15m",
+        "mode": "alignment",
+        "price": 466.2,
+        "candidate_score": 68.0676,
+        "score_floor": 48.0,
+        "ranker_proba": 0.808771,
+        "ranker_threshold": 0.8,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "портфель полон: 9/9 позиций",
+        "ts": "2026-03-30T16:56:46Z"
+      },
+      {
+        "event": "ranker_shadow",
+        "sym": "QNTUSDT",
+        "tf": "15m",
+        "mode": "trend",
+        "price": 71.3,
+        "candidate_score": 48.1074,
+        "score_floor": 48.0,
+        "ranker_proba": 0.80259,
+        "ranker_threshold": 0.8,
+        "ranker_take": true,
+        "bot_action": "blocked",
+        "reason": "портфель полон: 9/9 позиций",
+        "ts": "2026-03-30T16:56:47Z"
+      }
+    ]
+  }
+}
