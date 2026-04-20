@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 """
@@ -19,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import numpy as np
@@ -39,6 +41,16 @@ import critic_dataset
 import ml_dataset
 
 log = logging.getLogger(__name__)
+
+
+def _local_tz():
+    try:
+        return ZoneInfo("Europe/Budapest")
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+LOCAL_TZ = _local_tz()
 _ML_MODEL_FILE = Path(__file__).resolve().parent / "ml_signal_model.json"
 _ML_MODEL_CACHE: Optional[dict] = None
 _RANKER_MODEL_FILE = Path(__file__).resolve().parent / str(
@@ -909,7 +921,7 @@ def _near_miss_candidate_snapshot(
         and ema_sep_pct >= float(getattr(config, "NEAR_MISS_ALIGNMENT_EMA_SEP_MIN", -0.05)),
     )
     trend_mode = get_entry_mode(feat, i)
-    if trend_mode not in {"trend", "strong_trend", "impulse_speed"}:
+    if trend_mode not in {"trend", "impulse_speed", "strong_trend"}:
         trend_mode = "trend"
     _append_candidate(
         trend_mode,
@@ -1064,7 +1076,7 @@ def _time_block_bypass_allowed(
     elif tf == "1h":
         if not getattr(config, "TIME_BLOCK_BYPASS_1H_ENABLED", False):
             return False
-        bypass_modes = tuple(getattr(config, "TIME_BLOCK_BYPASS_1H_MODES", ("alignment", "trend", "strong_trend", "impulse_speed")))
+        bypass_modes = tuple(getattr(config, "TIME_BLOCK_BYPASS_1H_MODES", ("alignment", "trend", "impulse_speed", "strong_trend")))
         if mode not in bypass_modes and not continuation_profile:
             return False
         min_score = float(getattr(config, "TIME_BLOCK_BYPASS_1H_SCORE_MIN", 60.0))
@@ -1090,7 +1102,7 @@ def _time_block_1h_continuation_profile(
         getattr(
             config,
             "TIME_BLOCK_BYPASS_1H_CONTINUATION_MODES",
-            ("alignment", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("alignment", "trend", "impulse_speed", "strong_trend", "impulse"),
         )
     )
     if mode not in allowed_modes:
@@ -1152,7 +1164,7 @@ def _time_block_1h_prebypass_allowed(
         getattr(
             config,
             "TIME_BLOCK_BYPASS_1H_PREBYPASS_MODES",
-            ("alignment", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("alignment", "trend", "impulse_speed", "strong_trend", "impulse"),
         )
     )
     if mode not in allowed_modes or not continuation_profile:
@@ -1355,6 +1367,131 @@ def _late_impulse_speed_rotation_reason(
     return None
 
 
+def _top_gainer_chase_guard_reason(
+    *,
+    tf: str,
+    mode: str,
+    rsi: float,
+    daily_range: float,
+) -> Optional[str]:
+    if not getattr(config, "TOP_GAINER_CHASE_GUARD_ENABLED", True):
+        return None
+    allowed_tf = tuple(str(x) for x in getattr(config, "TOP_GAINER_CHASE_GUARD_TIMEFRAMES", ("15m", "1h")))
+    if tf not in allowed_tf:
+        return None
+    allowed_modes = tuple(
+        str(x)
+        for x in getattr(
+            config,
+            "TOP_GAINER_CHASE_GUARD_MODES",
+            ("trend", "strong_trend", "impulse_speed", "impulse"),
+        )
+    )
+    if mode not in allowed_modes:
+        return None
+    range_max = float(
+        getattr(
+            config,
+            "TOP_GAINER_CHASE_GUARD_MAX_DAILY_RANGE_PCT",
+            getattr(config, "AGENT_MAX_DAILY_RANGE_PCT", 14.0),
+        )
+    )
+    if np.isfinite(daily_range) and daily_range > range_max:
+        return f"top-gainer chase guard: daily_range {daily_range:.2f}% > {range_max:.2f}%"
+    rsi_max = float(getattr(config, "TOP_GAINER_CHASE_GUARD_MAX_RSI", 76.0))
+    rsi_range_min = float(getattr(config, "TOP_GAINER_CHASE_GUARD_RSI_RANGE_MIN_PCT", 8.0))
+    if (
+        np.isfinite(rsi)
+        and np.isfinite(daily_range)
+        and rsi > rsi_max
+        and daily_range >= rsi_range_min
+    ):
+        return (
+            f"top-gainer chase guard: RSI {rsi:.1f} > {rsi_max:.1f} "
+            f"with daily_range {daily_range:.2f}% >= {rsi_range_min:.2f}%"
+        )
+    return None
+
+
+def _intraday_change_pct_from_data(data: dict, i: int) -> float:
+    try:
+        t_arr = data.get("t")
+        c_arr = data.get("c")
+        if t_arr is None or c_arr is None or i <= 0:
+            return 0.0
+        ts = int(t_arr[i])
+        day_start = (ts // 86_400_000) * 86_400_000
+        start_idx = 0
+        for j in range(i, -1, -1):
+            if int(t_arr[j]) < day_start:
+                start_idx = min(i, j + 1)
+                break
+        base = float(c_arr[start_idx])
+        current = float(c_arr[i])
+        if base <= 0 or not np.isfinite(base) or not np.isfinite(current):
+            return 0.0
+        return (current / base - 1.0) * 100.0
+    except Exception:
+        return 0.0
+
+
+def _top_gainer_objective_gate_reason(
+    *,
+    tf: str,
+    mode: str,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    candidate_score: float,
+    today_confirmed: bool,
+) -> Optional[str]:
+    if not getattr(config, "TOP_GAINER_OBJECTIVE_GATE_ENABLED", False):
+        return None
+    allowed_modes = tuple(
+        str(x)
+        for x in getattr(
+            config,
+            "TOP_GAINER_OBJECTIVE_GATE_MODES",
+            ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse"),
+        )
+    )
+    if allowed_modes and mode not in allowed_modes:
+        return None
+    if (
+        today_confirmed
+        and getattr(config, "TOP_GAINER_OBJECTIVE_ALLOW_CONFIRMED_LEADER", True)
+    ):
+        return None
+
+    min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_INTRADAY_CHANGE_PCT", 0.35))
+    if mode == "retest":
+        min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_RETEST_MIN_INTRADAY_CHANGE_PCT", 0.75))
+    elif mode in ("trend", "strong_trend", "impulse_speed", "impulse"):
+        min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_MOMENTUM_MIN_INTRADAY_CHANGE_PCT", 1.0))
+
+    strong_score = candidate_score >= float(getattr(config, "TOP_GAINER_OBJECTIVE_STRONG_SCORE_BYPASS", 115.0))
+    strong_adx = adx >= float(getattr(config, "TOP_GAINER_OBJECTIVE_STRONG_ADX_BYPASS", 32.0))
+    if strong_score and strong_adx and intraday_change_pct >= 0.0:
+        return None
+
+    if intraday_change_pct < min_change:
+        return (
+            f"top-gainer objective gate: intraday {intraday_change_pct:+.2f}% "
+            f"< {min_change:.2f}%"
+        )
+    min_range = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_DAILY_RANGE_PCT", 0.90))
+    if daily_range < min_range:
+        return f"top-gainer objective gate: daily_range {daily_range:.2f}% < {min_range:.2f}%"
+    min_vol = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_VOL_X", 1.20))
+    if vol_x < min_vol:
+        return f"top-gainer objective gate: vol_x {vol_x:.2f} < {min_vol:.2f}"
+    min_adx = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_ADX", 20.0))
+    if adx < min_adx:
+        return f"top-gainer objective gate: ADX {adx:.1f} < {min_adx:.1f}"
+    return None
+
+
 def _continuation_profit_lock_active(
     *,
     tf: str,
@@ -1373,7 +1510,7 @@ def _continuation_profit_lock_active(
         getattr(
             config,
             "CONTINUATION_PROFIT_LOCK_MODES",
-            ("trend", "alignment", "strong_trend", "impulse_speed", "impulse"),
+            ("trend", "alignment", "impulse_speed", "strong_trend", "impulse"),
         )
     )
     if mode not in allowed_modes:
@@ -1408,7 +1545,7 @@ def _continuation_micro_exit_reason(
         getattr(
             config,
             "CONTINUATION_MICRO_EXIT_MODES",
-            ("trend", "alignment", "strong_trend", "impulse_speed", "impulse"),
+            ("trend", "alignment", "impulse_speed", "strong_trend", "impulse"),
         )
     )
     if mode not in allowed_modes:
@@ -1862,6 +1999,55 @@ def _forecast_return_score_bonus(forecast_return_pct: float) -> float:
     if forecast_return_pct >= 0:
         return forecast_return_pct * float(getattr(config, "FORECAST_RETURN_SCORE_WEIGHT", 18.0))
     return forecast_return_pct * float(getattr(config, "FORECAST_RETURN_NEGATIVE_WEIGHT", 10.0))
+
+
+async def _four_h_context_score(session: aiohttp.ClientSession, sym: str) -> tuple[float, str]:
+    if not bool(getattr(config, "FOUR_H_CONTEXT_SCORE_ENABLED", True)):
+        return 0.0, "disabled"
+    try:
+        data = await fetch_klines(session, sym, "4h", limit=120)
+        c = data["c"].astype(float)
+        if len(c) < 60:
+            return 0.0, "4h_insufficient"
+        feat = compute_features(data["o"], data["h"], data["l"], c, data["v"])
+        i = len(c) - 2
+        price = float(c[i])
+        ema20 = float(feat["ema_fast"][i]) if np.isfinite(feat["ema_fast"][i]) else 0.0
+        ema50 = float(feat["ema_slow"][i]) if np.isfinite(feat["ema_slow"][i]) else 0.0
+        slope = float(feat["slope"][i]) if np.isfinite(feat["slope"][i]) else 0.0
+        rsi = float(feat["rsi"][i]) if np.isfinite(feat["rsi"][i]) else 50.0
+        vol_x = float(feat["vol_x"][i]) if np.isfinite(feat["vol_x"][i]) else 0.0
+        macd_hist = float(feat["macd_hist"][i]) if np.isfinite(feat["macd_hist"][i]) else 0.0
+        greens = sum(1 for j in range(max(0, i - 2), i + 1) if float(data["c"][j]) > float(data["o"][j]))
+
+        score = 0.0
+        score += 2.0 if price > ema20 > 0 else -1.5
+        score += 1.2 if price > ema50 > 0 else -0.8
+        score += 1.3 if ema20 > ema50 > 0 else -0.8
+        score += max(-3.0, min(3.0, slope * 1.6))
+        score += 0.8 * greens
+        score += 1.0 if macd_hist > 0 else -1.0
+        if 45.0 <= rsi <= 68.0:
+            score += 0.8
+        elif rsi < 42.0 or rsi > 75.0:
+            score -= 0.8
+        score += 0.5 if vol_x >= 0.8 else -0.5
+        score = max(
+            float(getattr(config, "FOUR_H_CONTEXT_MAX_PENALTY", -6.0)),
+            min(float(getattr(config, "FOUR_H_CONTEXT_MAX_BONUS", 8.0)), score),
+        )
+        if score >= 4.0:
+            label = "4h_bull_context"
+        elif score >= 1.0:
+            label = "4h_recovery_context"
+        elif score <= -2.0:
+            label = "4h_weak_context"
+        else:
+            label = "4h_neutral_context"
+        return round(score, 4), label
+    except Exception as exc:
+        log.debug("4h context score failed for %s: %s", sym, exc)
+        return 0.0, "4h_error"
 
 
 def _entry_score_floor(tf: str) -> float:
@@ -2352,7 +2538,7 @@ def _mtf_relaxed_1h_candidate_ok(
         getattr(
             config,
             "MTF_1H_CONTINUATION_RELAX_MODES",
-            ("alignment", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("alignment", "trend", "impulse_speed", "strong_trend", "impulse"),
         )
     ):
         return False
@@ -2677,6 +2863,8 @@ def _pos_to_dict(pos: "OpenPosition") -> dict:
         "ranker_top_gainer_prob": getattr(pos, "ranker_top_gainer_prob", 0.0),
         "ranker_capture_ratio_pred": getattr(pos, "ranker_capture_ratio_pred", 0.0),
         "leader_continuation": getattr(pos, "leader_continuation", False),
+        "four_h_context_score": getattr(pos, "four_h_context_score", 0.0),
+        "four_h_context_label": getattr(pos, "four_h_context_label", ""),
         "prediction_horizons": list(
             getattr(pos, "prediction_horizons", ()) or _position_forward_horizons(pos.tf, pos.signal_mode)
         ),
@@ -2714,6 +2902,8 @@ def _pos_from_dict(d: dict) -> "OpenPosition":
         ranker_top_gainer_prob=d.get("ranker_top_gainer_prob", 0.0),
         ranker_capture_ratio_pred=d.get("ranker_capture_ratio_pred", 0.0),
         leader_continuation=d.get("leader_continuation", False),
+        four_h_context_score=d.get("four_h_context_score", 0.0),
+        four_h_context_label=d.get("four_h_context_label", ""),
         prediction_horizons=prediction_horizons,
         predictions={int(k): v for k, v in d.get("predictions", {}).items()},
         bars_elapsed=d.get("bars_elapsed", 0), ml_record_id=d.get("ml_record_id", ""),
@@ -2737,6 +2927,59 @@ def save_positions(positions: dict) -> None:
     except Exception as e:
         log.warning("save_positions failed: %s", e)
 
+
+def _local_day_key(ts_ms: int) -> str:
+    if ts_ms <= 0:
+        return ""
+    return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
+
+
+def _current_local_day_key() -> str:
+    return datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
+
+
+def _position_priority(pos: "OpenPosition") -> tuple[float, float, float, float]:
+    prediction_score = 0.0
+    for value in (getattr(pos, "predictions", {}) or {}).values():
+        if value is True:
+            prediction_score += 1.0
+        elif value is False:
+            prediction_score -= 1.0
+    return (
+        float(getattr(pos, "ranker_final_score", 0.0) or 0.0),
+        float(getattr(pos, "candidate_score_at_entry", 0.0) or 0.0),
+        prediction_score,
+        float(getattr(pos, "entry_slope", 0.0) or 0.0),
+    )
+
+
+def _trim_restored_positions(positions: dict) -> tuple[dict, list[str]]:
+    current_day = _current_local_day_key()
+    removed: list[str] = []
+    kept = {}
+    for sym, pos in positions.items():
+        if _local_day_key(int(getattr(pos, "entry_ts", 0) or 0)) != current_day:
+            removed.append(f"{sym}: stale intraday position")
+            continue
+        if (
+            str(getattr(pos, "signal_mode", "")) == "alignment"
+            and not bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False))
+        ):
+            removed.append(f"{sym}: alignment entries disabled")
+            continue
+        kept[sym] = pos
+
+    max_pos = int(getattr(config, "MAX_OPEN_POSITIONS", 6))
+    if max_pos > 0 and len(kept) > max_pos:
+        ranked = sorted(kept.items(), key=lambda item: _position_priority(item[1]), reverse=True)
+        keep_symbols = {sym for sym, _ in ranked[:max_pos]}
+        for sym in list(kept):
+            if sym not in keep_symbols:
+                removed.append(f"{sym}: restored portfolio over limit {len(kept)}/{max_pos}")
+                del kept[sym]
+    return kept, removed
+
+
 def load_positions() -> dict:
     """Восстанавливает позиции при старте бота."""
     path = getattr(config, "POSITIONS_FILE", "positions.json")
@@ -2750,7 +2993,10 @@ def load_positions() -> dict:
         for pos in positions.values():
             if _maybe_backfill_position_metadata(pos):
                 backfilled = True
-        if backfilled:
+        positions, removed = _trim_restored_positions(positions)
+        if removed:
+            log.info("Dropped restored position(s): %s", removed)
+        if backfilled or removed:
             save_positions(positions)
         log.info("Restored %d position(s) from %s: %s",
                  len(positions), path, list(positions.keys()))
@@ -2940,6 +3186,8 @@ class OpenPosition:
     ranker_top_gainer_prob: float = 0.0
     ranker_capture_ratio_pred: float = 0.0
     leader_continuation: bool = False
+    four_h_context_score: float = 0.0
+    four_h_context_label: str = ""
 
     # Forward prediction tracking: {horizon_bars: True/False/None}
     prediction_horizons: tuple[int, ...] = field(default_factory=tuple)
@@ -3046,10 +3294,26 @@ def _signal_cluster_bucket(tf: str, mode: str) -> str:
         getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES", ("impulse_speed",))
     ):
         return "15m_impulse"
+    if tf == "15m" and mode in tuple(
+        getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MODES", ("trend", "strong_trend", "impulse"))
+    ):
+        return "15m_momentum"
+    if tf == "15m" and mode in tuple(
+        getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MODES", ("alignment",))
+    ):
+        return "15m_alignment"
     if tf == "1h" and mode in tuple(
         getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES", ("retest",))
     ):
         return "1h_retest"
+    if tf == "1h" and mode in tuple(
+        getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MODES", ("trend", "strong_trend", "impulse_speed", "impulse"))
+    ):
+        return "1h_momentum"
+    if tf == "1h" and mode in tuple(
+        getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MODES", ("alignment",))
+    ):
+        return "1h_alignment"
     return ""
 
 
@@ -3070,8 +3334,16 @@ def _open_signal_cluster_cap_reason(
         max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX", 2)))
     elif bucket == "15m_impulse":
         max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX", 2)))
+    elif bucket == "15m_momentum":
+        max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MAX", 2)))
+    elif bucket == "15m_alignment":
+        max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MAX", 2)))
     elif bucket == "1h_retest":
-        max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX", 1)))
+        max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX", 2)))
+    elif bucket == "1h_momentum":
+        max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MAX", 2)))
+    elif bucket == "1h_alignment":
+        max_open = max(1, int(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MAX", 2)))
     else:
         return ""
 
@@ -3098,7 +3370,8 @@ def _signal_snapshot(feat: dict, c: np.ndarray, idx: int, tf: str = "") -> Optio
     surge_ok, _ = check_trend_surge_conditions(feat, idx)
     imp_ok, _ = check_impulse_conditions(feat, idx)
     aln_ok, _ = check_alignment_conditions(feat, idx, tf=tf)
-    if not any((entry_ok, brk_ok, ret_ok, surge_ok, imp_ok, aln_ok)):
+    alignment_buy_enabled = bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False))
+    if not any((entry_ok, brk_ok, ret_ok, surge_ok, imp_ok, aln_ok and alignment_buy_enabled)):
         return None
     if brk_ok:
         mode = "breakout"
@@ -3110,8 +3383,10 @@ def _signal_snapshot(feat: dict, c: np.ndarray, idx: int, tf: str = "") -> Optio
         mode = "impulse_speed"
     elif imp_ok:
         mode = "impulse"
-    else:
+    elif alignment_buy_enabled and aln_ok:
         mode = "alignment"
+    else:
+        return None
     return {
         "idx": idx,
         "mode": mode,
@@ -3313,7 +3588,8 @@ async def _poll_coin(
         imp_ok,   _             = check_impulse_conditions(feat, i)
         aln_ok,   _             = check_alignment_conditions(feat, i, tf=tf)
 
-        any_signal = entry_ok or brk_ok or ret_ok or surge_ok or imp_ok or aln_ok
+        alignment_buy_enabled = bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False))
+        any_signal = entry_ok or brk_ok or ret_ok or surge_ok or imp_ok or (aln_ok and alignment_buy_enabled)
         catchup_snapshot = None
         recent_disc = state.recent_discoveries.get(sym)
         if not any_signal and recent_disc and recent_disc.get("tf") == tf:
@@ -3434,8 +3710,10 @@ async def _poll_coin(
                 preview_mode = "impulse_speed"
             elif imp_ok:
                 preview_mode = "impulse"
-            else:
+            elif alignment_buy_enabled and aln_ok:
                 preview_mode = "alignment"
+            else:
+                return
 
             preview_price = float(c[i])
             preview_ema20 = float(feat["ema_fast"][i])
@@ -3467,6 +3745,8 @@ async def _poll_coin(
             score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
             candidate_score += _top_mover_score_bonus(float(getattr(report, "today_change_pct", 0.0)))
             candidate_score += _forecast_return_score_bonus(float(getattr(report, "forecast_return_pct", 0.0)))
+            four_h_context_score, four_h_context_label = await _four_h_context_score(session, sym)
+            candidate_score += four_h_context_score * float(getattr(config, "FOUR_H_CONTEXT_SCORE_WEIGHT", 1.0))
             continuation_profile = _time_block_1h_continuation_profile(
                 tf=tf,
                 mode=preview_mode,
@@ -3816,6 +4096,102 @@ async def _poll_coin(
                             )
                             botlog.log_blocked(sym, tf, float(c[i]), reason, signal_type="ml_filter")
                             return
+            chase_guard_reason = _top_gainer_chase_guard_reason(
+                tf=tf,
+                mode=preview_mode,
+                rsi=preview_rsi,
+                daily_range=preview_range,
+            )
+            if chase_guard_reason:
+                _log_critic_candidate(
+                    sym=sym,
+                    tf=tf,
+                    bar_ts=int(data["t"][i]),
+                    signal_type=preview_mode,
+                    feat=feat,
+                    data=data,
+                    i=i,
+                    action="blocked",
+                    reason_code="top_gainer_chase_guard",
+                    reason=chase_guard_reason,
+                    stage="quality_floor",
+                    candidate_score=candidate_score,
+                    base_score=base_score,
+                    score_floor=score_floor,
+                    forecast_return_pct=float(getattr(report, "forecast_return_pct", 0.0)),
+                    today_change_pct=float(getattr(report, "today_change_pct", 0.0)),
+                    ml_proba=ml_proba,
+                    mtf_soft_penalty=mtf_soft_penalty,
+                    fresh_priority=_is_fresh_priority_candidate(preview_mode, catchup_snapshot),
+                    catchup=catchup_snapshot is not None,
+                    continuation_profile=continuation_profile,
+                    signal_flags=signal_flags,
+                )
+                log.info("TOP GAINER CHASE BLOCK %s [%s]: %s", sym, tf, chase_guard_reason)
+                _maybe_log_ranker_shadow(
+                    sym=sym,
+                    tf=tf,
+                    mode=preview_mode,
+                    price=float(c[i]),
+                    candidate_score=candidate_score,
+                    score_floor=score_floor,
+                    ranker_proba=ranker_proba,
+                    ranker_info=ranker_info,
+                    bot_action="blocked",
+                    reason=chase_guard_reason,
+                )
+                botlog.log_blocked(sym, tf, float(c[i]), chase_guard_reason, signal_type="top_gainer_chase_guard")
+                return
+            objective_gate_reason = _top_gainer_objective_gate_reason(
+                tf=tf,
+                mode=preview_mode,
+                intraday_change_pct=_intraday_change_pct_from_data(data, i),
+                daily_range=preview_range,
+                vol_x=preview_vol,
+                adx=preview_adx,
+                candidate_score=candidate_score,
+                today_confirmed=today_confirmed_now,
+            )
+            if objective_gate_reason:
+                _log_critic_candidate(
+                    sym=sym,
+                    tf=tf,
+                    bar_ts=int(data["t"][i]),
+                    signal_type=preview_mode,
+                    feat=feat,
+                    data=data,
+                    i=i,
+                    action="blocked",
+                    reason_code="top_gainer_objective_gate",
+                    reason=objective_gate_reason,
+                    stage="quality_floor",
+                    candidate_score=candidate_score,
+                    base_score=base_score,
+                    score_floor=score_floor,
+                    forecast_return_pct=float(getattr(report, "forecast_return_pct", 0.0)),
+                    today_change_pct=float(getattr(report, "today_change_pct", 0.0)),
+                    ml_proba=ml_proba,
+                    mtf_soft_penalty=mtf_soft_penalty,
+                    fresh_priority=_is_fresh_priority_candidate(preview_mode, catchup_snapshot),
+                    catchup=catchup_snapshot is not None,
+                    continuation_profile=continuation_profile,
+                    signal_flags=signal_flags,
+                )
+                log.info("TOP GAINER OBJECTIVE BLOCK %s [%s]: %s", sym, tf, objective_gate_reason)
+                _maybe_log_ranker_shadow(
+                    sym=sym,
+                    tf=tf,
+                    mode=preview_mode,
+                    price=float(c[i]),
+                    candidate_score=candidate_score,
+                    score_floor=score_floor,
+                    ranker_proba=ranker_proba,
+                    ranker_info=ranker_info,
+                    bot_action="blocked",
+                    reason=objective_gate_reason,
+                )
+                botlog.log_blocked(sym, tf, float(c[i]), objective_gate_reason, signal_type="top_gainer_objective_gate")
+                return
             if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False):
                 min_score = score_floor
                 if candidate_score < min_score:
@@ -4550,6 +4926,8 @@ async def _poll_coin(
                 ranker_top_gainer_prob=float((ranker_info or {}).get("top_gainer_prob", 0.0)),
                 ranker_capture_ratio_pred=float((ranker_info or {}).get("capture_ratio_pred", 0.0)),
                 leader_continuation=confirmed_leader_continuation,
+                four_h_context_score=float(four_h_context_score),
+                four_h_context_label=str(four_h_context_label),
                 prediction_horizons=prediction_horizons,
                 predictions={h: None for h in prediction_horizons},
                 trail_stop=init_trail,
@@ -4633,6 +5011,10 @@ async def _poll_coin(
                     bot_action="take",
                     reason="candidate accepted",
                 )
+            except Exception as _log_err:
+                log.warning("ranker shadow log failed for %s: %s", sym, _log_err)
+
+            try:
                 botlog.log_entry(
                     sym=sym, tf=tf, mode=sig_mode,
                     price=price, ema20=ef, slope=slp,
@@ -5174,6 +5556,19 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
     async with aiohttp.ClientSession() as session:
         while state.running:
             try:
+                trimmed_positions, removed_positions = _trim_restored_positions(state.positions)
+                if removed_positions:
+                    state.positions = trimmed_positions
+                    save_positions(state.positions)
+                    log.info("Trimmed live portfolio: %s", removed_positions)
+                    try:
+                        await send(
+                            "🧹 *Портфель очищен*\n"
+                            + "\n".join(f"- `{item}`" for item in removed_positions)
+                        )
+                    except Exception as exc:
+                        log.warning("portfolio trim notification failed: %s", exc)
+
                 tasks = [
                     _poll_coin(session, r, state, send)
                     for r in state.hot_coins

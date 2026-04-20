@@ -8,135 +8,57 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Telegram ──────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Telegram в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-# Telegram UX / noise control
-ENABLE_EARLY_SCANNER_ALERTS: bool = False
-SEND_DISCOVERY_NOTIFICATIONS: bool = False
-SEND_SERVICE_NOTIFICATIONS: bool = False
-SEND_AUX_NOTIFICATIONS: bool = False
-ML_ENABLE_GENERAL_RANKING: bool = True
-ML_GENERAL_USE_SEGMENT_WHEN_AVAILABLE: bool = True
-ML_GENERAL_NEUTRAL_PROBA: float = 0.50
-ML_GENERAL_SCORE_WEIGHT: float = 0.0
-ML_ENABLE_TREND_NONBULL_FILTER: bool = True
-ML_TREND_NONBULL_SEGMENT_KEY: str = "trend|nonbull"
-ML_TREND_NONBULL_MIN_PROBA: float = 0.35
-ML_TREND_NONBULL_LOW_PROBA_PENALTY: float = 6.0
-ML_TREND_NONBULL_HARD_BLOCK: bool = False
-CRITIC_DATASET_ENABLED: bool = True
-ML_CANDIDATE_RANKER_RUNTIME_ENABLED: bool = True
-ML_CANDIDATE_RANKER_MODEL_FILE: str = "ml_candidate_ranker.json"
-ML_CANDIDATE_RANKER_NEUTRAL_PROBA: float = 0.50
-ML_CANDIDATE_RANKER_SCORE_WEIGHT: float = 0.75
-ML_CANDIDATE_RANKER_USE_FINAL_SCORE: bool = True
-ML_CANDIDATE_RANKER_SCORE_CLIP: float = 2.0
-ML_CANDIDATE_RANKER_SHADOW_ENABLED: bool = True
-ML_CANDIDATE_RANKER_SHADOW_LOG_ALL: bool = False
-ML_CANDIDATE_RANKER_VETO_ENABLED: bool = True
-ML_CANDIDATE_RANKER_REQUIRE_CATBOOST: bool = True
-ML_CANDIDATE_RANKER_VETO_TF: tuple[str, ...] = ("15m",)
-ML_CANDIDATE_RANKER_VETO_MODES: tuple[str, ...] = ("trend",)
-ML_CANDIDATE_RANKER_VETO_PROBA_MAX: float = 0.20
-ML_CANDIDATE_RANKER_VETO_SCORE_MAX: float = 60.0
-ML_CANDIDATE_RANKER_VETO_FORECAST_MAX: float = 0.25
-ML_CANDIDATE_RANKER_HARD_VETO_ENABLED: bool = True
-ML_CANDIDATE_RANKER_HARD_VETO_15M_TF: tuple[str, ...] = ("15m",)
-ML_CANDIDATE_RANKER_HARD_VETO_15M_MODES: tuple[str, ...] = ("breakout", "retest", "impulse_speed", "impulse", "alignment", "trend", "strong_trend")
-ML_CANDIDATE_RANKER_HARD_VETO_15M_FINAL_MAX: float = -0.75
-ML_CANDIDATE_RANKER_HARD_VETO_15M_TOP_GAINER_MAX: float = 0.20
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_ENABLED: bool = True
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_MODES: tuple[str, ...] = ("impulse_speed", "impulse")
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_FINAL_MAX: float = -0.50
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_EV_MAX: float = -0.60
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_QUALITY_MAX: float = 0.50
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_TOP_GAINER_MAX: float = 0.28
-ML_CANDIDATE_RANKER_HARD_VETO_15M_IMPULSE_CAPTURE_MAX: float = 0.05
-ML_CANDIDATE_RANKER_HARD_VETO_1H_TF: tuple[str, ...] = ("1h",)
-ML_CANDIDATE_RANKER_HARD_VETO_1H_MODES: tuple[str, ...] = ("retest", "alignment", "trend", "strong_trend", "impulse_speed", "impulse")
-ML_CANDIDATE_RANKER_HARD_VETO_1H_FINAL_MAX: float = -1.50
-ML_CANDIDATE_RANKER_HARD_VETO_1H_RETEST_ENABLED: bool = True
-ML_CANDIDATE_RANKER_HARD_VETO_1H_RETEST_MODES: tuple[str, ...] = ("retest",)
-ML_CANDIDATE_RANKER_HARD_VETO_1H_RETEST_FINAL_MAX: float = -1.20
-ML_CANDIDATE_RANKER_HARD_VETO_1H_RETEST_QUALITY_MAX: float = 0.35
-ML_CANDIDATE_RANKER_HARD_VETO_1H_RETEST_EV_MAX: float = -1.25
-TOP_GAINER_CRITIC_ENABLED: bool = True
-TOP_GAINER_CRITIC_TIMEZONE: str = "Europe/Budapest"
-TOP_GAINER_CRITIC_TOP_N: int = 15
-TOP_GAINER_CRITIC_MIN_QUOTE_VOLUME_24H: float = 1_000_000.0
-WATCHLIST_TOP_GAINER_GOAL_ENABLED: bool = True
-WATCHLIST_TOP_GAINER_GOAL_CUTOFF_HOUR_LOCAL: int = 22
-WATCHLIST_TOP_GAINER_GOAL_CHECKPOINT_HOURS: tuple[int, ...] = (1, 4, 8, 12, 18, 22)
-WATCHLIST_TOP_GAINER_GOAL_PRECISION_FIRST_NS: tuple[int, ...] = (5, 10, 20)
-WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED: bool = True
-RL_TELEGRAM_REPORTS_ENABLED: bool = True
-RL_TRAIN_TELEGRAM_REPORTS_ENABLED: bool = True
-TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED: bool = True
-RL_WORKER_ENABLE_COLLECTOR: bool = False
-BOT_ENABLE_DATA_COLLECTOR: bool = False
-
-RANKER_POSITION_CLEANUP_ENABLED: bool = True
-RANKER_POSITION_CLEANUP_15M_MODES: tuple[str, ...] = ("impulse_speed", "impulse")
-RANKER_POSITION_CLEANUP_15M_MIN_BARS: int = 8
-RANKER_POSITION_CLEANUP_15M_FINAL_MAX: float = -0.50
-RANKER_POSITION_CLEANUP_15M_EV_MAX: float = -0.60
-RANKER_POSITION_CLEANUP_15M_TOP_GAINER_MAX: float = 0.28
-RANKER_POSITION_CLEANUP_15M_CAPTURE_MAX: float = 0.05
-RANKER_POSITION_CLEANUP_15M_REQUIRE_BELOW_EMA20: bool = True
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_ENABLED: bool = True
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_FINAL_MAX: float = -0.60
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_EV_MAX: float = -0.70
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_QUALITY_MAX: float = 0.50
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_TOP_GAINER_MAX: float = 0.26
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_CAPTURE_MAX: float = 0.05
-RANKER_POSITION_CLEANUP_15M_PROACTIVE_PNL_MAX: float = 1.25
-RANKER_POSITION_CLEANUP_1H_RETEST_ENABLED: bool = True
-RANKER_POSITION_CLEANUP_1H_RETEST_MIN_BARS: int = 3
-RANKER_POSITION_CLEANUP_1H_RETEST_FINAL_MAX: float = -1.50
-RANKER_POSITION_CLEANUP_1H_RETEST_QUALITY_MAX: float = 0.35
-RANKER_POSITION_CLEANUP_1H_RETEST_PNL_MAX: float = 0.50
-
-# ── Binance ───────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Binance в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 BINANCE_REST: str = "https://api.binance.com"
 
-# ── Watchlist ─────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Watchlist в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 WATCHLIST_FILE = Path("watchlist.json")
 
 DEFAULT_WATCHLIST: list[str] = [
-    # Топ ликвидность
-    "BTCUSDT",   "ETHUSDT",   "BNBUSDT",   "XRPUSDT",   "SOLUSDT",
-    "TRXUSDT",   "DOGEUSDT",  "ADAUSDT",   "AVAXUSDT",  "SHIBUSDT",
-    "DOTUSDT",   "LINKUSDT",  "LTCUSDT",   "BCHUSDT",   "UNIUSDT",
-    "TONUSDT",   "NEARUSDT",  "ICPUSDT",   "AAVEUSDT",  "HBARUSDT",
-    # L2 и новые сети
-    "ARBUSDT",   "OPUSDT",    "POLUSDT",   "SUIUSDT",   "APTUSDT",   "STRKUSDT",
-    "ZROUSDT",   "UMAUSDT",   "ENAUSDT",   "SEIUSDT",   "METISUSDT",
-    # DeFi
-    "MKRUSDT",   "CRVUSDT",   "SUSHIUSDT", "COMPUSDT",  "YFIUSDT",
-    "SNXUSDT",   "LDOUSDT",   "1INCHUSDT", "DYDXUSDT",
-    # AI и инфраструктура
-    "FETUSDT",   "RNDRUSDT",  "TAOUSDT",   "INJUSDT",
-    # Layer 1
-    "ATOMUSDT",  "ALGOUSDT",  "XLMUSDT",   "XTZUSDT",   "EOSUSDT",   "CELOUSDT",
-    "ETCUSDT",   "FILUSDT",   "EGLDUSDT",  "PAXGUSDT",  "QNTUSDT",   "RUNEUSDT",
-    # GameFi, NFT, мемы
-    "CAKEUSDT",  "GRTUSDT",   "AXSUSDT",   "SANDUSDT",  "MANAUSDT",
-    "CHZUSDT",   "APEUSDT",   "FLOKIUSDT", "WIFUSDT",   "BONKUSDT",
-    "ILVUSDT",   "AUDIOUSDT", "JASMYUSDT",
-    # Средний эшелон
-    "ACHUSDT",   "CFXUSDT",   "ENSUSDT",   "GMTUSDT",   "ORDIUSDT",  "WLDUSDT",
-    "BLURUSDT",  "LRCUSDT",   "ZRXUSDT",   "ZILUSDT",   "KSMUSDT",
-    "BATUSDT",   "AMPUSDT",   "BNTUSDT",   "MDTUSDT",   "GLMUSDT",   "FLUXUSDT",
-    "OXTUSDT",   "BAKEUSDT",  "PYRUSDT",   "TRUUSDT",   "ARUSDT",    "COTIUSDT",
-    "CELRUSDT",  "QIUSDT",    "SNTUSDT",   "AXLUSDT",   "TIAUSDT",   "AEVOUSDT",
-    "RENDERUSDT","XAIUSDT",   "C98USDT",   "ACAUSDT",   "LQTYUSDT",
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT",
+    "TRXUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT",
+    "DOTUSDT", "LINKUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT",
+    "TONUSDT", "NEARUSDT", "ICPUSDT", "AAVEUSDT", "HBARUSDT",
+    "ARBUSDT", "OPUSDT", "POLUSDT", "SUIUSDT", "APTUSDT",
+    "STRKUSDT", "ZROUSDT", "UMAUSDT", "ENAUSDT", "SEIUSDT",
+    "METISUSDT", "MKRUSDT", "CRVUSDT", "SUSHIUSDT", "COMPUSDT",
+    "YFIUSDT", "SNXUSDT", "LDOUSDT", "1INCHUSDT", "DYDXUSDT",
+    "FETUSDT", "RNDRUSDT", "TAOUSDT", "INJUSDT", "ATOMUSDT",
+    "ALGOUSDT", "XLMUSDT", "XTZUSDT", "EOSUSDT", "CELOUSDT",
+    "ETCUSDT", "FILUSDT", "EGLDUSDT", "PAXGUSDT", "QNTUSDT",
+    "RUNEUSDT", "CAKEUSDT", "GRTUSDT", "AXSUSDT", "SANDUSDT",
+    "MANAUSDT", "CHZUSDT", "APEUSDT", "FLOKIUSDT", "WIFUSDT",
+    "BONKUSDT", "ILVUSDT", "AUDIOUSDT", "JASMYUSDT", "ACHUSDT",
+    "CFXUSDT", "ENSUSDT", "GMTUSDT", "ORDIUSDT", "WLDUSDT",
+    "BLURUSDT", "LRCUSDT", "ZRXUSDT", "ZILUSDT", "KSMUSDT",
+    "BATUSDT", "AMPUSDT", "BNTUSDT", "MDTUSDT", "GLMUSDT",
+    "FLUXUSDT", "OXTUSDT", "BAKEUSDT", "PYRUSDT", "TRUUSDT",
+    "ARUSDT", "COTIUSDT", "CELRUSDT", "QIUSDT", "SNTUSDT",
+    "AXLUSDT", "TIAUSDT", "AEVOUSDT", "RENDERUSDT", "XAIUSDT",
+    "C98USDT", "ACAUSDT", "LQTYUSDT", "DOGSUSDT", "MEMEUSDT",
 ]
-
 
 def load_watchlist() -> list[str]:
     if WATCHLIST_FILE.exists():
-        return json.loads(WATCHLIST_FILE.read_text())
+        raw = json.loads(WATCHLIST_FILE.read_text())
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
+            sym = str(item or "").strip().upper()
+            if not sym:
+                continue
+            if sym == "MENU":
+                continue
+            if not sym.isalnum():
+                continue
+            if sym in seen:
+                continue
+            cleaned.append(sym)
+            seen.add(sym)
+        return cleaned
     return list(DEFAULT_WATCHLIST)
 
 
@@ -144,10 +66,10 @@ def save_watchlist(symbols: list[str]) -> None:
     WATCHLIST_FILE.write_text(json.dumps(symbols, indent=2))
 
 
-# ── Timeframes ────────────────────────────────────────────────────────────────
+# в”Ђв”Ђ Timeframes в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 TIMEFRAMES: list[str] = ["15m", "1h"]
 
-# ── Wide market scan ──────────────────────────────────────────────────────────
+# в”Ђв”Ђ Wide market scan в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 SCAN_TOP_N:   int       = 50
 SCAN_QUOTE:   str       = "USDT"
 SCAN_EXCLUDE: list[str] = [
@@ -155,7 +77,7 @@ SCAN_EXCLUDE: list[str] = [
     "USDCUSDT", "BUSDUSDT", "TUSDUSDT", "DAIUSDT", "FDUSDUSDT",
 ]
 
-# ── Indicator parameters ──────────────────────────────────────────────────────
+# в”Ђв”Ђ Indicator parameters в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 EMA_FAST       = 20
 EMA_SLOW       = 50
 RSI_PERIOD     = 14
@@ -164,389 +86,193 @@ ATR_PERIOD     = 14
 VOL_LOOKBACK   = 20
 SLOPE_LOOKBACK = 5
 
-# ── Entry conditions ──────────────────────────────────────────────────────────
+# в”Ђв”Ђ Entry conditions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 EMA_SLOPE_MIN  = 0.10
 ADX_MIN        = 20.0
-ADX_GROW_BARS  = 3   # используется только в выходе (ADX ослаб)
-ADX_SMA_PERIOD = 10  # период SMA для фильтра ADX на входе
+ADX_GROW_BARS  = 3   # РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ С‚РѕР»СЊРєРѕ РІ РІС‹С…РѕРґРµ (ADX РѕСЃР»Р°Р±)
+ADX_SMA_PERIOD = 10  # РїРµСЂРёРѕРґ SMA РґР»СЏ С„РёР»СЊС‚СЂР° ADX РЅР° РІС…РѕРґРµ
 VOL_MULT       = 1.30
 RSI_BUY_LO         = 45.0
-RSI_BUY_HI         = 72.0   # стандартная верхняя граница RSI
-RSI_BUY_HI_STRONG  = 80.0   # расширенная граница при сильном тренде
-STRONG_ADX_MIN     = 28.0   # ADX ≥ этого → "сильный тренд"
-STRONG_VOL_MIN     = 2.0    # vol× ≥ этого → "сильный объём"
-STRONG_RSI_MIN     = 55.0   # strong_trend не берём на вялом RSI
-STRONG_CLOSE_EMA20_MAX_PCT: float = 6.0  # strong_trend оставляем и на зрелом импульсе, если структура ещё здорова
-# При ADX ≥ STRONG_ADX_MIN И vol× ≥ STRONG_VOL_MIN → RSI разрешён до RSI_BUY_HI_STRONG
+RSI_BUY_HI         = 72.0   # СЃС‚Р°РЅРґР°СЂС‚РЅР°СЏ РІРµСЂС…РЅСЏСЏ РіСЂР°РЅРёС†Р° RSI
+RSI_BUY_HI_STRONG  = 80.0   # СЂР°СЃС€РёСЂРµРЅРЅР°СЏ РіСЂР°РЅРёС†Р° РїСЂРё СЃРёР»СЊРЅРѕРј С‚СЂРµРЅРґРµ
+STRONG_ADX_MIN     = 28.0   # ADX в‰Ґ СЌС‚РѕРіРѕ в†’ "СЃРёР»СЊРЅС‹Р№ С‚СЂРµРЅРґ"
+STRONG_VOL_MIN     = 2.0    # volГ— в‰Ґ СЌС‚РѕРіРѕ в†’ "СЃРёР»СЊРЅС‹Р№ РѕР±СЉС‘Рј"
+# РџСЂРё ADX в‰Ґ STRONG_ADX_MIN Р volГ— в‰Ґ STRONG_VOL_MIN в†’ RSI СЂР°Р·СЂРµС€С‘РЅ РґРѕ RSI_BUY_HI_STRONG
 
-# ── IMPULSE: детектор начала тренда ──────────────────────────────────────────
-# Срабатывает в самом начале движения — до того как ADX успевает вырасти.
-# Ключевое отличие: ADX не требуется, вместо него — объём и скорость цены.
+# в”Ђв”Ђ IMPULSE: РґРµС‚РµРєС‚РѕСЂ РЅР°С‡Р°Р»Р° С‚СЂРµРЅРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# РЎСЂР°Р±Р°С‚С‹РІР°РµС‚ РІ СЃР°РјРѕРј РЅР°С‡Р°Р»Рµ РґРІРёР¶РµРЅРёСЏ вЂ” РґРѕ С‚РѕРіРѕ РєР°Рє ADX СѓСЃРїРµРІР°РµС‚ РІС‹СЂР°СЃС‚Рё.
+# РљР»СЋС‡РµРІРѕРµ РѕС‚Р»РёС‡РёРµ: ADX РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ, РІРјРµСЃС‚Рѕ РЅРµРіРѕ вЂ” РѕР±СЉС‘Рј Рё СЃРєРѕСЂРѕСЃС‚СЊ С†РµРЅС‹.
 
-IMPULSE_VOL_MIN:      float = 2.0   # vol_x минимум — нужен реальный объём
-IMPULSE_PRICE_SPEED:  float = 1.0   # % рост цены за IMPULSE_SPEED_BARS баров
-IMPULSE_SPEED_BARS:   int   = 4     # окно для оценки скорости (4 бара = 1ч на 15m)
-IMPULSE_RANGE_MAX:    float = 5.0   # daily_range < 5% — ещё не поздно входить
-IMPULSE_RSI_LO:       float = 50.0  # RSI выше нейтрали
-IMPULSE_RSI_HI:       float = 72.0  # RSI ещё не перегрет
-IMPULSE_CROSS_BARS:   int   = 6     # окно поиска пересечения EMA20>EMA50
+IMPULSE_VOL_MIN:      float = 2.0   # vol_x РјРёРЅРёРјСѓРј вЂ” РЅСѓР¶РµРЅ СЂРµР°Р»СЊРЅС‹Р№ РѕР±СЉС‘Рј
+IMPULSE_PRICE_SPEED:  float = 1.0   # % СЂРѕСЃС‚ С†РµРЅС‹ Р·Р° IMPULSE_SPEED_BARS Р±Р°СЂРѕРІ
+IMPULSE_SPEED_BARS:   int   = 4     # РѕРєРЅРѕ РґР»СЏ РѕС†РµРЅРєРё СЃРєРѕСЂРѕСЃС‚Рё (4 Р±Р°СЂР° = 1С‡ РЅР° 15m)
+IMPULSE_RANGE_MAX:    float = 5.0   # daily_range < 5% вЂ” РµС‰С‘ РЅРµ РїРѕР·РґРЅРѕ РІС…РѕРґРёС‚СЊ
+IMPULSE_RSI_LO:       float = 50.0  # RSI РІС‹С€Рµ РЅРµР№С‚СЂР°Р»Рё
+IMPULSE_RSI_HI:       float = 72.0  # RSI РµС‰С‘ РЅРµ РїРµСЂРµРіСЂРµС‚
+IMPULSE_CROSS_BARS:   int   = 6     # РѕРєРЅРѕ РїРѕРёСЃРєР° РїРµСЂРµСЃРµС‡РµРЅРёСЏ EMA20>EMA50
 
-# Сканирование IMPULSE: независимая фоновая задача
-IMPULSE_SCAN_SEC:     int   = 900   # каждые 15 минут (= 1 бар на 15m)
-IMPULSE_COOLDOWN_SEC: int   = 3600  # не повторять сигнал по одной монете чаще 1ч
+# РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ IMPULSE: РЅРµР·Р°РІРёСЃРёРјР°СЏ С„РѕРЅРѕРІР°СЏ Р·Р°РґР°С‡Р°
+IMPULSE_SCAN_SEC:     int   = 900   # РєР°Р¶РґС‹Рµ 15 РјРёРЅСѓС‚ (= 1 Р±Р°СЂ РЅР° 15m)
+IMPULSE_COOLDOWN_SEC: int   = 3600  # РЅРµ РїРѕРІС‚РѕСЂСЏС‚СЊ СЃРёРіРЅР°Р» РїРѕ РѕРґРЅРѕР№ РјРѕРЅРµС‚Рµ С‡Р°С‰Рµ 1С‡
 
 
-# ── Exit conditions ───────────────────────────────────────────────────────────
+# в”Ђв”Ђ Exit conditions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 RSI_OVERBOUGHT = 85.0
 ADX_DROP_RATIO = 0.75
-TREND_MACD_REL_MIN: float = 0.00005  # 0.005% от цены — защита от почти нулевого MACD
-MODE_AWARE_EXITS_ENABLED: bool = True
-EXIT_AGGRESSIVE_MODES: tuple = ("breakout", "retest")
-EXIT_PATIENT_MODES: tuple = ("trend", "strong_trend", "alignment")
-EXIT_SEMI_PATIENT_MODES: tuple = ("impulse_speed",)
-MIN_BARS_BEFORE_ADX_EXIT: int = 5
-SEMI_PATIENT_MIN_BARS_BEFORE_ADX_EXIT: int = 4
-PATIENT_SLOPE_CONFIRM_BARS: int = 2
-SEMI_PATIENT_SLOPE_CONFIRM_BARS: int = 2
 
-# ── Forward accuracy ─────────────────────────────────────────────────────────
+# в”Ђв”Ђ Forward accuracy в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 FORWARD_BARS = [3, 5, 10]
-FORWARD_BARS_15M_FAST_MODES: tuple = ("breakout", "retest", "impulse_speed")
-FORWARD_BARS_15M_FAST = [2, 5, 7]
 MIN_ACCURACY = 60.0
-MIN_SIGNALS  = 5  # общий минимум (не используется в дневном)
+MIN_SIGNALS  = 5  # РѕР±С‰РёР№ РјРёРЅРёРјСѓРј (РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РґРЅРµРІРЅРѕРј)
 
-# ── Live monitoring ───────────────────────────────────────────────────────────
+# в”Ђв”Ђ Live monitoring в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 POLL_SEC      = 60
 HISTORY_LIMIT = 300
 LIVE_LIMIT    = 100
-DISCOVERY_ENTRY_GRACE_BARS: int = 2
-DISCOVERY_ENTRY_MAX_SLIPPAGE_PCT: float = 0.45
-DISCOVERY_CATCHUP_SCORE_BONUS: float = 4.0
-DISCOVERY_SCAN_SEC: int = 60  # ищем новые live-сигналы на каждом polling-цикле
 
-# ── Часовой фильтр входов (ML-анализ ml_dataset.jsonl, 44K баров, 15.03.2026) ─
-# EDA выявил устойчивый паттерн: 7 часов UTC стабильно убыточны (EV < -0.15%).
-# Физическая интерпретация:
-#   03 UTC: ночная Азия — малый объём, ложные движения
-#   10-12 UTC: активная Европа + конец азиатской сессии — зона разворотов
-#   13-15 UTC: пред-открытие NYSE (14:30) — крипта реагирует на ожидания
-# Фильтр отключён: пользователь явно потребовал не блокировать входы по часу UTC.
-ENTRY_BLOCK_HOURS: list = []
-TIME_BLOCK_BYPASS_ENABLED: bool = True
-TIME_BLOCK_BYPASS_SCORE_MIN: float = 60.0
-TIME_BLOCK_BYPASS_VOL_X_MIN: float = 1.80
-TIME_BLOCK_BYPASS_MODES: tuple = ("breakout", "retest")
-TIME_BLOCK_BYPASS_1H_ENABLED: bool = True
-TIME_BLOCK_BYPASS_1H_SCORE_MIN: float = 60.0
-TIME_BLOCK_BYPASS_1H_VOL_X_MIN: float = 1.00
-TIME_BLOCK_BYPASS_1H_MODES: tuple = ("alignment", "trend", "strong_trend", "impulse_speed")
-TIME_BLOCK_BYPASS_1H_CONTINUATION_ENABLED: bool = True
-TIME_BLOCK_BYPASS_1H_CONTINUATION_MODES: tuple = ("alignment", "trend", "strong_trend", "impulse_speed", "impulse")
-TIME_BLOCK_BYPASS_1H_CONTINUATION_SCORE_BONUS: float = 8.0
-TIME_BLOCK_BYPASS_1H_CONTINUATION_RSI_MIN: float = 62.0
-TIME_BLOCK_BYPASS_1H_CONTINUATION_RSI_MAX: float = 78.0
-TIME_BLOCK_BYPASS_1H_CONTINUATION_ADX_MIN: float = 16.0
-TIME_BLOCK_BYPASS_1H_CONTINUATION_SLOPE_MIN: float = 0.08
-TIME_BLOCK_BYPASS_1H_CONTINUATION_VOL_X_MIN: float = 1.00
-TIME_BLOCK_BYPASS_1H_CONTINUATION_RANGE_MAX: float = 6.5
-TIME_BLOCK_BYPASS_1H_PREBYPASS_ENABLED: bool = True
-TIME_BLOCK_BYPASS_1H_PREBYPASS_MODES: tuple = ("alignment", "trend", "strong_trend", "impulse_speed", "impulse")
-TIME_BLOCK_BYPASS_1H_PREBYPASS_CONFIRMATIONS: int = 2
-TIME_BLOCK_BYPASS_1H_PREBYPASS_SCORE_MIN: float = 54.0
-TIME_BLOCK_BYPASS_1H_PREBYPASS_VOL_X_MIN: float = 1.00
-TIME_BLOCK_BYPASS_1H_PREBYPASS_PRICE_EDGE_MAX_PCT: float = 2.20
-LATE_1H_CONTINUATION_GUARD_ENABLED: bool = True
-LATE_1H_CONTINUATION_GUARD_MODES: tuple = ("trend", "alignment", "impulse_speed")
-LATE_1H_CONTINUATION_GUARD_RSI_MIN: float = 70.0
-LATE_1H_CONTINUATION_GUARD_PRICE_EDGE_MIN_PCT: float = 1.50
-LATE_1H_CONTINUATION_GUARD_RANGE_MIN: float = 5.0
-LATE_1H_CONTINUATION_GUARD_SCORE_MAX: float = 68.0
-IMPULSE_SPEED_1H_ENTRY_GUARD_ENABLED: bool = True
-IMPULSE_SPEED_1H_RSI_MAX: float = 70.0
-IMPULSE_SPEED_1H_ADX_MIN: float = 22.0
-IMPULSE_SPEED_1H_RANGE_MAX: float = 10.0
-IMPULSE_SPEED_LATE_GUARD_ENABLED: bool = True
-IMPULSE_SPEED_LATE_GUARD_15M_RSI_MIN: float = 70.0
-IMPULSE_SPEED_LATE_GUARD_15M_RANGE_MIN: float = 6.0
-IMPULSE_SPEED_LATE_GUARD_15M_PRICE_EDGE_MIN_PCT: float = 2.20
-IMPULSE_SPEED_LATE_GUARD_15M_MACD_FADE_RATIO_MAX: float = 0.60
-IMPULSE_SPEED_LATE_GUARD_15M_MACD_PEAK_LOOKBACK: int = 8
-IMPULSE_SPEED_LATE_GUARD_15M_FRESH_SPIKE_RSI_MIN: float = 75.0
-IMPULSE_SPEED_LATE_GUARD_15M_FRESH_SPIKE_RANGE_MIN: float = 10.0
-IMPULSE_SPEED_LATE_GUARD_15M_FRESH_SPIKE_PRICE_EDGE_MIN_PCT: float = 4.0
-IMPULSE_SPEED_LATE_GUARD_1H_RSI_MIN: float = 68.0
-IMPULSE_SPEED_LATE_GUARD_1H_RANGE_MIN: float = 8.0
-IMPULSE_SPEED_LATE_GUARD_1H_PRICE_EDGE_MIN_PCT: float = 2.40
-IMPULSE_SPEED_LATE_GUARD_1H_MACD_FADE_RATIO_MAX: float = 0.68
-IMPULSE_SPEED_LATE_GUARD_1H_MACD_PEAK_LOOKBACK: int = 6
-IMPULSE_SPEED_ROTATION_GUARD_ENABLED: bool = True
-IMPULSE_SPEED_ROTATION_GUARD_15M_RSI_MIN: float = 76.0
-IMPULSE_SPEED_ROTATION_GUARD_15M_RANGE_MIN: float = 5.0
-IMPULSE_SPEED_ROTATION_GUARD_1H_RSI_MIN: float = 64.0
-IMPULSE_SPEED_ROTATION_GUARD_1H_RANGE_MIN: float = 16.0
-EARLY_1H_CONTINUATION_ENTRY_ENABLED: bool = True
-EARLY_1H_CONTINUATION_ENTRY_RSI_MIN: float = 60.0
-EARLY_1H_CONTINUATION_ENTRY_RSI_MAX: float = 78.0
-EARLY_1H_CONTINUATION_ENTRY_ADX_MIN: float = 24.0
-EARLY_1H_CONTINUATION_ENTRY_SLOPE_MIN: float = 0.08
-EARLY_1H_CONTINUATION_ENTRY_VOL_X_MIN: float = 1.20
-EARLY_1H_CONTINUATION_ENTRY_RANGE_MAX: float = 6.5
-EARLY_1H_CONTINUATION_ENTRY_PRICE_EDGE_MAX_PCT: float = 1.60
-EARLY_1H_CONTINUATION_ENTRY_ADX_SMA_TOLERANCE: float = 3.0
-EARLY_1H_CONTINUATION_ENTRY_MODES: tuple = ("trend", "strong_trend", "impulse_speed")
-EARLY_15M_CONTINUATION_ENTRY_ENABLED: bool = True
-EARLY_15M_CONTINUATION_ENTRY_RSI_MIN: float = 60.0
-EARLY_15M_CONTINUATION_ENTRY_RSI_MAX: float = 76.0
-EARLY_15M_CONTINUATION_ENTRY_ADX_MIN: float = 20.0
-EARLY_15M_CONTINUATION_ENTRY_SLOPE_MIN: float = 0.10
-EARLY_15M_CONTINUATION_ENTRY_VOL_X_MIN: float = 1.05
-EARLY_15M_CONTINUATION_ENTRY_RANGE_MAX: float = 8.0
-EARLY_15M_CONTINUATION_ENTRY_PRICE_EDGE_MAX_PCT: float = 1.60
-EARLY_15M_CONTINUATION_ENTRY_SCORE_BONUS: float = 10.0
-EARLY_15M_CONTINUATION_ENTRY_MODES: tuple = ("trend",)
-FRESH_SIGNAL_SCORE_BONUS: float = 3.0
-TIME_BLOCK_RETEST_GRACE_BARS: int = 4
-TIME_BLOCK_RETEST_SCORE_BONUS: float = 5.0
-
-# ── Новые фильтры входа ───────────────────────────────────────────────────────
-# Макс. рост от минимума последних 96 баров (24ч на 15m)
-# Если монета уже выросла больше — тренд устал, вход запрещён
+# в”Ђв”Ђ РќРѕРІС‹Рµ С„РёР»СЊС‚СЂС‹ РІС…РѕРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# РњР°РєСЃ. СЂРѕСЃС‚ РѕС‚ РјРёРЅРёРјСѓРјР° РїРѕСЃР»РµРґРЅРёС… 96 Р±Р°СЂРѕРІ (24С‡ РЅР° 15m)
+# Р•СЃР»Рё РјРѕРЅРµС‚Р° СѓР¶Рµ РІС‹СЂРѕСЃР»Р° Р±РѕР»СЊС€Рµ вЂ” С‚СЂРµРЅРґ СѓСЃС‚Р°Р», РІС…РѕРґ Р·Р°РїСЂРµС‰С‘РЅ
 DAILY_RANGE_MAX: float = 7.0
 
-# Максимум баров в позиции — если за это время нет выхода по условиям,
-# выходим принудительно. На 15m: 16 баров = 4 часа
-MAX_HOLD_BARS: int = 16       # fallback и для 1h
-MAX_HOLD_BARS_15M: int = 48   # 15m: 12 часов — ловим дневные тренды
+# РњР°РєСЃРёРјСѓРј Р±Р°СЂРѕРІ РІ РїРѕР·РёС†РёРё вЂ” РµСЃР»Рё Р·Р° СЌС‚Рѕ РІСЂРµРјСЏ РЅРµС‚ РІС‹С…РѕРґР° РїРѕ СѓСЃР»РѕРІРёСЏРј,
+# РІС‹С…РѕРґРёРј РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ. РќР° 15m: 16 Р±Р°СЂРѕРІ = 4 С‡Р°СЃР°
+MAX_HOLD_BARS: int = 16
 
-# Минимум оценённых сигналов сегодня для подтверждения стратегии
-# Если меньше — монета не проходит в мониторинг
+# РњРёРЅРёРјСѓРј РѕС†РµРЅС‘РЅРЅС‹С… СЃРёРіРЅР°Р»РѕРІ СЃРµРіРѕРґРЅСЏ РґР»СЏ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃС‚СЂР°С‚РµРіРёРё
+# Р•СЃР»Рё РјРµРЅСЊС€Рµ вЂ” РјРѕРЅРµС‚Р° РЅРµ РїСЂРѕС…РѕРґРёС‚ РІ РјРѕРЅРёС‚РѕСЂРёРЅРі
 TODAY_MIN_SIGNALS: int = 2
-FORWARD_TEST_WINDOW_HOURS: int = 24  # скользящее окно форвард-теста (вместо UTC-полночь)
+FORWARD_TEST_WINDOW_HOURS: int = 24  # СЃРєРѕР»СЊР·СЏС‰РµРµ РѕРєРЅРѕ С„РѕСЂРІР°СЂРґ-С‚РµСЃС‚Р° (РІРјРµСЃС‚Рѕ UTC-РїРѕР»РЅРѕС‡СЊ)
 
-# Минимальная точность T+3 для подтверждения (было 50%, стало строже)
+# РњРёРЅРёРјР°Р»СЊРЅР°СЏ С‚РѕС‡РЅРѕСЃС‚СЊ T+3 РґР»СЏ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ (Р±С‹Р»Рѕ 50%, СЃС‚Р°Р»Рѕ СЃС‚СЂРѕР¶Рµ)
 TODAY_T3_MIN: float = 60.0
 
-# Минимальная точность T+10 — если ниже этого, монета опасна на длинном горизонте
+# РњРёРЅРёРјР°Р»СЊРЅР°СЏ С‚РѕС‡РЅРѕСЃС‚СЊ T+10 вЂ” РµСЃР»Рё РЅРёР¶Рµ СЌС‚РѕРіРѕ, РјРѕРЅРµС‚Р° РѕРїР°СЃРЅР° РЅР° РґР»РёРЅРЅРѕРј РіРѕСЂРёР·РѕРЅС‚Рµ
 TODAY_T10_MIN: float = 40.0
 
-# Интервал авто-реанализа в секундах (0 = выключен)
-# 7200 = каждые 2 часа бот сам пересчитывает список монет
-AUTO_REANALYZE_SEC: int = 7200
-AUTO_REANALYZE_FIRST_DELAY_SEC: int = 90
-POSITIONS_FILE: str = "positions.json"
+# РРЅС‚РµСЂРІР°Р» Р°РІС‚Рѕ-СЂРµР°РЅР°Р»РёР·Р° РІ СЃРµРєСѓРЅРґР°С… (0 = РІС‹РєР»СЋС‡РµРЅ)
+# 7200 = РєР°Р¶РґС‹Рµ 2 С‡Р°СЃР° Р±РѕС‚ СЃР°Рј РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ СЃРїРёСЃРѕРє РјРѕРЅРµС‚
+AUTO_REANALYZE_SEC: int = 0
+BOT_ENABLE_DATA_COLLECTOR: bool = False
+BOT_STARTUP_AUTO_SCAN_ENABLED: bool = False
 
-ATR_TRAIL_K: float = 2.0   # множитель ATR для трейлинг-стопа
-MACDWARN_BARS: int = 3     # баров подряд MACD hist падает → предупреждение о развороте
+ATR_TRAIL_K: float = 2.0   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РґР»СЏ С‚СЂРµР№Р»РёРЅРі-СЃС‚РѕРїР°
+MACDWARN_BARS: int = 3     # Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ MACD hist РїР°РґР°РµС‚ в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рѕ СЂР°Р·РІРѕСЂРѕС‚Рµ
 
-# ── П1: ATR-трейл и лимит баров по режиму входа ──────────────────────────────
-ATR_TRAIL_K_STRONG:    float = 2.5   # BUY strong_trend (ADX высокий + объём)
-ATR_TRAIL_K_RETEST:    float = 1.5   # RETEST (откат к EMA20 — tighter trail режет плохие возвраты)
-ATR_TRAIL_K_BREAKOUT:  float = 1.5   # BREAKOUT (пробой флэта — быстрый выход)
-MAX_HOLD_BARS_RETEST:  int   = 10    # RETEST: 10 баров × 15m = 2.5 часа
-MAX_HOLD_BARS_BREAKOUT:int   = 6     # BREAKOUT: 6 баров × 15m = 1.5 часа
-CONTINUATION_PROFIT_LOCK_ENABLED: bool = True
-CONTINUATION_PROFIT_LOCK_MODES: tuple = ("trend", "alignment", "strong_trend", "impulse_speed", "impulse")
-CONTINUATION_PROFIT_LOCK_TF: tuple = ("1h",)
-CONTINUATION_PROFIT_LOCK_ENTRY_RSI_MIN: float = 70.0
-CONTINUATION_PROFIT_LOCK_MIN_BARS: int = 3
-CONTINUATION_PROFIT_LOCK_ACTIVATE_PNL_PCT: float = 0.20
-CONTINUATION_PROFIT_LOCK_CONTINUATION_PNL_PCT: float = 0.60
-CONTINUATION_PROFIT_LOCK_TRAIL_K: float = 1.4
-CONTINUATION_PROFIT_LOCK_FLOOR_PCT: float = 0.10
-CONTINUATION_MICRO_EXIT_ENABLED: bool = True
-CONTINUATION_MICRO_EXIT_TF: tuple = ("1h",)
-CONTINUATION_MICRO_EXIT_MODES: tuple = ("trend", "alignment", "strong_trend", "impulse_speed", "impulse")
-CONTINUATION_MICRO_EXIT_MIN_BARS: int = 3
-CONTINUATION_MICRO_EXIT_MACD_NEG_BARS: int = 4
-CONTINUATION_MICRO_EXIT_RSI_MAX: float = 72.0
-CONTINUATION_MICRO_EXIT_PRICE_EDGE_MAX_PCT: float = 0.50
-SHORT_MODE_PROFIT_LOCK_ENABLED: bool = False
-SHORT_MODE_PROFIT_LOCK_TF: tuple = ("15m",)
-SHORT_MODE_PROFIT_LOCK_MODES: tuple = ("breakout", "retest")
-SHORT_MODE_PROFIT_LOCK_MIN_BARS: int = 2
-SHORT_MODE_PROFIT_LOCK_ACTIVATE_PNL_PCT: float = 0.30
-SHORT_MODE_PROFIT_LOCK_TRAIL_K: float = 1.2
-SHORT_MODE_PROFIT_LOCK_FLOOR_PCT: float = 0.05
+# в”Ђв”Ђ Рџ1: ATR-С‚СЂРµР№Р» Рё Р»РёРјРёС‚ Р±Р°СЂРѕРІ РїРѕ СЂРµР¶РёРјСѓ РІС…РѕРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+ATR_TRAIL_K_STRONG:    float = 2.5   # BUY strong_trend (ADX РІС‹СЃРѕРєРёР№ + РѕР±СЉС‘Рј)
+ATR_TRAIL_K_RETEST:    float = 1.8   # RETEST (РѕС‚РєР°С‚ Рє EMA20 вЂ” СЂРёСЃРє РЅРёР¶Рµ)
+ATR_TRAIL_K_BREAKOUT:  float = 1.5   # BREAKOUT (РїСЂРѕР±РѕР№ С„Р»СЌС‚Р° вЂ” Р±С‹СЃС‚СЂС‹Р№ РІС‹С…РѕРґ)
+MAX_HOLD_BARS_RETEST:  int   = 10    # RETEST: 10 Р±Р°СЂРѕРІ Г— 15m = 2.5 С‡Р°СЃР°
+MAX_HOLD_BARS_BREAKOUT:int   = 6     # BREAKOUT: 6 Р±Р°СЂРѕРІ Г— 15m = 1.5 С‡Р°СЃР°
 
-# ── П5: Trend Day (BTC 1h EMA50) ─────────────────────────────────────────────
-# В бычий день расширяем допустимые пороги
-BULL_DAY_RANGE_MAX: float = 14.0  # DAILY_RANGE_MAX при бычьем дне
-BULL_DAY_RSI_HI:    float = 75.0  # RSI_BUY_HI при бычьем дне
+# в”Ђв”Ђ Рџ5: Trend Day (BTC 1h EMA50) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р’ Р±С‹С‡РёР№ РґРµРЅСЊ СЂР°СЃС€РёСЂСЏРµРј РґРѕРїСѓСЃС‚РёРјС‹Рµ РїРѕСЂРѕРіРё
+BULL_DAY_RANGE_MAX: float = 14.0  # DAILY_RANGE_MAX РїСЂРё Р±С‹С‡СЊРµРј РґРЅРµ
+BULL_DAY_RSI_HI:    float = 75.0  # RSI_BUY_HI РїСЂРё Р±С‹С‡СЊРµРј РґРЅРµ
 
-# ── ADX SMA bypass (уже использовался через getattr) ─────────────────────────
-ADX_SMA_BYPASS: float = 35.0  # ADX ≥ этого → плато сильного тренда, bypass
+# в”Ђв”Ђ ADX SMA bypass (СѓР¶Рµ РёСЃРїРѕР»СЊР·РѕРІР°Р»СЃСЏ С‡РµСЂРµР· getattr) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+ADX_SMA_BYPASS: float = 35.0  # ADX в‰Ґ СЌС‚РѕРіРѕ в†’ РїР»Р°С‚Рѕ СЃРёР»СЊРЅРѕРіРѕ С‚СЂРµРЅРґР°, bypass
 
-# ── П3: Cooldown (уже использовался через getattr) ───────────────────────────
-COOLDOWN_BARS: int = 8  # баров тишины после выхода (8 × 15m = 2 часа)
+# в”Ђв”Ђ Рџ3: Cooldown (СѓР¶Рµ РёСЃРїРѕР»СЊР·РѕРІР°Р»СЃСЏ С‡РµСЂРµР· getattr) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+COOLDOWN_BARS: int = 8  # Р±Р°СЂРѕРІ С‚РёС€РёРЅС‹ РїРѕСЃР»Рµ РІС‹С…РѕРґР° (8 Г— 15m = 2 С‡Р°СЃР°)
 
-# ── RETEST: откат к EMA20 в существующем тренде ──────────────────────────────
-RETEST_LOOKBACK:    int   = 12    # баров назад — проверяем что тренд был
-RETEST_TOUCH_BARS:  int   = 5     # окно поиска касания EMA20
-RETEST_RSI_MAX:     float = 65.0  # RSI на ретесте должен быть ниже
-RETEST_VOL_MIN:     float = 1.0   # ретест без хотя бы среднего объёма слишком часто срывается
+# в”Ђв”Ђ RETEST: РѕС‚РєР°С‚ Рє EMA20 РІ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРј С‚СЂРµРЅРґРµ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+RETEST_LOOKBACK:    int   = 12    # Р±Р°СЂРѕРІ РЅР°Р·Р°Рґ вЂ” РїСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ С‚СЂРµРЅРґ Р±С‹Р»
+RETEST_TOUCH_BARS:  int   = 5     # РѕРєРЅРѕ РїРѕРёСЃРєР° РєР°СЃР°РЅРёСЏ EMA20
+RETEST_RSI_MAX:     float = 65.0  # RSI РЅР° СЂРµС‚РµСЃС‚Рµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРёР¶Рµ
+RETEST_VOL_MIN:     float = 0.8   # РѕР±СЉС‘Рј РґР»СЏ СЂРµС‚РµСЃС‚Р° РЅРµРѕР±СЏР·Р°С‚РµР»СЊРЅРѕ РІС‹СЃРѕРєРёР№
 
-# ── BREAKOUT: пробой флэта с объёмом ─────────────────────────────────────────
-BREAKOUT_FLAT_BARS:    int   = 8    # баров флэта перед пробоем
-BREAKOUT_FLAT_MAX_PCT: float = 2.0  # макс диапазон флэта (%)
-BREAKOUT_VOL_MIN:      float = 2.8  # vol_x на пробое — нужен более убедительный спрос
-BREAKOUT_RANGE_MAX:    float = 3.0  # daily_range — движение только началось
-BREAKOUT_SLOPE_MIN:    float = 0.08 # EMA20 уже должна смотреть вверх
-BREAKOUT_RSI_MAX:      float = 76.0 # допускаем горячий breakout, но не экстремально поздний
-BREAKOUT_ADX_MIN:      float = 18.0 # чистый объёмный всплеск без трендовой опоры не берём
+# в”Ђв”Ђ BREAKOUT: РїСЂРѕР±РѕР№ С„Р»СЌС‚Р° СЃ РѕР±СЉС‘РјРѕРј в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+BREAKOUT_FLAT_BARS:    int   = 8    # Р±Р°СЂРѕРІ С„Р»СЌС‚Р° РїРµСЂРµРґ РїСЂРѕР±РѕРµРј
+BREAKOUT_FLAT_MAX_PCT: float = 2.0  # РјР°РєСЃ РґРёР°РїР°Р·РѕРЅ С„Р»СЌС‚Р° (%)
+BREAKOUT_VOL_MIN:      float = 2.0  # vol_x РЅР° РїСЂРѕР±РѕРµ
+BREAKOUT_RANGE_MAX:    float = 4.0  # daily_range вЂ” РґРІРёР¶РµРЅРёРµ С‚РѕР»СЊРєРѕ РЅР°С‡Р°Р»РѕСЃСЊ
 
-# ── IMPULSE: детектор начала импульса (до подтверждения ADX) ─────────────────
-# Откалиброван по реальным данным 04.03.2026:
-#   ETH 15:15 — r1=+2.37% r3=+3.50% RSI=78.8 vol×2.63  ← поймал за 1 бар до BUY
-#   SOL 15:15 — r1=+2.11% r3=+3.27% RSI=76.4 vol×2.35
-#   XRP 15:15 — r1=+2.05% r3=+2.69% RSI=79.5 vol×3.77
-#   XLMUSDT  — r1=+1.54% r3=+2.13% RSI=72.6 vol×1.73
-IMPULSE_R1_MIN:        float = 1.5   # мин рост текущего бара (%)
-IMPULSE_R3_MIN:        float = 2.0   # мин рост за 3 бара (%)
-IMPULSE_VOL_MIN:       float = 1.5   # мин объём кратный среднему
-IMPULSE_BODY_MIN:      float = 0.5   # мин тело свечи (%) — реальное движение
-IMPULSE_RSI_LO:        float = 45.0  # RSI нижняя граница
-IMPULSE_RSI_HI:        float = 80.0  # RSI верхняя (80 — ловим импульс при разгоне)
-IMPULSE_COOLDOWN_BARS: int   = 8     # баров между сигналами одной монеты
+# в”Ђв”Ђ IMPULSE: РґРµС‚РµРєС‚РѕСЂ РЅР°С‡Р°Р»Р° РёРјРїСѓР»СЊСЃР° (РґРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ ADX) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# РћС‚РєР°Р»РёР±СЂРѕРІР°РЅ РїРѕ СЂРµР°Р»СЊРЅС‹Рј РґР°РЅРЅС‹Рј 04.03.2026:
+#   ETH 15:15 вЂ” r1=+2.37% r3=+3.50% RSI=78.8 volГ—2.63  в†ђ РїРѕР№РјР°Р» Р·Р° 1 Р±Р°СЂ РґРѕ BUY
+#   SOL 15:15 вЂ” r1=+2.11% r3=+3.27% RSI=76.4 volГ—2.35
+#   XRP 15:15 вЂ” r1=+2.05% r3=+2.69% RSI=79.5 volГ—3.77
+#   XLMUSDT  вЂ” r1=+1.54% r3=+2.13% RSI=72.6 volГ—1.73
+IMPULSE_R1_MIN:        float = 1.5   # РјРёРЅ СЂРѕСЃС‚ С‚РµРєСѓС‰РµРіРѕ Р±Р°СЂР° (%)
+IMPULSE_R3_MIN:        float = 2.0   # РјРёРЅ СЂРѕСЃС‚ Р·Р° 3 Р±Р°СЂР° (%)
+IMPULSE_VOL_MIN:       float = 1.5   # РјРёРЅ РѕР±СЉС‘Рј РєСЂР°С‚РЅС‹Р№ СЃСЂРµРґРЅРµРјСѓ
+IMPULSE_BODY_MIN:      float = 0.5   # РјРёРЅ С‚РµР»Рѕ СЃРІРµС‡Рё (%) вЂ” СЂРµР°Р»СЊРЅРѕРµ РґРІРёР¶РµРЅРёРµ
+IMPULSE_RSI_LO:        float = 45.0  # RSI РЅРёР¶РЅСЏСЏ РіСЂР°РЅРёС†Р°
+IMPULSE_RSI_HI:        float = 80.0  # RSI РІРµСЂС…РЅСЏСЏ (80 вЂ” Р»РѕРІРёРј РёРјРїСѓР»СЊСЃ РїСЂРё СЂР°Р·РіРѕРЅРµ)
+IMPULSE_COOLDOWN_BARS: int   = 8     # Р±Р°СЂРѕРІ РјРµР¶РґСѓ СЃРёРіРЅР°Р»Р°РјРё РѕРґРЅРѕР№ РјРѕРЅРµС‚С‹
 
-# ── TREND_SURGE: детектор начала устойчивого тренда ──────────────────────────
-# Ловит момент когда тренд «включается» — slope ускоряется + MACD растёт.
-# Не зависит от ADX и форвард-теста. Кулдаун 5 часов — один сигнал на тренд.
-# Примеры: JASMY 09.03 03:00 UTC (+8% за 12ч), BONK 09.03 12:00 UTC.
-SURGE_SLOPE_MIN:     float = 0.30   # slope EMA20 (%) — для боевого входа берём только сильное ускорение
-SURGE_VOL_MIN:       float = 1.5    # объём выше среднего
-SURGE_RSI_LO:        float = 50.0   # RSI в зоне импульса
-SURGE_RSI_HI:        float = 80.0   # не перегрет
-SURGE_COOLDOWN_BARS: int   = 20     # 20 × 15m = 5 часов между сигналами одной монеты
+# в”Ђв”Ђ TREND_SURGE: РґРµС‚РµРєС‚РѕСЂ РЅР°С‡Р°Р»Р° СѓСЃС‚РѕР№С‡РёРІРѕРіРѕ С‚СЂРµРЅРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р›РѕРІРёС‚ РјРѕРјРµРЅС‚ РєРѕРіРґР° С‚СЂРµРЅРґ В«РІРєР»СЋС‡Р°РµС‚СЃСЏВ» вЂ” slope СѓСЃРєРѕСЂСЏРµС‚СЃСЏ + MACD СЂР°СЃС‚С‘С‚.
+# РќРµ Р·Р°РІРёСЃРёС‚ РѕС‚ ADX Рё С„РѕСЂРІР°СЂРґ-С‚РµСЃС‚Р°. РљСѓР»РґР°СѓРЅ 5 С‡Р°СЃРѕРІ вЂ” РѕРґРёРЅ СЃРёРіРЅР°Р» РЅР° С‚СЂРµРЅРґ.
+# РџСЂРёРјРµСЂС‹: JASMY 09.03 03:00 UTC (+8% Р·Р° 12С‡), BONK 09.03 12:00 UTC.
+SURGE_SLOPE_MIN:     float = 0.15   # slope EMA20 (%) вЂ” С‚СЂРµРЅРґ РґРѕР»Р¶РµРЅ СѓСЃРєРѕСЂРёС‚СЊСЃСЏ
+SURGE_VOL_MIN:       float = 1.5    # РѕР±СЉС‘Рј РІС‹С€Рµ СЃСЂРµРґРЅРµРіРѕ
+SURGE_RSI_LO:        float = 50.0   # RSI РІ Р·РѕРЅРµ РёРјРїСѓР»СЊСЃР°
+SURGE_RSI_HI:        float = 80.0   # РЅРµ РїРµСЂРµРіСЂРµС‚
+SURGE_COOLDOWN_BARS: int   = 20     # 20 Г— 15m = 5 С‡Р°СЃРѕРІ РјРµР¶РґСѓ СЃРёРіРЅР°Р»Р°РјРё РѕРґРЅРѕР№ РјРѕРЅРµС‚С‹
 
-# ── ALIGNMENT: плавный бычий тренд без ADX ────────────────────────────────────
-# Ловит медленные альт-тренды где ADX не успевает подтвердить за 28+ баров,
-# но структура устойчиво бычья (пример: CHZ 08.03 09:00-18:00 = +8% за 9 часов).
-ALIGNMENT_SLOPE_MIN:  float = 0.05  # мягче чем BUY (0.10) — тренд может быть плавным
-ALIGNMENT_VOL_MIN:    float = 0.8   # не нужен спайк, достаточно любой активности
-ALIGNMENT_RSI_LO:     float = 45.0  # RSI выше нейтрали
-ALIGNMENT_RSI_HI:     float = 82.0  # медленный тренд — RSI разогревается постепенно
-ALIGNMENT_RANGE_MAX:  float = 9.0   # ↓ с 18% — не входить в alignment когда уже +9%+ за день (был TAO 16.12%)
-ALIGNMENT_PRICE_EDGE_MAX_PCT: float = 2.0  # общий guard: alignment не должен быть слишком далеко от EMA20
-ALIGNMENT_1H_PRICE_EDGE_MAX_PCT: float = 1.5  # на 1h режем поздние догоняющие alignment-входы
-ALIGNMENT_MACD_BARS:  int   = 5     # ↑ с 3 — иссякший импульс SEI (hist≈0.0000) не прошёл бы 5 баров
-ALIGNMENT_MACD_REL_MIN: float = 0.0002  # мин. MACD hist как доля цены (0.02%) — SEI hist=0.0000 заблокирован
-ALIGNMENT_LATE_RANGE_MIN: float = 6.5  # при уже большом ходе за день late-alignment должен быть строже
-ALIGNMENT_MACD_PEAK_LOOKBACK: int = 8  # сколько последних баров сравниваем с локальным пиком MACD
-ALIGNMENT_MACD_PEAK_RATIO_MIN: float = 0.45  # текущий MACD hist должен держать ≥45% локального пика
-ALIGNMENT_NONBULL_ADX_MIN: int = 20
-ALIGNMENT_NONBULL_REQUIRE_ABOVE_EMA200: bool = True
-ALIGNMENT_NONBULL_VOL_MIN: float = 1.0
-ALIGNMENT_NONBULL_RSI_LO: float = 50.0
-ALIGNMENT_NONBULL_RSI_HI: float = 66.0
+# в”Ђв”Ђ ALIGNMENT: РїР»Р°РІРЅС‹Р№ Р±С‹С‡РёР№ С‚СЂРµРЅРґ Р±РµР· ADX в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р›РѕРІРёС‚ РјРµРґР»РµРЅРЅС‹Рµ Р°Р»СЊС‚-С‚СЂРµРЅРґС‹ РіРґРµ ADX РЅРµ СѓСЃРїРµРІР°РµС‚ РїРѕРґС‚РІРµСЂРґРёС‚СЊ Р·Р° 28+ Р±Р°СЂРѕРІ,
+# РЅРѕ СЃС‚СЂСѓРєС‚СѓСЂР° СѓСЃС‚РѕР№С‡РёРІРѕ Р±С‹С‡СЊСЏ (РїСЂРёРјРµСЂ: CHZ 08.03 09:00-18:00 = +8% Р·Р° 9 С‡Р°СЃРѕРІ).
+ALIGNMENT_SLOPE_MIN:  float = 0.05  # РјСЏРіС‡Рµ С‡РµРј BUY (0.10) вЂ” С‚СЂРµРЅРґ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїР»Р°РІРЅС‹Рј
+ALIGNMENT_VOL_MIN:    float = 0.8   # РЅРµ РЅСѓР¶РµРЅ СЃРїР°Р№Рє, РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ Р»СЋР±РѕР№ Р°РєС‚РёРІРЅРѕСЃС‚Рё
+ALIGNMENT_RSI_LO:     float = 45.0  # RSI РІС‹С€Рµ РЅРµР№С‚СЂР°Р»Рё
+ALIGNMENT_RSI_HI:     float = 82.0  # РјРµРґР»РµРЅРЅС‹Р№ С‚СЂРµРЅРґ вЂ” RSI СЂР°Р·РѕРіСЂРµРІР°РµС‚СЃСЏ РїРѕСЃС‚РµРїРµРЅРЅРѕ
+ALIGNMENT_RANGE_MAX:  float = 18.0  # в†‘ СЃ 12% вЂ” РјРµРґР»РµРЅРЅС‹Рµ С‚СЂРµРЅРґС‹ РёРґСѓС‚ РґРѕР»РіРѕ (Р±С‹Р»Рѕ 12%)
+ALIGNMENT_MACD_BARS:  int   = 3     # MACD hist > 0 РїРѕСЃР»РµРґРЅРёРµ N Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ вЂ” РЅРµ РѕРґРЅРѕСЂР°Р·РѕРІС‹Р№ РІСЃРїР»РµСЃРє
 
-# ── Fast loss exit: ускоренный выход после первого закрытия ниже EMA20 ─────────────
-# Ночная проблема 23.03: часть 15m сделок выходила только после 2-го close ниже EMA20,
-# хотя уже на первом закрытии под EMA20 сделка была в минусе и импульс слабел.
-FAST_LOSS_EMA_EXIT_ENABLED: bool = True
-FAST_LOSS_EMA_EXIT_TF: tuple = ("15m", "1h")
-FAST_LOSS_EMA_EXIT_MODES: tuple = ("retest", "breakout", "alignment", "impulse")
-FAST_LOSS_EMA_EXIT_MIN_BARS: int = 1
-FAST_LOSS_EMA_EXIT_PNL_MAX: float = 0.0
-FAST_LOSS_EMA_EXIT_RSI_MAX: float = 70.0
+# в”Ђв”Ђ IMPULSE: РїРѕРґРЅСЏС‚Р°СЏ РІРµСЂС…РЅСЏСЏ РіСЂР°РЅРёС†Р° RSI в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# в†‘ СЃ 80 РґРѕ 82 вЂ” Р»РѕРІРёС‚ СЂР°Р·РіРѕРЅСЏСЋС‰РёРµСЃСЏ Р°Р»СЊС‚РєРѕРёРЅС‹ С‚РёРїР° XAI (+34%) СЂР°РЅСЊС€Рµ
+IMPULSE_RSI_HI:       float = 82.0  # (РїРµСЂРµРѕРїСЂРµРґРµР»СЏРµС‚ РІС‹С€Рµ)
 
-# Time exit should not cut an active uptrend. If the trend structure is still healthy,
-# keep the position beyond the nominal bar limit and let other exits manage it.
-TIME_EXIT_TREND_CONTINUATION_ENABLED: bool = True
-TIME_EXIT_CONTINUE_CLOSE_ABOVE_EMA20: bool = True
-TIME_EXIT_CONTINUE_SLOPE_MIN: float = 0.0
-TIME_EXIT_CONTINUE_RSI_MIN: float = 50.0
-TIME_EXIT_CONTINUE_MACD_HIST_MIN: float = 0.0
+# в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
+# РќРћР’Р«Р• РџРђР РђРњР•РўР Р« v2: РќР°С‡Р°Р»Рѕ/РѕРєРѕРЅС‡Р°РЅРёРµ С‚СЂРµРЅРґР° вЂ” СЂР°СЃС€РёСЂРµРЅРЅР°СЏ СЃРёРіРЅР°Р»РёР·Р°С†РёСЏ
+# в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
 
-# ── MTF (Multi-TimeFrame) фильтр для 1h сигналов ─────────────────────────────
-# Когда бот входит по 1h сигналу, 15м индикаторы могут уже показывать коррекцию
-# (пример: ETH 13.03 — 1h вход в 16:00, но пик 14:15, MACD=-6.78, RSI=41 на 15м).
-# Перед входом по 1H проверяем последний закрытый 15м бар:
-#   • MTF_MACD_POSITIVE: True  → 15м MACD hist должен быть > 0
-#   • MTF_RSI_MIN: 42.0        → 15м RSI допускаем чуть глубже в pullback
-#   • MTF_MACD_SOFT_FLOOR_REL  → допускаем только очень неглубокий минус MACD,
-#                                если он уже разворачивается вверх
-#   • MTF_RSI_SOFT_MIN         → для soft-pass RSI должен быть чуть сильнее обычного
-# При tf="15m" фильтр не применяется (не нужен — уже на нужном ТФ).
-MTF_ENABLED:      bool  = True   # глобальный выключатель
-MTF_MACD_POSITIVE: bool = True   # 15м MACD hist > 0 для входа по 1h
-MTF_RSI_MIN:      float = 42.0  # 15м RSI минимум для входа по 1h
-MTF_MACD_SOFT_FLOOR_REL: float = -0.00060  # допускаем до -0.06% цены
-MTF_MACD_HARD_FLOOR_REL: float = -0.00120  # hard-block только при глубокой 15м коррекции
-MTF_RSI_SOFT_MIN:       float = 45.0       # soft-pass допускает чуть более глубокий pullback
-MTF_REQUIRE_MACD_RISING: bool = False      # soft-pass не требует обязательного улучшения MACD vs prev bar
-MTF_1H_CONTINUATION_RELAX_ENABLED: bool = True
-MTF_RSI_HARD_MIN:       float = 38.0
-MTF_SOFT_PASS_PENALTY:  float = 5.0
-MTF_1H_CONTINUATION_RELAX_MODES: tuple = ("alignment", "trend", "strong_trend", "impulse_speed", "impulse")
-MTF_1H_CONTINUATION_RELAX_SCORE_MIN: float = 60.0
-MTF_1H_CONTINUATION_RELAX_ADX_MIN: float = 18.0
-MTF_1H_CONTINUATION_RELAX_SLOPE_MIN: float = 0.12
-MTF_1H_CONTINUATION_RELAX_RSI_MIN: float = 52.0
-MTF_1H_CONTINUATION_RELAX_RSI_MAX: float = 80.0
-MTF_1H_CONTINUATION_RELAX_VOL_X_MIN: float = 0.65
-MTF_1H_CONTINUATION_RELAX_RANGE_MAX: float = 12.0
-MTF_1H_CONTINUATION_RELAX_MACD_FLOOR_REL: float = -0.00120
-MTF_1H_CONTINUATION_RELAX_15M_RSI_MIN: float = 42.0
-MTF_1H_CONTINUATION_RELAX_15M_EMA20_SLIP_PCT: float = 0.45
-MTF_1H_CONTINUATION_RELAX_REQUIRE_MACD_RISING: bool = False
-RETEST_1H_MTF_CONFIRM_ENABLED: bool = True
-RETEST_1H_MTF_RSI_MIN: float = 48.0
-RETEST_1H_MTF_RSI_MAX: float = 72.0
-RETEST_1H_MTF_EMA20_SLIP_PCT: float = 0.15
-RETEST_1H_MTF_MACD_MIN_REL: float = 0.0
-RETEST_1H_MTF_REQUIRE_MACD_RISING: bool = True
+# в”Ђв”Ђ A. РЈСЃРєРѕСЂРµРЅРёРµ РЅР°РєР»РѕРЅР° EMA (slope acceleration) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р›РѕРІРёС‚ РјРѕРјРµРЅС‚ РєРѕРіРґР° EMA20 РЅР°С‡РёРЅР°РµС‚ СЂР°Р·РіРѕРЅСЏС‚СЊСЃСЏ вЂ” РѕРїРµСЂРµР¶Р°РµС‚ BUY РЅР° 1-3 Р±Р°СЂР°.
+# slope[i] - slope[i-3] > SLOPE_ACCEL_MIN в†’ С‚СЂРµРЅРґ РЅР°Р±РёСЂР°РµС‚ СЃРёР»Сѓ РїСЂСЏРјРѕ СЃРµР№С‡Р°СЃ.
+SLOPE_ACCEL_MIN:   float = 0.05   # СѓСЃРєРѕСЂРµРЅРёРµ slope (%) Р·Р° 3 Р±Р°СЂР°
+SLOPE_ACCEL_BARS:  int   = 3      # РѕРєРЅРѕ РѕС†РµРЅРєРё СѓСЃРєРѕСЂРµРЅРёСЏ
 
-# ── IMPULSE: поднятая верхняя граница RSI ─────────────────────────────────────
-# ↑ с 80 до 82 — ловит разгоняющиеся альткоины типа XAI (+34%) раньше
-IMPULSE_RSI_HI:       float = 82.0  # (переопределяет выше)
+# в”Ђв”Ђ B. Squeeze Breakout (РїСЂРѕР±РѕР№ СЃР¶Р°С‚РёСЏ ATR) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# ATR < 50% СЃРІРѕРµР№ N-Р±Р°СЂРѕРІРѕР№ СЃСЂРµРґРЅРµР№ = СЃР¶Р°С‚РёРµ (РЅР°РєРѕРїР»РµРЅРёРµ РїРµСЂРµРґ РґРІРёР¶РµРЅРёРµРј).
+# ATR РІС‹СЂРѕСЃ РІ 1.8Г— РѕС‚ РјРёРЅРёРјСѓРјР° СЃР¶Р°С‚РёСЏ = РїСЂРѕР±РѕР№.
+# РРґРµСЏ: Р±РѕРєРѕРІРёРє СЃР¶РёРјР°РµС‚ РїСЂСѓР¶РёРЅСѓ вЂ” РІС‹С…РѕРґ РёР· Р±РѕРєРѕРІРёРєР° РІР·СЂС‹РІРЅРѕР№.
+SQUEEZE_LOOKBACK:       int   = 20    # Р±Р°СЂРѕРІ РґР»СЏ СЂР°СЃС‡С‘С‚Р° СЃСЂРµРґРЅРµР№ ATR
+ATR_SQUEEZE_RATIO:      float = 0.5   # ATR < 50% РѕС‚ SMA(ATR,20) = СЃР¶Р°С‚РёРµ
+ATR_EXPANSION_MULT:     float = 1.8   # ATR РІС‹СЂРѕСЃ РІ 1.8Г— РѕС‚ РґРЅР° СЃР¶Р°С‚РёСЏ = РїСЂРѕР±РѕР№
+SQUEEZE_MIN_BARS:       int   = 5     # РјРёРЅРёРјСѓРј Р±Р°СЂРѕРІ РІ СЃР¶Р°С‚РёРё РїРµСЂРµРґ РїСЂРѕР±РѕРµРј
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# НОВЫЕ ПАРАМЕТРЫ v2: Начало/окончание тренда — расширенная сигнализация
-# ═══════════════════════════════════════════════════════════════════════════════
+# в”Ђв”Ђ C. RSI Р”РёРІРµСЂРіРµРЅС†РёСЏ (СЃРёРіРЅР°Р» РѕРєРѕРЅС‡Р°РЅРёСЏ С‚СЂРµРЅРґР°) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р¦РµРЅР° РґРµР»Р°РµС‚ РЅРѕРІС‹Р№ maximum в†’ RSI РЅРµ РїРѕРґС‚РІРµСЂР¶РґР°РµС‚ в†’ СЃРєСЂС‹С‚РѕРµ РѕСЃР»Р°Р±Р»РµРЅРёРµ.
+# РџСЂРё РѕР±РЅР°СЂСѓР¶РµРЅРёРё: СѓР¶РµСЃС‚РѕС‡РёС‚СЊ СЃС‚РѕРї (ATR_K * RSI_DIV_TRAIL_MULT), РЅРµ РѕС‚РєСЂС‹РІР°С‚СЊ BUY.
+RSI_DIV_LOOKBACK:       int   = 10    # Р±Р°СЂРѕРІ РЅР°Р·Р°Рґ РґР»СЏ РїРѕРёСЃРєР° РїСЂРµРґС‹РґСѓС‰РµРіРѕ РјР°РєСЃРёРјСѓРјР°
+RSI_DIV_PRICE_MARGIN:   float = 0.001 # С†РµРЅР° РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РІС‹С€Рµ РЅР° >0.1% (С„РёР»СЊС‚СЂ С€СѓРјР°)
+RSI_DIV_TRAIL_MULT:     float = 0.6   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РїСЂРё РґРёРІРµСЂРіРµРЅС†РёРё (2.0 в†’ 1.2)
 
-# ── A. Ускорение наклона EMA (slope acceleration) ─────────────────────────────
-# Ловит момент когда EMA20 начинает разгоняться — опережает BUY на 1-3 бара.
-# slope[i] - slope[i-3] > SLOPE_ACCEL_MIN → тренд набирает силу прямо сейчас.
-SLOPE_ACCEL_MIN:   float = 0.05   # ускорение slope (%) за 3 бара
-SLOPE_ACCEL_BARS:  int   = 3      # окно оценки ускорения
+# в”Ђв”Ђ D. Volume Exhaustion (РёСЃС‚РѕС‰РµРЅРёРµ РѕР±СЉС‘РјР° вЂ” РєРѕРЅРµС† С‚СЂРµРЅРґР°) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р¦РµРЅР° СЂР°СЃС‚С‘С‚ N Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ, РЅРѕ РѕР±СЉС‘Рј РєР°Р¶РґС‹Р№ Р±Р°СЂ РЅРёР¶Рµ РїСЂРµРґС‹РґСѓС‰РµРіРѕ.
+# РЎРёР»СЊРЅС‹Р№ СЃРёРіРЅР°Р» СЂР°Р·РІРѕСЂРѕС‚Р° вЂ” РїРѕРєСѓРїР°С‚РµР»Рё Р·Р°РєР°РЅС‡РёРІР°СЋС‚СЃСЏ.
+VOL_EXHAUST_BARS:       int   = 5     # Р±Р°СЂРѕРІ СѓР±С‹РІР°СЋС‰РµРіРѕ РѕР±СЉС‘РјР° РїСЂРё СЂРѕСЃС‚Рµ С†РµРЅС‹
+VOL_EXHAUST_PRICE_MIN:  float = 0.5   # РјРёРЅРёРјР°Р»СЊРЅС‹Р№ СЂРѕСЃС‚ С†РµРЅС‹ (%) Р·Р° СЌС‚Рё N Р±Р°СЂРѕРІ
 
-# ── B. Squeeze Breakout (пробой сжатия ATR) ───────────────────────────────────
-# ATR < 50% своей N-баровой средней = сжатие (накопление перед движением).
-# ATR вырос в 1.8× от минимума сжатия = пробой.
-# Идея: боковик сжимает пружину — выход из боковика взрывной.
-SQUEEZE_LOOKBACK:       int   = 20    # баров для расчёта средней ATR
-ATR_SQUEEZE_RATIO:      float = 0.5   # ATR < 50% от SMA(ATR,20) = сжатие
-ATR_EXPANSION_MULT:     float = 1.8   # ATR вырос в 1.8× от дна сжатия = пробой
-SQUEEZE_MIN_BARS:       int   = 5     # минимум баров в сжатии перед пробоем
+# в”Ђв”Ђ E. EMA Fan Collapse (СЃС…Р»РѕРїС‹РІР°РЅРёРµ РІРµРµСЂР° вЂ” РєРѕРЅРµС† С‚СЂРµРЅРґР°) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р’ С‚СЂРµРЅРґРµ: EMA20 >> EMA50 >> EMA200, СЂР°СЃСЃС‚РѕСЏРЅРёСЏ СЂР°СЃС‚СѓС‚.
+# Р Р°Р·РІРѕСЂРѕС‚: spread EMA20-EMA50 СѓРјРµРЅСЊС€РёР»СЃСЏ РЅР° SPREAD_DECAY РѕС‚ РјР°РєСЃРёРјСѓРјР°.
+EMA_FAN_LOOKBACK:       int   = 8     # Р±Р°СЂРѕРІ РЅР°Р·Р°Рґ РґР»СЏ РїРѕРёСЃРєР° РјР°РєСЃРёРјСѓРјР° spread
+EMA_FAN_DECAY_THRESHOLD: float = 0.30 # spread СѓРїР°Р» РЅР° 30% РѕС‚ РјР°РєСЃРёРјСѓРјР° в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ
 
-# ── C. RSI Дивергенция (сигнал окончания тренда) ──────────────────────────────
-# Цена делает новый maximum → RSI не подтверждает → скрытое ослабление.
-# При обнаружении: ужесточить стоп (ATR_K * RSI_DIV_TRAIL_MULT), не открывать BUY.
-RSI_DIV_LOOKBACK:       int   = 10    # баров назад для поиска предыдущего максимума
-RSI_DIV_PRICE_MARGIN:   float = 0.001 # цена должна быть выше на >0.1% (фильтр шума)
-RSI_DIV_TRAIL_MULT:     float = 0.6   # множитель ATR при дивергенции (2.0 → 1.2)
+# в”Ђв”Ђ F. Market Regime (СЂРµР¶РёРј СЂС‹РЅРєР°) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# РЇРІРЅС‹Рµ СЂРµР¶РёРјС‹ СЂС‹РЅРєР° РјРµРЅСЏСЋС‚ РїРѕСЂРѕРіРё РґР»СЏ РІСЃРµС… СЃРёРіРЅР°Р»РѕРІ.
+# BULL_TREND:    BTC > EMA50 + ADX > 25 в†’ РјСЏРіС‡Рµ RSI, range; СЃС‚СЂРѕР¶Рµ vol
+# CONSOLIDATION: ADX < 20 в†’ СЃС‚СЂРѕР¶Рµ РІСЃС‘, Р¶РґС‘Рј РїСЂРѕР±РѕСЏ
+# RECOVERY:      BTC РїСЂРѕР±РёРІР°РµС‚ EMA50 СЃРЅРёР·Сѓ в†’ Р°РіСЂРµСЃСЃРёРІРЅС‹Р№ РІС…РѕРґ
+# BEAR_TREND:    BTC < EMA50 + ADX > 25 в†’ С‚РѕР»СЊРєРѕ СЂРµС‚РµСЃС‚С‹, Р·Р°РїСЂРµС‚ РЅРѕРІС‹С… BUY
 
-# ── D. Volume Exhaustion (истощение объёма — конец тренда) ────────────────────
-# Цена растёт N баров подряд, но объём каждый бар ниже предыдущего.
-# Сильный сигнал разворота — покупатели заканчиваются.
-VOL_EXHAUST_BARS:       int   = 5     # баров убывающего объёма при росте цены
-VOL_EXHAUST_PRICE_MIN:  float = 0.5   # минимальный рост цены (%) за эти N баров
-
-# ── E. EMA Fan Collapse (схлопывание веера — конец тренда) ────────────────────
-# В тренде: EMA20 >> EMA50 >> EMA200, расстояния растут.
-# Разворот: spread EMA20-EMA50 уменьшился на SPREAD_DECAY от максимума.
-EMA_FAN_LOOKBACK:       int   = 8     # баров назад для поиска максимума spread
-EMA_FAN_DECAY_THRESHOLD: float = 0.30 # spread упал на 30% от максимума → предупреждение
-
-# ── F. Market Regime (режим рынка) ────────────────────────────────────────────
-# Явные режимы рынка меняют пороги для всех сигналов.
-# BULL_TREND:    BTC > EMA50 + ADX > 25 → мягче RSI, range; строже vol
-# CONSOLIDATION: ADX < 20 → строже всё, ждём пробоя
-# RECOVERY:      BTC пробивает EMA50 снизу → агрессивный вход
-# BEAR_TREND:    BTC < EMA50 + ADX > 25 → только ретесты, запрет новых BUY
-
-# Параметры по режимам: {режим: {параметр: значение}}
+# РџР°СЂР°РјРµС‚СЂС‹ РїРѕ СЂРµР¶РёРјР°Рј: {СЂРµР¶РёРј: {РїР°СЂР°РјРµС‚СЂ: Р·РЅР°С‡РµРЅРёРµ}}
 REGIME_PARAMS: dict = {
     "bull_trend": {
         "rsi_hi":       75.0,
@@ -577,7 +303,7 @@ REGIME_PARAMS: dict = {
         "slope_min":    0.15,
     },
     "neutral": {
-        # Базовые значения — не перезаписываем config
+        # Р‘Р°Р·РѕРІС‹Рµ Р·РЅР°С‡РµРЅРёСЏ вЂ” РЅРµ РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµРј config
         "rsi_hi":       None,
         "vol_mult":     None,
         "range_max":    None,
@@ -586,328 +312,130 @@ REGIME_PARAMS: dict = {
     },
 }
 
-# Пороги для определения режима по BTC 1h
-REGIME_BTC_ADX_TREND:   float = 22.0   # ADX >= этого → тренд (bull или bear)
-REGIME_BTC_ADX_FLAT:    float = 18.0   # ADX < этого → консолидация
-REGIME_BTC_RECOVERY_SLOPE: float = 0.05  # slope EMA50 при пробое снизу вверх
+# РџРѕСЂРѕРіРё РґР»СЏ РѕРїСЂРµРґРµР»РµРЅРёСЏ СЂРµР¶РёРјР° РїРѕ BTC 1h
+REGIME_BTC_ADX_TREND:   float = 22.0   # ADX >= СЌС‚РѕРіРѕ в†’ С‚СЂРµРЅРґ (bull РёР»Рё bear)
+REGIME_BTC_ADX_FLAT:    float = 18.0   # ADX < СЌС‚РѕРіРѕ в†’ РєРѕРЅСЃРѕР»РёРґР°С†РёСЏ
+REGIME_BTC_RECOVERY_SLOPE: float = 0.05  # slope EMA50 РїСЂРё РїСЂРѕР±РѕРµ СЃРЅРёР·Сѓ РІРІРµСЂС…
 
-# ── G. Dynamic Range Max (адаптивный порог по волатильности монеты) ───────────
-# Вместо фиксированного 7% — порог пропорционален исторической волатильности монеты.
-# Монеты типа XAI (дневной диапазон 15%+) получают более широкий порог.
-# Монеты типа BTC (диапазон 3%) — более узкий.
+# в”Ђв”Ђ G. Dynamic Range Max (Р°РґР°РїС‚РёРІРЅС‹Р№ РїРѕСЂРѕРі РїРѕ РІРѕР»Р°С‚РёР»СЊРЅРѕСЃС‚Рё РјРѕРЅРµС‚С‹) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р’РјРµСЃС‚Рѕ С„РёРєСЃРёСЂРѕРІР°РЅРЅРѕРіРѕ 7% вЂ” РїРѕСЂРѕРі РїСЂРѕРїРѕСЂС†РёРѕРЅР°Р»РµРЅ РёСЃС‚РѕСЂРёС‡РµСЃРєРѕР№ РІРѕР»Р°С‚РёР»СЊРЅРѕСЃС‚Рё РјРѕРЅРµС‚С‹.
+# РњРѕРЅРµС‚С‹ С‚РёРїР° XAI (РґРЅРµРІРЅРѕР№ РґРёР°РїР°Р·РѕРЅ 15%+) РїРѕР»СѓС‡Р°СЋС‚ Р±РѕР»РµРµ С€РёСЂРѕРєРёР№ РїРѕСЂРѕРі.
+# РњРѕРЅРµС‚С‹ С‚РёРїР° BTC (РґРёР°РїР°Р·РѕРЅ 3%) вЂ” Р±РѕР»РµРµ СѓР·РєРёР№.
 DYNAMIC_RANGE_ENABLED:   bool  = True
-DYNAMIC_RANGE_REF_PCT:   float = 5.0   # эталонный дневной диапазон (нормировка)
-DYNAMIC_RANGE_HIST_BARS: int   = 96 * 14  # 14 дней на 15m для расчёта avg_daily_range
-DYNAMIC_RANGE_MIN:       float = 3.0   # нижний предел (защита от слишком узкого порога)
-DYNAMIC_RANGE_MAX_CAP:   float = 25.0  # верхний предел (защита от бесконечного порога)
+DYNAMIC_RANGE_REF_PCT:   float = 5.0   # СЌС‚Р°Р»РѕРЅРЅС‹Р№ РґРЅРµРІРЅРѕР№ РґРёР°РїР°Р·РѕРЅ (РЅРѕСЂРјРёСЂРѕРІРєР°)
+DYNAMIC_RANGE_HIST_BARS: int   = 96 * 14  # 14 РґРЅРµР№ РЅР° 15m РґР»СЏ СЂР°СЃС‡С‘С‚Р° avg_daily_range
+DYNAMIC_RANGE_MIN:       float = 3.0   # РЅРёР¶РЅРёР№ РїСЂРµРґРµР» (Р·Р°С‰РёС‚Р° РѕС‚ СЃР»РёС€РєРѕРј СѓР·РєРѕРіРѕ РїРѕСЂРѕРіР°)
+DYNAMIC_RANGE_MAX_CAP:   float = 25.0  # РІРµСЂС…РЅРёР№ РїСЂРµРґРµР» (Р·Р°С‰РёС‚Р° РѕС‚ Р±РµСЃРєРѕРЅРµС‡РЅРѕРіРѕ РїРѕСЂРѕРіР°)
 
-# ── Runtime overrides (устанавливаются динамически в market_scan / strategy) ──
+# в”Ђв”Ђ Runtime overrides (СѓСЃС‚Р°РЅР°РІР»РёРІР°СЋС‚СЃСЏ РґРёРЅР°РјРёС‡РµСЃРєРё РІ market_scan / strategy) в”Ђв”Ђ
 _current_regime:         str   = "neutral"
-_regime_params_active:   dict  = {}     # активные параметры текущего режима
+_regime_params_active:   dict  = {}     # Р°РєС‚РёРІРЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹ С‚РµРєСѓС‰РµРіРѕ СЂРµР¶РёРјР°
 
-# ── H. EMA Cross — ранний сигнал пробоя EMA20 снизу вверх ────────────────────
-# Ловит момент когда цена пробивает EMA20 с объёмом ДО подтверждения slope/ADX.
-# Типичный выигрыш: 3-5 баров (45-75 минут) раньше стандартного сигнала.
+# в”Ђв”Ђ H. EMA Cross вЂ” СЂР°РЅРЅРёР№ СЃРёРіРЅР°Р» РїСЂРѕР±РѕСЏ EMA20 СЃРЅРёР·Сѓ РІРІРµСЂС… в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Р›РѕРІРёС‚ РјРѕРјРµРЅС‚ РєРѕРіРґР° С†РµРЅР° РїСЂРѕР±РёРІР°РµС‚ EMA20 СЃ РѕР±СЉС‘РјРѕРј Р”Рћ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ slope/ADX.
+# РўРёРїРёС‡РЅС‹Р№ РІС‹РёРіСЂС‹С€: 3-5 Р±Р°СЂРѕРІ (45-75 РјРёРЅСѓС‚) СЂР°РЅСЊС€Рµ СЃС‚Р°РЅРґР°СЂС‚РЅРѕРіРѕ СЃРёРіРЅР°Р»Р°.
 #
-# Паттерн: close[i-1] < ema20[i-1]  AND  close[i] >= ema20[i]  (пробой)
-#          vol_x[i] >= CROSS_VOL_MIN                             (объём подтверждает)
-#          ema50_slope >= CROSS_EMA50_SLOPE_MIN                  (EMA50 не падает)
-#          RSI в диапазоне [CROSS_RSI_LO, CROSS_RSI_HI]         (не перекуплен/перепродан)
-#          daily_range_pct <= CROSS_RANGE_MAX                    (нет уже разогнанного хода)
-#          close > ema200 (выше долгосрочной поддержки)          (опционально)
+# РџР°С‚С‚РµСЂРЅ: close[i-1] < ema20[i-1]  AND  close[i] >= ema20[i]  (РїСЂРѕР±РѕР№)
+#          vol_x[i] >= CROSS_VOL_MIN                             (РѕР±СЉС‘Рј РїРѕРґС‚РІРµСЂР¶РґР°РµС‚)
+#          ema50_slope >= CROSS_EMA50_SLOPE_MIN                  (EMA50 РЅРµ РїР°РґР°РµС‚)
+#          RSI РІ РґРёР°РїР°Р·РѕРЅРµ [CROSS_RSI_LO, CROSS_RSI_HI]         (РЅРµ РїРµСЂРµРєСѓРїР»РµРЅ/РїРµСЂРµРїСЂРѕРґР°РЅ)
+#          daily_range_pct <= CROSS_RANGE_MAX                    (РЅРµС‚ СѓР¶Рµ СЂР°Р·РѕРіРЅР°РЅРЅРѕРіРѕ С…РѕРґР°)
+#          close > ema200 (РІС‹С€Рµ РґРѕР»РіРѕСЃСЂРѕС‡РЅРѕР№ РїРѕРґРґРµСЂР¶РєРё)          (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
 
-CROSS_VOL_MIN:       float = 1.2    # мин объём на баре пробоя (ниже стандартного 1.3)
-CROSS_EMA50_SLOPE_MIN: float = -0.40 # EMA50 не должна падать сильнее этого % (за 3 бара)
-CROSS_RSI_LO:        float = 38.0   # нижняя RSI (шире стандартного 45)
-CROSS_RSI_HI:        float = 72.0   # верхняя RSI (как стандарт, выше = уже разогнан)
-CROSS_RANGE_MAX:     float = 6.0    # макс дневной диапазон (фильтр уже разогнанных)
-CROSS_LOOKBACK:      int   = 3      # баров назад для проверки что было ниже EMA20
-CROSS_MACD_FILTER:   bool  = True   # требовать MACD hist >= 0 на баре пробоя
-CROSS_COOLDOWN_BARS: int   = 6      # баров между EMA_CROSS сигналами одной монеты
-CROSS_CONFIRM_BARS:  int   = 2      # макс баров с момента пробоя (не слать старое)
+CROSS_VOL_MIN:       float = 1.2    # РјРёРЅ РѕР±СЉС‘Рј РЅР° Р±Р°СЂРµ РїСЂРѕР±РѕСЏ (РЅРёР¶Рµ СЃС‚Р°РЅРґР°СЂС‚РЅРѕРіРѕ 1.3)
+CROSS_EMA50_SLOPE_MIN: float = -0.40 # EMA50 РЅРµ РґРѕР»Р¶РЅР° РїР°РґР°С‚СЊ СЃРёР»СЊРЅРµРµ СЌС‚РѕРіРѕ % (Р·Р° 3 Р±Р°СЂР°)
+CROSS_RSI_LO:        float = 38.0   # РЅРёР¶РЅСЏСЏ RSI (С€РёСЂРµ СЃС‚Р°РЅРґР°СЂС‚РЅРѕРіРѕ 45)
+CROSS_RSI_HI:        float = 72.0   # РІРµСЂС…РЅСЏСЏ RSI (РєР°Рє СЃС‚Р°РЅРґР°СЂС‚, РІС‹С€Рµ = СѓР¶Рµ СЂР°Р·РѕРіРЅР°РЅ)
+CROSS_RANGE_MAX:     float = 6.0    # РјР°РєСЃ РґРЅРµРІРЅРѕР№ РґРёР°РїР°Р·РѕРЅ (С„РёР»СЊС‚СЂ СѓР¶Рµ СЂР°Р·РѕРіРЅР°РЅРЅС‹С…)
+CROSS_LOOKBACK:      int   = 3      # Р±Р°СЂРѕРІ РЅР°Р·Р°Рґ РґР»СЏ РїСЂРѕРІРµСЂРєРё С‡С‚Рѕ Р±С‹Р»Рѕ РЅРёР¶Рµ EMA20
+CROSS_MACD_FILTER:   bool  = True   # С‚СЂРµР±РѕРІР°С‚СЊ MACD hist >= 0 РЅР° Р±Р°СЂРµ РїСЂРѕР±РѕСЏ
+CROSS_COOLDOWN_BARS: int   = 6      # Р±Р°СЂРѕРІ РјРµР¶РґСѓ EMA_CROSS СЃРёРіРЅР°Р»Р°РјРё РѕРґРЅРѕР№ РјРѕРЅРµС‚С‹
+CROSS_CONFIRM_BARS:  int   = 2      # РјР°РєСЃ Р±Р°СЂРѕРІ СЃ РјРѕРјРµРЅС‚Р° РїСЂРѕР±РѕСЏ (РЅРµ СЃР»Р°С‚СЊ СЃС‚Р°СЂРѕРµ)
 
-# ── Runtime: EMA_CROSS ───────────────────────────────────────────────────────
-_last_cross_ts:      dict  = {}     # sym → timestamp последнего CROSS-сигнала
+# в”Ђв”Ђ Runtime: EMA_CROSS в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+_last_cross_ts:      dict  = {}     # sym в†’ timestamp РїРѕСЃР»РµРґРЅРµРіРѕ CROSS-СЃРёРіРЅР°Р»Р°
 
-# ── J. Exit Guards ────────────────────────────────────────────────────────────
-# Защита от немедленного ложного выхода на баре входа.
-#
-# Проблема (AR 11.03.2026): RSI дивергенция существовала ДО входа → при 0 барах
-# check_exit_conditions(WEAK) давал немедленный выход с +0.00%.
-# Монета при этом росла +1.14% на 1h.
-#
-# Решение: WEAK сигналы (RSI div, vol exhaustion, EMA fan collapse) игнорируются
-# первые MIN_WEAK_EXIT_BARS баров. Hard exits (ATR-трейл, время) — без изменений.
-MIN_WEAK_EXIT_BARS: int = 2   # 2 бара = 30 мин на 15m, 2 часа на 1h
-MIN_WEAK_EXIT_BARS_RETEST: int = 2
-MIN_WEAK_EXIT_BARS_BREAKOUT: int = 2
-MIN_WEAK_EXIT_BARS_TREND: int = 2
-MIN_WEAK_EXIT_BARS_IMPULSE_SPEED: int = 4
-TREND_HOLD_WEAK_EXIT_ENABLED: bool = True
-TREND_HOLD_WEAK_EXIT_TF: tuple = ("15m",)
-TREND_HOLD_WEAK_EXIT_MODES: tuple = ("impulse_speed", "trend", "alignment")
-TREND_HOLD_WEAK_EXIT_MIN_BARS: int = 5
-TREND_HOLD_WEAK_EXIT_MIN_PNL_PCT: float = 0.75
-TREND_HOLD_WEAK_EXIT_MIN_ENTRY_SCORE: float = 70.0
-TREND_HOLD_WEAK_EXIT_MIN_ADX: float = 24.0
-TREND_HOLD_WEAK_EXIT_MIN_SLOPE_PCT: float = 0.10
-TREND_HOLD_WEAK_EXIT_TIGHTEN_ATR_K: float = 1.4
 
-# Лимиты открытых позиций — защита от "все альты двигаются пачкой".
-# 11.03.2026: 12 монет вошли одновременно = 1 рыночное движение, не 12 независимых сигналов.
-
-# Максимум одновременно открытых позиций (все монеты вместе)
-LOCAL_TIMEZONE: str = "Europe/Budapest"
-
+# в”Ђв”Ђ Portfolio / entry quality controls в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 MAX_OPEN_POSITIONS: int = 10
-# Резервируем один слот под самые свежие сильные импульсные входы,
-# чтобы переполненный портфель не душил новые breakout/impulse-сетапы.
-FRESH_SIGNAL_RESERVED_SLOTS: int = 1
-FRESH_SIGNAL_PRIORITY_MODES: tuple = ("breakout", "retest", "impulse_speed")
-TOP_MOVER_SCORE_ENABLED: bool = True
-TOP_MOVER_MIN_DAY_CHANGE_PCT: float = 1.5
-TOP_MOVER_DAY_CHANGE_CAP_PCT: float = 8.0
-TOP_MOVER_SCORE_WEIGHT: float = 1.6
-FORECAST_RETURN_SCORE_WEIGHT: float = 18.0
-FORECAST_RETURN_NEGATIVE_WEIGHT: float = 10.0
-MAX_CONCURRENT_1H_IMPULSE_SPEED_POSITIONS: int = 0
-PORTFOLIO_REPLACE_ENABLED: bool = True
-PORTFOLIO_REPLACE_MIN_DELTA: float = 8.0
-PORTFOLIO_REPLACE_FRESH_MIN_DELTA: float = 6.0
-PORTFOLIO_REPLACE_MIN_BARS: int = 2
-PORTFOLIO_REPLACE_PROFIT_PROTECT_PCT: float = 0.35
-PORTFOLIO_REPLACE_HARD_PROFIT_PROTECT_PCT: float = 0.80
-PORTFOLIO_REPLACE_PROFIT_EXTRA_DELTA: float = 12.0
-PORTFOLIO_REPLACE_STRONG_EXTRA_DELTA: float = 10.0
-PORTFOLIO_REPLACE_ADX_PROTECT_MIN: float = 30.0
-PORTFOLIO_REPLACE_TREND_GRACE_BARS: int = 5
-PORTFOLIO_REPLACE_RANKER_ENABLED: bool = True
-PORTFOLIO_REPLACE_RANKER_FINAL_WEIGHT: float = 6.0
-PORTFOLIO_REPLACE_TOP_GAINER_WEIGHT: float = 10.0
-PORTFOLIO_REPLACE_CANDIDATE_MIN_FINAL: float = -0.50
-PORTFOLIO_REPLACE_CANDIDATE_MIN_TOP_GAINER: float = 0.10
-PORTFOLIO_REPLACE_POSITION_FINAL_MAX: float = 0.00
-PORTFOLIO_REPLACE_POSITION_TOP_GAINER_MAX: float = 0.20
-WEAK_REENTRY_COOLDOWN_BARS: int = 8
-ENTRY_SCORE_MIN_ENABLED: bool = True
-ENTRY_SCORE_MIN_15M: float = 48.0
-ENTRY_SCORE_MIN_1H: float = 56.0
-ENTRY_SCORE_BORDERLINE_BYPASS_ENABLED: bool = True
-ENTRY_SCORE_BORDERLINE_ALLOW_1H: bool = False
-ENTRY_SCORE_BORDERLINE_MODES: tuple[str, ...] = ("breakout", "retest", "impulse_speed")
-ENTRY_SCORE_BORDERLINE_MAX_DEFICIT_15M: float = 6.0
-ENTRY_SCORE_BORDERLINE_MAX_DEFICIT_1H: float = 4.0
-ENTRY_SCORE_BORDERLINE_ADX_MIN: float = 28.0
-ENTRY_SCORE_BORDERLINE_SLOPE_MIN: float = 0.35
-ENTRY_SCORE_BORDERLINE_VOL_MIN: float = 1.20
-ENTRY_SCORE_BORDERLINE_DAILY_RANGE_MAX: float = 6.5
-ENTRY_SCORE_BORDERLINE_PRICE_EDGE_MAX_PCT: float = 2.80
-ENTRY_SCORE_BORDERLINE_RSI_MIN: float = 52.0
-ENTRY_SCORE_BORDERLINE_RSI_MAX: float = 74.5
-ENTRY_SCORE_CONTINUATION_BYPASS_ENABLED: bool = True
-ENTRY_SCORE_CONTINUATION_1H_ENABLED: bool = True
-ENTRY_SCORE_CONTINUATION_MODES: tuple[str, ...] = ("alignment", "trend", "strong_trend")
-ENTRY_SCORE_CONTINUATION_REQUIRE_BULL_DAY: bool = True
-ENTRY_SCORE_CONTINUATION_SCORE_MIN_1H: float = 42.0
-ENTRY_SCORE_CONTINUATION_ADX_MIN: float = 16.0
-ENTRY_SCORE_CONTINUATION_SLOPE_MIN: float = 0.30
-ENTRY_SCORE_CONTINUATION_VOL_MIN: float = 0.90
-ENTRY_SCORE_CONTINUATION_DAILY_RANGE_MAX: float = 8.5
-ENTRY_SCORE_CONTINUATION_PRICE_EDGE_MAX_PCT: float = 2.0
-ENTRY_SCORE_CONTINUATION_RSI_MIN: float = 54.0
-ENTRY_SCORE_CONTINUATION_RSI_MAX: float = 72.0
-TREND_15M_QUALITY_GUARD_ENABLED: bool = True
-TREND_15M_QUALITY_FORECAST_MIN: float = 0.25
-TREND_15M_QUALITY_ALT_VOL_MIN: float = 1.20
-TREND_15M_QUALITY_ALT_ADX_MIN: float = 24.0
-TREND_15M_QUALITY_ALT_SLOPE_MIN: float = 0.35
-TREND_15M_QUALITY_RSI_MAX: float = 68.0
-TREND_15M_QUALITY_DAILY_RANGE_MAX: float = 8.0
-TREND_15M_QUALITY_PRICE_EDGE_MAX_PCT: float = 2.40
-EARLY_LEADER_NEAR_MISS_ENABLED: bool = True
-EARLY_LEADER_NEAR_MISS_TF: tuple[str, ...] = ("15m", "1h")
-EARLY_LEADER_NEAR_MISS_MODES: tuple[str, ...] = ("breakout", "retest", "impulse_speed", "trend", "strong_trend", "alignment")
-EARLY_LEADER_REQUIRE_BULL_DAY: bool = True
-EARLY_LEADER_BTC_VS_EMA50_MIN: float = 0.75
-EARLY_LEADER_MIN_DAY_CHANGE_PCT: float = 1.00
-EARLY_LEADER_MIN_FORECAST_RETURN_PCT: float = 0.10
-EARLY_LEADER_PRECHECK_MAX_DEFICIT_15M: float = 6.0
-EARLY_LEADER_PRECHECK_MAX_DEFICIT_1H: float = 8.0
-EARLY_LEADER_ENTRY_BYPASS_MAX_DEFICIT_15M: float = 4.0
-EARLY_LEADER_ENTRY_BYPASS_MAX_DEFICIT_1H: float = 6.0
-EARLY_LEADER_MIN_TOP_GAINER_PROB: float = 0.22
-EARLY_LEADER_MIN_CAPTURE_RATIO_PRED: float = 0.08
-EARLY_LEADER_MIN_FINAL_SCORE: float = -0.35
-EARLY_LEADER_MIN_QUALITY_PROBA: float = 0.46
-EARLY_LEADER_FRESH_PRIORITY: bool = True
-EARLY_LEADER_TREND_GUARD_BYPASS_ENABLED: bool = True
-EARLY_LEADER_TREND_GUARD_MODES: tuple[str, ...] = ("trend",)
-EARLY_LEADER_TREND_GUARD_RSI_MAX: float = 74.5
-EARLY_LEADER_TREND_GUARD_DAILY_RANGE_MAX: float = 12.5
-EARLY_LEADER_TREND_GUARD_PRICE_EDGE_MAX_PCT: float = 3.0
-CONFIRMED_LEADER_CONTINUATION_ENABLED: bool = True
-CONFIRMED_LEADER_CONTINUATION_TF: tuple[str, ...] = ("15m", "1h")
-CONFIRMED_LEADER_CONTINUATION_MODES: tuple[str, ...] = (
-    "impulse_speed", "strong_trend", "trend", "alignment", "retest", "breakout"
-)
-CONFIRMED_LEADER_CONTINUATION_REQUIRE_BULL_DAY: bool = True
-CONFIRMED_LEADER_CONTINUATION_REQUIRE_CONFIRMED: bool = True
-CONFIRMED_LEADER_CONTINUATION_BTC_VS_EMA50_MIN: float = 1.0
-CONFIRMED_LEADER_CONTINUATION_MIN_DAY_CHANGE_PCT: float = 3.0
-CONFIRMED_LEADER_CONTINUATION_MIN_FORECAST_RETURN_PCT: float = 0.10
-CONFIRMED_LEADER_CONTINUATION_ENTRY_BYPASS_MAX_DEFICIT_15M: float = 8.0
-CONFIRMED_LEADER_CONTINUATION_ENTRY_BYPASS_MAX_DEFICIT_1H: float = 6.0
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_BYPASS_ENABLED: bool = True
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_15M_RSI_MAX: float = 82.0
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_15M_DAILY_RANGE_MAX: float = 14.0
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_15M_PRICE_EDGE_MAX_PCT: float = 4.2
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_1H_RSI_MAX: float = 76.0
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_1H_DAILY_RANGE_MAX: float = 18.0
-CONFIRMED_LEADER_CONTINUATION_IMPULSE_GUARD_1H_PRICE_EDGE_MAX_PCT: float = 3.0
-CONFIRMED_LEADER_CONTINUATION_TREND_GUARD_BYPASS_ENABLED: bool = True
-CONFIRMED_LEADER_CONTINUATION_TREND_GUARD_MODES: tuple[str, ...] = (
-    "trend", "strong_trend", "alignment", "impulse_speed"
-)
-CONFIRMED_LEADER_CONTINUATION_TREND_GUARD_RSI_MAX: float = 82.0
-CONFIRMED_LEADER_CONTINUATION_TREND_GUARD_DAILY_RANGE_MAX: float = 14.0
-CONFIRMED_LEADER_CONTINUATION_TREND_GUARD_PRICE_EDGE_MAX_PCT: float = 3.5
-CONFIRMED_LEADER_CONTINUATION_RANKER_BYPASS_ENABLED: bool = True
-CONFIRMED_LEADER_CONTINUATION_RANKER_FINAL_MIN_15M: float = -1.00
-CONFIRMED_LEADER_CONTINUATION_RANKER_EV_MIN_15M: float = -0.80
-CONFIRMED_LEADER_CONTINUATION_RANKER_QUALITY_MIN_15M: float = 0.38
-CONFIRMED_LEADER_CONTINUATION_RANKER_FINAL_MIN_1H: float = -0.90
-CONFIRMED_LEADER_CONTINUATION_RANKER_EV_MIN_1H: float = -0.70
-CONFIRMED_LEADER_CONTINUATION_RANKER_QUALITY_MIN_1H: float = 0.38
-CONFIRMED_LEADER_CONTINUATION_ROTATION_BYPASS_ENABLED: bool = True
-CONFIRMED_LEADER_CONTINUATION_ROTATION_15M_RSI_MAX: float = 82.0
-CONFIRMED_LEADER_CONTINUATION_ROTATION_15M_DAILY_RANGE_MAX: float = 14.0
-CONFIRMED_LEADER_CONTINUATION_ROTATION_1H_RSI_MAX: float = 76.0
-CONFIRMED_LEADER_CONTINUATION_ROTATION_1H_DAILY_RANGE_MAX: float = 20.0
-CONFIRMED_LEADER_CONTINUATION_FRESH_PRIORITY: bool = True
-CONFIRMED_LEADER_CONTINUATION_TRAIL_K_MULT: float = 0.85
-CONFIRMED_LEADER_CONTINUATION_MAX_HOLD_MULT: float = 0.70
-NEAR_MISS_LOGGING_ENABLED: bool = True
-NEAR_MISS_FORECAST_MIN: float = 0.05
-NEAR_MISS_VOL_MIN: float = 0.85
-NEAR_MISS_ADX_MIN: float = 12.0
-NEAR_MISS_RSI_MIN: float = 46.0
-NEAR_MISS_RSI_MAX: float = 74.0
-NEAR_MISS_DAILY_RANGE_MAX_15M: float = 9.0
-NEAR_MISS_DAILY_RANGE_MAX_1H: float = 11.0
-NEAR_MISS_SCORE_DEFICIT_MAX_15M: float = 6.0
-NEAR_MISS_SCORE_DEFICIT_MAX_1H: float = 8.0
-NEAR_MISS_BREAKOUT_LOOKBACK: int = 6
-NEAR_MISS_BREAKOUT_GAP_MAX_PCT: float = 0.45
-NEAR_MISS_BREAKOUT_VOL_MIN: float = 0.95
-NEAR_MISS_BREAKOUT_SLOPE_MIN: float = 0.05
-NEAR_MISS_RETEST_UNDER_EMA20_MAX_PCT: float = 0.12
-NEAR_MISS_RETEST_PRICE_EDGE_MAX_PCT: float = 0.35
-NEAR_MISS_RETEST_SLOPE_MIN: float = 0.05
-NEAR_MISS_RETEST_MACD_MIN_REL: float = -0.00005
-NEAR_MISS_ALIGNMENT_UNDER_EMA20_MAX_PCT: float = 0.15
-NEAR_MISS_ALIGNMENT_SLOPE_MIN: float = 0.04
-NEAR_MISS_ALIGNMENT_EMA_SEP_MIN: float = -0.05
-NEAR_MISS_TREND_PRICE_EDGE_MIN_PCT: float = 0.05
-NEAR_MISS_TREND_PRICE_EDGE_MAX_PCT: float = 2.60
-NEAR_MISS_TREND_SLOPE_MIN: float = 0.12
-NEAR_MISS_TREND_ADX_MIN: float = 16.0
-NEAR_MISS_TREND_VOL_MIN: float = 0.90
-
-# Максимум в одной "группе" монет — корреляционный лимит
-# Монеты одной группы двигаются синхронно (L1, AI, GameFi и т.д.)
+MAX_NEW_ENTRIES_PER_CYCLE: int = 1   # limit new entries per polling iteration
+ENTRY_SCORE_PCTL: float = 80.0       # dynamic threshold percentile among candidates
+ALIGNMENT_BUY_ENABLED: bool = False  # alignment is context/exit warning, not a buy trigger
 MAX_POSITIONS_PER_GROUP: int = 2
-CLONE_SIGNAL_GUARD_ENABLED: bool = True
-CLONE_SIGNAL_GUARD_TF: tuple = ("15m",)
-CLONE_SIGNAL_GUARD_MODES: tuple = ("impulse_speed", "breakout", "retest", "alignment", "trend")
-CLONE_SIGNAL_GUARD_WINDOW_BARS: int = 8
-CLONE_SIGNAL_GUARD_MAX_SIMILAR: int = 2
-CLONE_SIGNAL_GUARD_MAX_SAME_GROUP: int = 1
-CLONE_SIGNAL_GUARD_OVERRIDE_SCORE: float = 90.0
-CLONE_SIGNAL_GUARD_OVERRIDE_RANKER_FINAL: float = 0.50
-CLONE_SIGNAL_GUARD_SCORE_OVERRIDE_MIN_RANKER_FINAL: float = -0.25
 OPEN_SIGNAL_CLUSTER_CAP_ENABLED: bool = True
-OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MODES: tuple = ("breakout", "retest")
 OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX: int = 2
-OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES: tuple = ("impulse_speed",)
 OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX: int = 2
-OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES: tuple = ("retest",)
-OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX: int = 1
+OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MAX: int = 2
+OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MAX: int = 2
+OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX: int = 2
+OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MAX: int = 2
+OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MAX: int = 2
 
-# Группы монет по категориям (простая эвристика по суффиксу/имени)
-# Ключ = название группы, значение = список монет
-COIN_GROUPS: dict = {
-    "L1_major":  ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AVAXUSDT",
-                  "SUIUSDT", "APTUSDT", "NEARUSDT", "ATOMUSDT"],
-    "L2_eth":    ["ARBUSDT", "OPUSDT", "STRKUSDT", "MATICUSDT", "ZKUSDT"],
-    "AI_data":   ["RENDERUSDT", "FETUSDT", "AGIUSDT", "WLDUSDT", "TAOUSDT",
-                  "ARKMUSDT", "OCEANUSDT", "GRTUSDT", "GLMUSDT"],
-    "GameFi":    ["AXSUSDT", "SANDUSDT", "MANAUSDT", "GALAUSDT", "IMXUSDT",
-                  "YGGUSDT"],
-    "DeFi_amm":  ["UNIUSDT", "SUSHIUSDT", "CRVUSDT", "AAVEUSDT", "MKRUSDT",
-                  "COMPUSDT", "LDOUSDT"],
-    "Storage":   ["FILUSDT", "ARUSDT", "STXUSDT"],
-    "Meme":      ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "BONKUSDT", "WIFUSDT",
-                  "FLOKIUSDT"],
-    "Oracle":    ["LINKUSDT", "BANDUSDT", "PYTHUSDT"],
-    "Interop":   ["DOTUSDT", "COSUSDT", "AXLUSDT"],
-    "Infra":     ["TIAUSDT", "ORDIUSDT", "AEVOUSDT", "INJUSDT"],
-}
+# Agent: use full portfolio capacity. Top-mover leader_score decides the top 10;
+# do not let the coarse "momentum" mode cluster collapse the portfolio to 2.
+AGENT_MAX_POSITIONS: int = 10
+AGENT_ALLOWED_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse_speed")
+AGENT_ALLOWED_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
+AGENT_MIN_DAY_CHANGE_PCT: float = 1.25
+AGENT_MIN_FORECAST_PROXY_PCT: float = 0.35
+AGENT_MIN_LEADER_SCORE: float = 12.0
+AGENT_MIN_ADX: float = 18.0
+AGENT_MIN_VOL_X: float = 1.0
+AGENT_MAX_RSI: float = 72.5
+AGENT_MAX_DAILY_RANGE_PCT: float = 14.0
+AGENT_MIN_TODAY_SIGNALS: int = 2
+AGENT_MIN_BEST_ACCURACY: float = 55.0
+AGENT_REQUIRE_DISTINCT_MODE_CLUSTERS: bool = False
+AGENT_MAX_POSITIONS_PER_MODE_CLUSTER: int = 10
+AGENT_MAX_POSITIONS_PER_GROUP: int = 2
 
-# Expectancy фильтр в analyze_coin
-EV_MIN_PCT:      float = 0.05  # ↑ с 0.0 — отрицательный EV у TAO и SEI при входе
-EV_MIN_SAMPLES:  int   = 5     # ↑ с 3 — 3 сэмпла (TAO T+3=20%=1/5) не статистика
-BLOCK_LOG_INTERVAL_BARS: int = 4   # логировать блокировку не чаще раза в 4 бара
+# 4h context is not an entry trigger. It only adjusts ranking/leader score for
+# valid 15m/1h candidates so higher-timeframe recovery can be noticed without
+# reintroducing noisy standalone 4h BUY signals.
+FOUR_H_CONTEXT_SCORE_ENABLED: bool = True
+FOUR_H_CONTEXT_SCORE_WEIGHT: float = 1.0
+FOUR_H_CONTEXT_LEADER_WEIGHT: float = 0.8
+FOUR_H_CONTEXT_MAX_BONUS: float = 8.0
+FOUR_H_CONTEXT_MAX_PENALTY: float = -6.0
 
-# ── K. Strong Trend Classification Guards ────────────────────────────────────
-# Защита от ложных "strong_trend" на флэте (SNX 12.03.2026: ADX=29.9 при EMA20≈EMA50).
-#
-# Проблема: ADX пересёк порог 28 на объёмном импульсе, но цена весь день во флэте.
-# EMA20=0.3156, EMA50=0.3130 — разрыв 0.08%, MACD≈0.
-# При реальном сильном тренде (AR): EMA20 > EMA50 на 3%+, EMA50 растёт.
-#
-# Решение: strong_trend требует ВСЕ три условия:
-#   1. ADX ≥ STRONG_ADX_MIN + Vol× ≥ STRONG_VOL_MIN
-#   2. EMA20 выше EMA50 на ≥ STRONG_EMA_SEP_MIN %
-#   3. EMA50 наклонена вверх на ≥ STRONG_EMA50_SLOPE_MIN % за 3 бара
-STRONG_EMA_SEP_MIN:    float = 0.9   # мин. разрыв EMA20/EMA50 в % от цены
-STRONG_EMA50_SLOPE_MIN: float = 0.05  # мин. рост EMA50 за 3 бара (%)
+# Main bot anti-chase gate: keep generic signal logic, but block extreme late
+# top-gainer chases that are already far beyond a normal intraday leader move.
+TOP_GAINER_CHASE_GUARD_ENABLED: bool = True
+TOP_GAINER_CHASE_GUARD_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse_speed", "impulse")
+TOP_GAINER_CHASE_GUARD_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
+TOP_GAINER_CHASE_GUARD_MAX_RSI: float = 76.0
+TOP_GAINER_CHASE_GUARD_RSI_RANGE_MIN_PCT: float = 8.0
+TOP_GAINER_CHASE_GUARD_MAX_DAILY_RANGE_PCT: float = 25.0
+TOP_GAINER_OBJECTIVE_GATE_ENABLED: bool = False
+TOP_GAINER_OBJECTIVE_GATE_MODES: tuple[str, ...] = ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse")
+TOP_GAINER_OBJECTIVE_MIN_INTRADAY_CHANGE_PCT: float = 0.35
+TOP_GAINER_OBJECTIVE_MIN_DAILY_RANGE_PCT: float = 0.90
+TOP_GAINER_OBJECTIVE_MIN_VOL_X: float = 1.20
+TOP_GAINER_OBJECTIVE_MIN_ADX: float = 20.0
+TOP_GAINER_OBJECTIVE_RETEST_MIN_INTRADAY_CHANGE_PCT: float = 0.75
+TOP_GAINER_OBJECTIVE_MOMENTUM_MIN_INTRADAY_CHANGE_PCT: float = 1.00
+TOP_GAINER_OBJECTIVE_STRONG_SCORE_BYPASS: float = 115.0
+TOP_GAINER_OBJECTIVE_STRONG_ADX_BYPASS: float = 32.0
+TOP_GAINER_OBJECTIVE_ALLOW_CONFIRMED_LEADER: bool = True
 
-# ── L. Signal Quality Guards ─────────────────────────────────────────────────
-# Защита от слабых/ложных сигналов выявленных 12.03.2026.
+# RL/report Telegram notifications. Keep reports on disk, but do not spam chats.
+RL_TELEGRAM_REPORTS_ENABLED: bool = False
+TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED: bool = False
+WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED: bool = False
+RL_TRAIN_TELEGRAM_REPORTS_ENABLED: bool = False
 
-# RETEST: минимальный отскок от EMA20.
-# LTC-баг: close=54.97 EMA20=54.9694 → зазор 0.001% → ложный ретест.
-# При реальном отскоке цена уходит хотя бы на 0.05% выше EMA20.
-RETEST_MIN_BOUNCE_PCT: float = 0.05
+# в”Ђв”Ђ Early trend warnings (Stage-1, NO ENTRY) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+# Stage-1 only sends РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ (watch), РЅРµ РѕС‚РєСЂС‹РІР°РµС‚ РїРѕР·РёС†РёСЋ.
+EARLY_WARN_COOLDOWN_SEC = 3600   # 1 С‡Р°СЃ: РґРµРґСѓРї РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№ РЅР° РјРѕРЅРµС‚Сѓ/TF
+EARLY_WARN_ADX_MIN      = 12.0   # СѓР±СЂР°С‚СЊ СЃРѕРІСЃРµРј РјС‘СЂС‚РІС‹Р№ Р±РѕРєРѕРІРёРє
+EARLY_WARN_RSI_MAX      = 82.0   # РЅРµ РґРѕРіРѕРЅСЏС‚СЊ РїРёРєРё
+EARLY_WARN_VOLX_MIN     = 1.00   # РјРёРЅРёРјР°Р»СЊРЅР°СЏ Р°РєС‚РёРІРЅРѕСЃС‚СЊ СЂС‹РЅРєР°
+EARLY_WARN_VOLJUMP_MIN  = 1.20   # Р°Р»СЊС‚РµСЂРЅР°С‚РёРІРЅС‹Р№ С‚СЂРёРіРіРµСЂ РІРјРµСЃС‚Рѕ volГ—
 
-# ALIGNMENT: нижний порог ADX.
-# ICP-баг: ADX=13.2 — явный флэт. Alignment ловит медленные тренды (ADX лагует),
-# но 13 это уже шум. Порог 15 отсекает флэт не трогая слабые бычьи тренды.
-ALIGNMENT_ADX_MIN: int = 15
+# в”Ђв”Ђ Exit warnings dedup в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+EXIT_WARN_COOLDOWN_SEC  = 2700   # 45 РјРёРЅСѓС‚: РґРµРґСѓРї exit-warning СЃРѕРѕР±С‰РµРЅРёР№
 
-# ALIGNMENT: минимальный разрыв EMA20/EMA50 в %.
-# MANA-баг: EMA20≈EMA50 (разрыв <0.1%) при MACD≈0 → сигнал на горизонтальном рынке.
-ALIGNMENT_EMA_FAN_MIN: float = 0.1
 
-# ── L. Alignment & Retest Quality Guards ─────────────────────────────────────
-# Защита от слабых сигналов на флэте/горизонтали.
-#
-# MANA 12.03.2026: EMA20=0.0928 ≈ EMA50=0.0927 → alignment на боковике.
-# LTC  12.03.2026: slope=+0.08%, MACD=-0.02 → retest на горизонтальной EMA.
-#
-# ALIGNMENT: добавлен минимальный разрыв EMA20/EMA50 (мягче чем для strong_trend).
-ALIGNMENT_EMA_SEP_MIN: float = 0.05  # ↓ с 0.3% — разрешаем нарождающиеся тренды
-# где EMA20 только что пересекла EMA50 (TIA 15.03.2026: sep=0.085%).
-# 0.3% блокировал именно такие входы. SEI-паттерн (MACD=0) по-прежнему
-# блокируется через ALIGNMENT_MACD_REL_MIN=0.0002. Бэктест: Precision 75→80%.
-#
-# RETEST: поднят минимальный slope (>0 недостаточно), добавлен MACD guard.
-RETEST_SLOPE_MIN:      float = 0.10  # мин. наклон EMA20 % за бар
-# RETEST_MACD guard встроен напрямую (MACD hist >= 0 обязательно)
-ENTRY_QUALITY_RECHECK_ENABLED: bool = True
-ENTRY_QUALITY_RECHECK_MODES: tuple = ("alignment",)
-ENTRY_QUALITY_RECHECK_MAX_BARS: int = 8
-ENTRY_QUALITY_RECHECK_REASON_MARKERS: tuple = ("late alignment",)
-PROFITABLE_WEAK_EXIT_SKIP_COOLDOWN: bool = True
-PROFITABLE_WEAK_EXIT_COOLDOWN_PNL_MIN: float = 0.0
-PROFITABLE_WEAK_EXIT_TF: tuple = ("1h",)
+# в”Ђв”Ђ Paper execution (entry quality) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+PAPER_FEE_BPS = 7.5  # approx taker fee in bps for simulation
+PAPER_QUOTE = 50.0  # simulated quote size per entry (USDT)
