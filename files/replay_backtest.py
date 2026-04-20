@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from monitor import (
     _ml_candidate_ranker_components,
     _ml_candidate_ranker_runtime_bonus,
     _signal_priority,
+    _top_gainer_chase_guard_reason,
 )
 from strategy import (
     _early_15m_continuation_entry_ok,
@@ -38,7 +40,7 @@ from strategy import (
 
 
 BINANCE_URL = "https://api.binance.com/api/v3/klines"
-BAR_MS = {"15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000}
+BAR_MS = {"15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000, "4h": 4 * 60 * 60 * 1000}
 _ML_MODEL_CACHE: Optional[dict] = None
 
 
@@ -56,6 +58,10 @@ class ReplayTrade:
     entry_score: float = 0.0
     ranker_final_score: float = 0.0
     ranker_top_gainer_prob: float = 0.0
+    top_gainer_score: float = 0.0
+    entry_rsi: float = 50.0
+    entry_daily_range: float = 0.0
+    entry_intraday_change_pct: float = 0.0
     exit_ts: int = 0
     exit_price: float = 0.0
     exit_reason: str = ""
@@ -84,8 +90,14 @@ class ReplayCandidate:
     score: float
     ranker_final_score: float = 0.0
     ranker_top_gainer_prob: float = 0.0
+    top_gainer_score: float = 0.0
+    four_h_context_score: float = 0.0
+    four_h_context_label: str = ""
     rsi: float = 50.0
     daily_range: float = 0.0
+    vol_x: float = 0.0
+    adx: float = 0.0
+    intraday_change_pct: float = 0.0
 
 
 @dataclass
@@ -95,6 +107,8 @@ class ReplayRunStats:
     replacements_total: int = 0
     replacements_improved: int = 0
     replacements_worsened: int = 0
+    skipped_top_gainer_score: int = 0
+    skipped_cluster_cap: int = 0
 
 
 def _load_ml_model_payload() -> dict:
@@ -488,7 +502,7 @@ def _entry_candidate(feat: dict, i: int, c: np.ndarray, tf: str) -> Optional[Tup
         return "impulse_speed", getattr(config, "ATR_TRAIL_K_STRONG", 2.5), getattr(config, "MAX_HOLD_BARS_15M", 48), False
     if imp_ok:
         return "impulse", getattr(config, "ATR_TRAIL_K", 2.0), getattr(config, "MAX_HOLD_BARS_15M", 48), False
-    if aln_ok:
+    if aln_ok and bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False)):
         return "alignment", getattr(config, "ATR_TRAIL_K", 2.0), getattr(config, "MAX_HOLD_BARS_15M", 48), False
     return None
 
@@ -684,6 +698,82 @@ def _late_impulse_speed_rotation_reason(
             f"late impulse_speed rotation guard: RSI {rsi:.1f} >= {rsi_min:.1f}, "
             f"daily_range {daily_range:.2f}% >= {range_min:.2f}%"
         )
+    return None
+
+
+def _intraday_change_pct_from_data(data: dict, i: int) -> float:
+    try:
+        t_arr = data.get("t")
+        try:
+            c_arr = data["c"]
+        except Exception:
+            c_arr = None
+        if t_arr is None or c_arr is None or i <= 0:
+            return 0.0
+        ts = int(t_arr[i])
+        day_start = (ts // 86_400_000) * 86_400_000
+        start_idx = 0
+        for j in range(i, -1, -1):
+            if int(t_arr[j]) < day_start:
+                start_idx = min(i, j + 1)
+                break
+        base = float(c_arr[start_idx])
+        current = float(c_arr[i])
+        if base <= 0 or not np.isfinite(base) or not np.isfinite(current):
+            return 0.0
+        return (current / base - 1.0) * 100.0
+    except Exception:
+        return 0.0
+
+
+def _top_gainer_objective_gate_reason(
+    *,
+    tf: str,
+    mode: str,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    candidate_score: float,
+) -> Optional[str]:
+    if not getattr(config, "TOP_GAINER_OBJECTIVE_GATE_ENABLED", False):
+        return None
+    allowed_modes = tuple(
+        str(x)
+        for x in getattr(
+            config,
+            "TOP_GAINER_OBJECTIVE_GATE_MODES",
+            ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse"),
+        )
+    )
+    if allowed_modes and mode not in allowed_modes:
+        return None
+
+    min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_INTRADAY_CHANGE_PCT", 0.35))
+    if mode == "retest":
+        min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_RETEST_MIN_INTRADAY_CHANGE_PCT", 0.75))
+    elif mode in ("trend", "strong_trend", "impulse_speed", "impulse"):
+        min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_MOMENTUM_MIN_INTRADAY_CHANGE_PCT", 1.0))
+
+    strong_score = candidate_score >= float(getattr(config, "TOP_GAINER_OBJECTIVE_STRONG_SCORE_BYPASS", 115.0))
+    strong_adx = adx >= float(getattr(config, "TOP_GAINER_OBJECTIVE_STRONG_ADX_BYPASS", 32.0))
+    if strong_score and strong_adx and intraday_change_pct >= 0.0:
+        return None
+
+    if intraday_change_pct < min_change:
+        return (
+            f"top-gainer objective gate: intraday {intraday_change_pct:+.2f}% "
+            f"< {min_change:.2f}%"
+        )
+    min_range = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_DAILY_RANGE_PCT", 0.90))
+    if daily_range < min_range:
+        return f"top-gainer objective gate: daily_range {daily_range:.2f}% < {min_range:.2f}%"
+    min_vol = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_VOL_X", 1.20))
+    if vol_x < min_vol:
+        return f"top-gainer objective gate: vol_x {vol_x:.2f} < {min_vol:.2f}"
+    min_adx = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_ADX", 20.0))
+    if adx < min_adx:
+        return f"top-gainer objective gate: ADX {adx:.1f} < {min_adx:.1f}"
     return None
 
 
@@ -1148,12 +1238,128 @@ def _mtf_soft_penalty_from_reason(reason: str) -> float:
     return 0.0
 
 
+def _top_gainer_replay_score(
+    *,
+    tf: str,
+    mode: str,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    rsi: float,
+    ranker_final_score: float,
+    ranker_top_gainer_prob: float,
+) -> float:
+    score = 0.0
+    score += max(-8.0, min(45.0, intraday_change_pct * 6.0))
+    score += max(0.0, min(18.0, daily_range * 1.1))
+    score += max(0.0, min(14.0, (vol_x - 1.0) * 7.0))
+    score += max(0.0, min(14.0, (adx - 18.0) * 0.7))
+    score += max(-8.0, min(12.0, ranker_final_score * 6.0))
+    score += max(0.0, min(18.0, ranker_top_gainer_prob * 45.0))
+    if mode in ("impulse_speed", "strong_trend", "trend", "impulse"):
+        score += 5.0
+    elif mode in ("breakout", "retest"):
+        score += 1.5
+    if tf == "15m":
+        score += 1.5
+    if rsi > 76.0 and daily_range >= 8.0:
+        score -= min(16.0, (rsi - 76.0) * 1.2 + (daily_range - 8.0) * 0.4)
+    if daily_range > 25.0:
+        score -= min(18.0, (daily_range - 25.0) * 0.6)
+    if intraday_change_pct < 0.0:
+        score -= 8.0
+    return round(score, 4)
+
+
+def _signal_cluster_bucket_replay(tf: str, mode: str) -> str:
+    if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MODES", ("breakout", "retest")):
+        return "15m_short_bounce"
+    if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES", ("impulse_speed",)):
+        return "15m_impulse"
+    if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MODES", ("trend", "strong_trend", "impulse")):
+        return "15m_momentum"
+    if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MODES", ("alignment",)):
+        return "15m_alignment"
+    if tf == "1h" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES", ("retest",)):
+        return "1h_retest"
+    if tf == "1h" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MODES", ("trend", "strong_trend", "impulse_speed", "impulse")):
+        return "1h_momentum"
+    if tf == "1h" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MODES", ("alignment",)):
+        return "1h_alignment"
+    return f"{tf}_{mode}"
+
+
+def _signal_cluster_cap_replay(bucket: str) -> int:
+    mapping = {
+        "15m_short_bounce": "OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX",
+        "15m_impulse": "OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX",
+        "15m_momentum": "OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MAX",
+        "15m_alignment": "OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MAX",
+        "1h_retest": "OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX",
+        "1h_momentum": "OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MAX",
+        "1h_alignment": "OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MAX",
+    }
+    attr = mapping.get(bucket)
+    return max(1, int(getattr(config, attr, 2))) if attr else 2
+
+
+def _four_h_context_score_replay(
+    sym: str,
+    ts_ms: int,
+    cache_4h: Dict[str, Tuple[np.ndarray, dict]],
+) -> tuple[float, str]:
+    if not bool(getattr(config, "FOUR_H_CONTEXT_SCORE_ENABLED", True)):
+        return 0.0, "disabled"
+    pack = cache_4h.get(sym)
+    if not pack:
+        return 0.0, "4h_missing"
+    data, feat = pack
+    idx = _find_last_closed_index(data["t"], ts_ms)
+    if idx is None or idx < 50:
+        return 0.0, "4h_insufficient"
+    price = float(data["c"][idx])
+    ema20 = float(feat["ema_fast"][idx]) if np.isfinite(feat["ema_fast"][idx]) else 0.0
+    ema50 = float(feat["ema_slow"][idx]) if np.isfinite(feat["ema_slow"][idx]) else 0.0
+    slope = float(feat["ema20_slope"][idx] if "ema20_slope" in feat else feat["slope"][idx]) if np.isfinite(feat["slope"][idx]) else 0.0
+    rsi = float(feat["rsi"][idx]) if np.isfinite(feat["rsi"][idx]) else 50.0
+    vol_x = float(feat["vol_x"][idx]) if np.isfinite(feat["vol_x"][idx]) else 0.0
+    macd_hist = float(feat["macd_hist"][idx]) if np.isfinite(feat["macd_hist"][idx]) else 0.0
+    greens = sum(1 for j in range(max(0, idx - 2), idx + 1) if float(data["c"][j]) > float(data["o"][j]))
+    score = 0.0
+    score += 2.0 if price > ema20 > 0 else -1.5
+    score += 1.2 if price > ema50 > 0 else -0.8
+    score += 1.3 if ema20 > ema50 > 0 else -0.8
+    score += max(-3.0, min(3.0, slope * 1.6))
+    score += 0.8 * greens
+    score += 1.0 if macd_hist > 0 else -1.0
+    if 45.0 <= rsi <= 68.0:
+        score += 0.8
+    elif rsi < 42.0 or rsi > 75.0:
+        score -= 0.8
+    score += 0.5 if vol_x >= 0.8 else -0.5
+    score = max(
+        float(getattr(config, "FOUR_H_CONTEXT_MAX_PENALTY", -6.0)),
+        min(float(getattr(config, "FOUR_H_CONTEXT_MAX_BONUS", 8.0)), score),
+    )
+    if score >= 4.0:
+        label = "4h_bull_context"
+    elif score >= 1.0:
+        label = "4h_recovery_context"
+    elif score <= -2.0:
+        label = "4h_weak_context"
+    else:
+        label = "4h_neutral_context"
+    return round(score, 4), label
+
+
 async def _build_candidates_for_symbol(
     sym: str,
     tf: str,
     data: np.ndarray,
     feat: dict,
     cache_15m: Dict[str, Tuple[np.ndarray, dict]],
+    cache_4h: Dict[str, Tuple[np.ndarray, dict]],
     market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
 ) -> List[ReplayCandidate]:
     candidates: List[ReplayCandidate] = []
@@ -1191,6 +1397,8 @@ async def _build_candidates_for_symbol(
             )
             base_score = _candidate_score(feat, i, c, mode)
             candidate_score = base_score
+            four_h_context_score, four_h_context_label = _four_h_context_score_replay(sym, ts_ms, cache_4h)
+            candidate_score += four_h_context_score * float(getattr(config, "FOUR_H_CONTEXT_SCORE_WEIGHT", 1.0))
             if early_15m_continuation:
                 candidate_score += float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_SCORE_BONUS", 10.0))
             slope_arr = feat.get("ema20_slope", feat.get("slope"))
@@ -1309,6 +1517,24 @@ async def _build_candidates_for_symbol(
                 signal_flags=signal_flags,
             )
             candidate_score += _ml_candidate_ranker_runtime_bonus(ranker_info)
+            if _top_gainer_chase_guard_reason(
+                tf=tf,
+                mode=mode,
+                rsi=rsi,
+                daily_range=daily_range,
+            ):
+                continue
+            intraday_change_pct = _intraday_change_pct_from_data(data, i)
+            if _top_gainer_objective_gate_reason(
+                tf=tf,
+                mode=mode,
+                intraday_change_pct=intraday_change_pct,
+                daily_range=daily_range,
+                vol_x=preview_vol,
+                adx=adx,
+                candidate_score=candidate_score,
+            ):
+                continue
             if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False):
                 min_score = score_floor
                 if candidate_score < min_score:
@@ -1399,6 +1625,19 @@ async def _build_candidates_for_symbol(
                 is_bull_day=is_bull_day,
                 last_time_block_ts=last_time_block_ts,
             )
+            ranker_final_score = float((ranker_info or {}).get("final_score", 0.0))
+            ranker_top_gainer_prob = float((ranker_info or {}).get("top_gainer_prob", 0.0))
+            top_gainer_score = _top_gainer_replay_score(
+                tf=tf,
+                mode=mode,
+                intraday_change_pct=intraday_change_pct,
+                daily_range=daily_range,
+                vol_x=preview_vol,
+                adx=adx,
+                rsi=rsi,
+                ranker_final_score=ranker_final_score,
+                ranker_top_gainer_prob=ranker_top_gainer_prob,
+            )
             candidates.append(
                 ReplayCandidate(
                     sym=sym,
@@ -1410,10 +1649,16 @@ async def _build_candidates_for_symbol(
                     trail_k=trail_k,
                     max_hold_bars=max_hold,
                     score=candidate_score,
-                    ranker_final_score=float((ranker_info or {}).get("final_score", 0.0)),
-                    ranker_top_gainer_prob=float((ranker_info or {}).get("top_gainer_prob", 0.0)),
+                    ranker_final_score=ranker_final_score,
+                    ranker_top_gainer_prob=ranker_top_gainer_prob,
+                    top_gainer_score=top_gainer_score,
+                    four_h_context_score=four_h_context_score,
+                    four_h_context_label=four_h_context_label,
                     rsi=rsi,
                     daily_range=daily_range,
+                    vol_x=preview_vol,
+                    adx=adx,
+                    intraday_change_pct=intraday_change_pct,
                 )
             )
     finally:
@@ -1707,11 +1952,14 @@ async def simulate_portfolio(
     timeframes: List[str],
     cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
     cache_15m: Dict[str, Tuple[np.ndarray, dict]],
+    cache_4h: Dict[str, Tuple[np.ndarray, dict]],
     market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
     *,
     max_open_positions: int,
     enable_replacement: bool,
     replace_min_delta: float,
+    variant: str = "baseline",
+    top_gainer_score_min: float = 0.0,
 ) -> Tuple[List[ReplayTrade], ReplayRunStats]:
     candidates_by_ts: Dict[int, List[ReplayCandidate]] = {}
     timestamps: set[int] = set()
@@ -1724,7 +1972,7 @@ async def simulate_portfolio(
                 continue
             data, feat = pack
             timestamps.update(int(x) for x in data["t"][max(25, 5):])
-            built = await _build_candidates_for_symbol(sym, tf, data, feat, cache_15m, market_ctx)
+            built = await _build_candidates_for_symbol(sym, tf, data, feat, cache_15m, cache_4h, market_ctx)
             stats.candidates_total += len(built)
             for candidate in built:
                 candidates_by_ts.setdefault(candidate.ts_ms, []).append(candidate)
@@ -1769,8 +2017,11 @@ async def simulate_portfolio(
         if not ts_candidates:
             continue
 
+        use_top_gainer_score = variant in {"score", "score_replace", "score_replace_cluster"}
+        use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
             key=lambda item: (
+                item.top_gainer_score if use_top_gainer_score else item.score,
                 item.score,
                 _signal_priority(item.mode),
                 item.price,
@@ -1778,11 +2029,32 @@ async def simulate_portfolio(
             reverse=True,
         )
         for candidate in ts_candidates:
+            if use_top_gainer_score and candidate.top_gainer_score < top_gainer_score_min:
+                stats.skipped_top_gainer_score += 1
+                continue
             sym_cooldown = cooldown_until.get(candidate.sym, 0)
             if ts_ms < sym_cooldown:
                 continue
             if any(trade.sym == candidate.sym for trade in open_positions.values()):
                 continue
+            candidate_bucket = _signal_cluster_bucket_replay(candidate.tf, candidate.mode)
+            if use_cluster_cap:
+                same_cluster = [
+                    key for key, trade in open_positions.items()
+                    if _signal_cluster_bucket_replay(trade.tf, trade.mode) == candidate_bucket
+                ]
+                if len(same_cluster) >= _signal_cluster_cap_replay(candidate_bucket):
+                    if not enable_replacement:
+                        stats.skipped_cluster_cap += 1
+                        continue
+                    # A same-cluster replacement keeps exposure flat; cross-cluster replacement would exceed the cap.
+                    cluster_replaceable_exists = any(
+                        _signal_priority(candidate.mode) >= _signal_priority(open_positions[key].mode)
+                        for key in same_cluster
+                    )
+                    if not cluster_replaceable_exists:
+                        stats.skipped_cluster_cap += 1
+                        continue
             if candidate.tf == "1h" and candidate.mode == "impulse_speed":
                 impulse_cap = int(getattr(config, "MAX_CONCURRENT_1H_IMPULSE_SPEED_POSITIONS", 0))
                 if impulse_cap > 0:
@@ -1815,8 +2087,18 @@ async def simulate_portfolio(
                 if use_ranker_rotation and not _candidate_ranker_rotation_ok(candidate):
                     stats.skipped_portfolio_full += 1
                     continue
-                candidate_rotation_score = _candidate_rotation_score(candidate) if use_ranker_rotation else float(candidate.score)
+                candidate_rotation_score = (
+                    float(candidate.top_gainer_score)
+                    if use_top_gainer_score
+                    else (_candidate_rotation_score(candidate) if use_ranker_rotation else float(candidate.score))
+                )
                 for open_key, open_trade in open_positions.items():
+                    if use_cluster_cap and len([
+                        trade for trade in open_positions.values()
+                        if _signal_cluster_bucket_replay(trade.tf, trade.mode) == candidate_bucket
+                    ]) >= _signal_cluster_cap_replay(candidate_bucket):
+                        if _signal_cluster_bucket_replay(open_trade.tf, open_trade.mode) != candidate_bucket:
+                            continue
                     if _signal_priority(candidate.mode) < _signal_priority(open_trade.mode):
                         continue
                     open_data, open_feat = cache[(open_trade.sym, open_trade.tf)]
@@ -1840,8 +2122,12 @@ async def simulate_portfolio(
                         ):
                             continue
                         weakest_rotation_score = _trade_rotation_score(open_trade)
-                    score_to_compare = candidate_rotation_score if use_ranker_rotation else float(candidate.score)
-                    baseline_score = weakest_rotation_score if use_ranker_rotation else weakest_score
+                    if use_top_gainer_score:
+                        score_to_compare = candidate_rotation_score
+                        baseline_score = float(getattr(open_trade, "top_gainer_score", 0.0))
+                    else:
+                        score_to_compare = candidate_rotation_score if use_ranker_rotation else float(candidate.score)
+                        baseline_score = weakest_rotation_score if use_ranker_rotation else weakest_score
                     if score_to_compare < baseline_score + candidate_min_delta + extra_delta:
                         continue
                     replaceable.append((baseline_score, open_key, open_trade, idx, price))
@@ -1882,6 +2168,10 @@ async def simulate_portfolio(
                 entry_score=candidate.score,
                 ranker_final_score=float(getattr(candidate, "ranker_final_score", 0.0)),
                 ranker_top_gainer_prob=float(getattr(candidate, "ranker_top_gainer_prob", 0.0)),
+                top_gainer_score=float(getattr(candidate, "top_gainer_score", 0.0)),
+                entry_rsi=float(getattr(candidate, "rsi", 50.0)),
+                entry_daily_range=float(getattr(candidate, "daily_range", 0.0)),
+                entry_intraday_change_pct=float(getattr(candidate, "intraday_change_pct", 0.0)),
             )
 
     for key, trade in list(open_positions.items()):
@@ -1905,6 +2195,7 @@ async def simulate_symbol(
     timeframes: List[str],
     cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
     cache_15m: Dict[str, Tuple[np.ndarray, dict]],
+    cache_4h: Optional[Dict[str, Tuple[np.ndarray, dict]]] = None,
     *,
     max_open_positions: int,
     enable_replacement: bool,
@@ -1916,10 +2207,13 @@ async def simulate_symbol(
         timeframes,
         cache,
         cache_15m,
+        cache_4h or {},
         None,
         max_open_positions=max_open_positions,
         enable_replacement=enable_replacement,
         replace_min_delta=replace_min_delta,
+        variant="score_replace" if enable_replacement else "baseline",
+        top_gainer_score_min=0.0,
     )
     return trades
 
@@ -1933,8 +2227,23 @@ def _make_report(
     trades: List[ReplayTrade],
     run_stats: ReplayRunStats,
     label: str,
+    final_top_symbols: Optional[set[str]] = None,
 ) -> dict:
     summary = summarize_trades(trades)
+    final_top_symbols = final_top_symbols or set()
+    traded_symbols = {t.sym for t in trades}
+    captured_symbols = sorted(traded_symbols & final_top_symbols)
+    objective = {
+        "final_top_n": len(final_top_symbols),
+        "captured_top_symbols": captured_symbols,
+        "capture_rate": round(len(captured_symbols) / len(final_top_symbols), 4) if final_top_symbols else 0.0,
+        "symbol_precision": round(len(captured_symbols) / len(traded_symbols), 4) if traded_symbols and final_top_symbols else 0.0,
+        "trade_precision": round(
+            sum(1 for t in trades if t.sym in final_top_symbols) / len(trades),
+            4,
+        ) if trades and final_top_symbols else 0.0,
+        "non_objective_symbols": sorted(traded_symbols - final_top_symbols),
+    }
     return {
         "label": label,
         "window_start": start.isoformat(),
@@ -1949,11 +2258,40 @@ def _make_report(
             "replacements_total": run_stats.replacements_total,
             "replacements_improved": run_stats.replacements_improved,
             "replacements_worsened": run_stats.replacements_worsened,
+            "skipped_top_gainer_score": run_stats.skipped_top_gainer_score,
+            "skipped_cluster_cap": run_stats.skipped_cluster_cap,
         },
         "summary": summary,
+        "objective": objective,
         "suggestions": build_suggestions(summary),
         "examples": [_trade_to_example(t) for t in trades[:20]],
     }
+
+
+def _final_top_symbols(
+    symbols: List[str],
+    cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
+    top_n: int = 10,
+) -> set[str]:
+    ranked: List[tuple[float, str]] = []
+    for sym in symbols:
+        item = cache.get((sym, "15m"))
+        if not item:
+            continue
+        data, _ = item
+        try:
+            c_arr = data["c"]
+        except Exception:
+            c_arr = None
+        if c_arr is None or len(c_arr) < 3:
+            continue
+        start_price = float(c_arr[0])
+        end_price = float(c_arr[-2])
+        if start_price <= 0 or not np.isfinite(start_price) or not np.isfinite(end_price):
+            continue
+        ranked.append(((end_price / start_price - 1.0) * 100.0, sym))
+    ranked.sort(reverse=True)
+    return {sym for _, sym in ranked[:top_n]}
 
 
 async def run_replay(
@@ -1964,6 +2302,9 @@ async def run_replay(
     max_open_positions: int,
     compare_baseline: bool,
     replace_min_delta: float,
+    variant: str = "score_replace",
+    top_gainer_score_min: float = 0.0,
+    objective_top_n: int = 10,
 ) -> dict:
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
@@ -1974,7 +2315,7 @@ async def run_replay(
         cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]] = {}
         fetch_symbols = list(dict.fromkeys(list(symbols) + ["BTCUSDT"]))
         for sym in fetch_symbols:
-            for tf in sorted(set(timeframes) | {"15m"}):
+            for tf in sorted(set(timeframes) | {"15m", "4h"}):
                 data = await fetch_klines(session, sym, tf, start_ms, end_ms)
                 if data is None:
                     continue
@@ -1982,16 +2323,24 @@ async def run_replay(
                 cache[(sym, tf)] = (data, feat)
 
     cache_15m = {sym: cache[(sym, "15m")] for sym in symbols if (sym, "15m") in cache}
+    cache_4h = {sym: cache[(sym, "4h")] for sym in symbols if (sym, "4h") in cache}
     market_ctx = _build_bull_day_context(cache.get(("BTCUSDT", "1h"), (None, None))[0] if ("BTCUSDT", "1h") in cache else None)
+    final_top_symbols = _final_top_symbols(symbols, cache, top_n=objective_top_n)
+    enable_replacement = variant in {"score_replace", "score_replace_cluster"} or (
+        variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
+    )
     portfolio_trades, portfolio_stats = await simulate_portfolio(
         symbols,
         timeframes,
         cache,
         cache_15m,
+        cache_4h,
         market_ctx,
         max_open_positions=max_open_positions,
-        enable_replacement=bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True)),
+        enable_replacement=enable_replacement,
         replace_min_delta=replace_min_delta,
+        variant=variant,
+        top_gainer_score_min=top_gainer_score_min,
     )
     reports = {
         "portfolio": _make_report(
@@ -2002,6 +2351,7 @@ async def run_replay(
             trades=portfolio_trades,
             run_stats=portfolio_stats,
             label="portfolio",
+            final_top_symbols=final_top_symbols,
         )
     }
 
@@ -2011,10 +2361,13 @@ async def run_replay(
             timeframes,
             cache,
             cache_15m,
+            cache_4h,
             market_ctx,
             max_open_positions=max_open_positions,
             enable_replacement=False,
             replace_min_delta=replace_min_delta,
+            variant="baseline",
+            top_gainer_score_min=0.0,
         )
         reports["baseline"] = _make_report(
             start=start,
@@ -2024,6 +2377,7 @@ async def run_replay(
             trades=baseline_trades,
             run_stats=baseline_stats,
             label="baseline",
+            final_top_symbols=final_top_symbols,
         )
 
     comparison = {}
@@ -2056,6 +2410,9 @@ async def run_replay(
         "timeframes": timeframes,
         "max_open_positions": max_open_positions,
         "replace_min_delta": replace_min_delta,
+        "variant": variant,
+        "top_gainer_score_min": top_gainer_score_min,
+        "objective_top_n": objective_top_n,
         "reports": reports,
         "comparison": comparison,
     }
@@ -2067,6 +2424,7 @@ def render_text(report: dict) -> str:
         f"Window: {report['window_start']} .. {report['window_end']}",
         f"Symbols: {len(report['symbols'])}, timeframes: {', '.join(report['timeframes'])}",
         f"Portfolio size: {report['max_open_positions']}, replace delta: {report['replace_min_delta']:.2f}",
+        f"Variant: {report.get('variant', 'n/a')}, top-gainer min score: {report.get('top_gainer_score_min', 0.0):.2f}, objective top N: {report.get('objective_top_n', 10)}",
     ]
     for name, sub in report["reports"].items():
         totals = sub["totals"]
@@ -2078,6 +2436,8 @@ def render_text(report: dict) -> str:
                 f"  Trades: {sub['trades_total']}",
                 f"  Totals: pnl_total={totals['pnl_total']:+.4f}% pnl_avg={totals['pnl_avg']:+.4f}% win_rate={totals['win_rate']:.1%}",
                 f"  Flow: candidates={run_stats['candidates_total']} skipped_full={run_stats['skipped_portfolio_full']} replacements={run_stats['replacements_total']}",
+                f"  Objective: symbol_precision={sub['objective']['symbol_precision']:.1%} trade_precision={sub['objective']['trade_precision']:.1%} recall={sub['objective']['capture_rate']:.1%} captured={len(sub['objective']['captured_top_symbols'])}/{sub['objective']['final_top_n']}",
+                f"  Score/cluster skips: score={run_stats.get('skipped_top_gainer_score', 0)} cluster={run_stats.get('skipped_cluster_cap', 0)}",
                 "  By mode:",
             ]
         )
@@ -2127,6 +2487,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeframes", nargs="*", default=["15m", "1h"])
     parser.add_argument("--max-open-positions", type=int, default=getattr(config, "MAX_OPEN_POSITIONS", 6))
     parser.add_argument("--replace-min-delta", type=float, default=getattr(config, "PORTFOLIO_REPLACE_MIN_DELTA", 8.0))
+    parser.add_argument(
+        "--variant",
+        choices=["baseline", "score", "score_replace", "score_replace_cluster"],
+        default="score_replace",
+    )
+    parser.add_argument("--top-gainer-score-min", type=float, default=18.0)
+    parser.add_argument("--objective-top-n", type=int, default=15)
     parser.add_argument("--no-baseline", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json")
     return parser.parse_args()
@@ -2134,6 +2501,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     symbols = args.symbols or config.load_watchlist()
     report = asyncio.run(
         run_replay(
@@ -2143,6 +2514,9 @@ def main() -> None:
             max_open_positions=args.max_open_positions,
             compare_baseline=not args.no_baseline,
             replace_min_delta=args.replace_min_delta,
+            variant=args.variant,
+            top_gainer_score_min=args.top_gainer_score_min,
+            objective_top_n=args.objective_top_n,
         )
     )
     if args.as_json:
