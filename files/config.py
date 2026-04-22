@@ -374,7 +374,7 @@ OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MAX: int = 2
 # Agent: use full portfolio capacity. Top-mover leader_score decides the top 10;
 # do not let the coarse "momentum" mode cluster collapse the portfolio to 2.
 AGENT_MAX_POSITIONS: int = 10
-AGENT_ALLOWED_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse_speed")
+AGENT_ALLOWED_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse_speed", "4h_leader_watch")
 AGENT_ALLOWED_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
 AGENT_MIN_DAY_CHANGE_PCT: float = 1.25
 AGENT_MIN_FORECAST_PROXY_PCT: float = 0.35
@@ -400,6 +400,28 @@ FOUR_H_CONTEXT_SCORE_WEIGHT: float = 1.0
 FOUR_H_CONTEXT_LEADER_WEIGHT: float = 0.8
 FOUR_H_CONTEXT_MAX_BONUS: float = 8.0
 FOUR_H_CONTEXT_MAX_PENALTY: float = -6.0
+
+# 4h leader watch: entry trigger for coins that already lead on 4h but were
+# missed by normal 15m/1h patterns because generic intraday gates are too tight.
+# It still requires fresh 15m/1h confirmation; 4h context alone is not enough.
+AGENT_4H_LEADER_WATCH_ENABLED: bool = True
+AGENT_4H_LEADER_MIN_CONTEXT_SCORE: float = 7.0
+AGENT_4H_LEADER_MIN_TODAY_CHANGE_PCT: float = 4.0
+AGENT_4H_LEADER_MAX_DAILY_RANGE_PCT: float = 35.0
+AGENT_4H_LEADER_MIN_ADX: float = 30.0
+AGENT_4H_LEADER_MIN_SLOPE: float = 0.35
+AGENT_4H_LEADER_MIN_RSI: float = 50.0
+AGENT_4H_LEADER_MAX_RSI: float = 78.0
+AGENT_4H_LEADER_MIN_VOL_X: float = 0.35
+AGENT_4H_LEADER_RECLAIM_MAX_PRICE_EDGE_PCT: float = 8.0
+AGENT_4H_LEADER_PULLBACK_MAX_PRICE_EDGE_PCT: float = 3.5
+AGENT_4H_LEADER_MIN_MACD_HIST: float = 0.0
+AGENT_4H_LEADER_BONUS: float = 10.0
+AGENT_4H_LEADER_TRAIL_K: float = 2.8
+AGENT_4H_LEADER_MAX_HOLD_BARS_15M: int = 48
+AGENT_4H_LEADER_MAX_HOLD_BARS_1H: int = 16
+AGENT_4H_LEADER_BYPASS_SYMBOL_COOLDOWN: bool = True
+AGENT_4H_LEADER_COOLDOWN_MIN_LEADER_SCORE: float = 55.0
 
 # Main bot anti-chase gate: keep generic signal logic, but block extreme late
 # top-gainer chases that are already far beyond a normal intraday leader move.
