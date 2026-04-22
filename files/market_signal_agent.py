@@ -1197,6 +1197,65 @@ def _candidate_fits_portfolio(candidate: dict, positions: Dict[str, AgentPositio
     return True, ""
 
 
+def _candidate_rank_key(candidate: dict) -> tuple[float, float, float, float, float, float]:
+    return (
+        float(candidate.get("leader_score", 0.0)),
+        float(candidate.get("today_change_pct", 0.0)),
+        float(candidate.get("forecast_return_pct", 0.0)),
+        float(candidate.get("four_h_context_score", 0.0)),
+        float(candidate.get("adx", 0.0)),
+        float(candidate.get("vol_x", 0.0)),
+    )
+
+
+def _position_rank_key(pos: AgentPosition) -> tuple[float, float, float, float, float, float]:
+    return (
+        float(getattr(pos, "leader_score", 0.0)),
+        float(getattr(pos, "today_change_pct", 0.0)),
+        float(getattr(pos, "forecast_return_pct", 0.0)),
+        float(getattr(pos, "four_h_context_score", 0.0)),
+        float(getattr(pos, "entry_adx", 0.0)),
+        float(getattr(pos, "entry_vol_x", 0.0)),
+    )
+
+
+def _candidate_better_than_position(candidate: dict, pos: AgentPosition) -> bool:
+    min_delta = float(getattr(config, "AGENT_REPLACEMENT_MIN_LEADER_DELTA", 0.0))
+    candidate_leader = float(candidate.get("leader_score", 0.0))
+    position_leader = float(getattr(pos, "leader_score", 0.0))
+    if candidate_leader < position_leader + min_delta:
+        return False
+    return _candidate_rank_key(candidate) > _position_rank_key(pos)
+
+
+def _find_replacement_target(
+    candidate: dict,
+    positions: Dict[str, AgentPosition],
+) -> tuple[Optional[str], Optional[AgentPosition], str]:
+    symbol = str(candidate["symbol"])
+    if any(pos.symbol == symbol for pos in positions.values()):
+        return None, None, f"symbol already open: {symbol}"
+
+    ranked_open = sorted(positions.items(), key=lambda item: _position_rank_key(item[1]))
+    last_reject = ""
+    for key, pos in ranked_open:
+        if not _candidate_better_than_position(candidate, pos):
+            last_reject = (
+                f"candidate leader {float(candidate.get('leader_score', 0.0)):.2f} "
+                f"<= {pos.symbol} leader {float(getattr(pos, 'leader_score', 0.0)):.2f}"
+            )
+            continue
+
+        remaining = dict(positions)
+        remaining.pop(key, None)
+        ok, reason = _candidate_fits_portfolio(candidate, remaining, [])
+        if ok:
+            return key, pos, ""
+        last_reject = reason
+
+    return None, None, last_reject or "no weaker replaceable position"
+
+
 async def _open_selected_candidate(
     session: aiohttp.ClientSession,
     positions: Dict[str, AgentPosition],
@@ -1247,6 +1306,42 @@ async def _open_selected_candidate(
     )
     await _send_entry_alert(session, pos)
     return f"{pos.symbol} [{pos.tf}] {pos.signal_mode}"
+
+
+async def _replace_position_with_candidate(
+    session: aiohttp.ClientSession,
+    positions: Dict[str, AgentPosition],
+    last_exit_bar: Dict[str, int],
+    symbol_cooldown_until: Dict[str, int],
+    old_key: str,
+    old_pos: AgentPosition,
+    candidate: dict,
+) -> str:
+    exit_price = float(old_pos.mark_price or old_pos.entry_price)
+    exit_ts = int(old_pos.last_bar_ts or old_pos.entry_ts)
+    reason = (
+        "portfolio replacement: "
+        f"{candidate['symbol']} leader {float(candidate.get('leader_score', 0.0)):.2f} "
+        f"> {old_pos.symbol} leader {float(getattr(old_pos, 'leader_score', 0.0)):.2f}"
+    )
+    agentlog.log_exit(
+        sym=old_pos.symbol,
+        tf=old_pos.tf,
+        mode=old_pos.signal_mode,
+        entry_price=old_pos.entry_price,
+        exit_price=exit_price,
+        reason=reason,
+        bars_held=old_pos.bars_elapsed,
+        trail_k=old_pos.trail_k,
+    )
+    await _send_exit_alert(session, old_pos, exit_price, reason)
+    last_exit_bar[old_key] = exit_ts
+    symbol_cooldown_until[old_pos.symbol] = _next_local_day_start_utc_ms(exit_ts)
+    positions.pop(old_key, None)
+    _save_positions(positions)
+
+    opened = await _open_selected_candidate(session, positions, candidate)
+    return f"{opened} replaced {old_pos.symbol} [{old_pos.tf}]"
 
 
 async def _prune_positions_to_limit(
@@ -1343,67 +1438,98 @@ async def _run_cycle(
     await _prune_positions_to_limit(session, positions, last_exit_bar, symbol_cooldown_until)
 
     max_positions = int(getattr(config, "AGENT_MAX_POSITIONS", 2))
-    if len(positions) < max_positions:
-        sem = asyncio.Semaphore(12)
-        candidates: list[dict] = []
+    sem = asyncio.Semaphore(12)
+    candidates: list[dict] = []
 
-        async def _wrapped_candidate(sym: str, tf: str) -> None:
-            async with sem:
-                try:
-                    candidate = await _scan_symbol_tf_candidate(
-                        session,
-                        positions,
-                        last_exit_bar,
-                        symbol_cooldown_until,
-                        sym,
-                        tf,
-                    )
-                    if candidate is not None:
-                        candidates.append(candidate)
-                except Exception as exc:
-                    log.warning("agent candidate scan error %s [%s]: %s", sym, tf, exc)
-
-        await asyncio.gather(*[_wrapped_candidate(sym, tf) for sym in symbols for tf in config.TIMEFRAMES])
-
-        best_by_symbol: Dict[str, dict] = {}
-        for candidate in candidates:
-            symbol = str(candidate["symbol"])
-            current = best_by_symbol.get(symbol)
-            if current is None or float(candidate.get("leader_score", 0.0)) > float(current.get("leader_score", 0.0)):
-                best_by_symbol[symbol] = candidate
-
-        ranked_candidates = sorted(
-            best_by_symbol.values(),
-            key=lambda item: (
-                float(item.get("leader_score", 0.0)),
-                float(item.get("today_change_pct", 0.0)),
-                float(item.get("forecast_return_pct", 0.0)),
-            ),
-            reverse=True,
-        )
-
-        selected: list[dict] = []
-        for candidate in ranked_candidates:
-            if len(positions) + len(selected) >= max_positions:
-                break
-            ok, reason = _candidate_fits_portfolio(candidate, positions, selected)
-            if not ok:
-                agentlog.log_blocked(
-                    str(candidate["symbol"]),
-                    str(candidate["tf"]),
-                    float(candidate["price"]),
-                    reason,
-                    signal_type="agent_portfolio_filter",
-                    rsi=float(candidate["rsi"]),
-                    adx=float(candidate["adx"]),
-                    vol_x=float(candidate["vol_x"]),
-                    daily_range=float(candidate["daily_range"]),
+    async def _wrapped_candidate(sym: str, tf: str) -> None:
+        async with sem:
+            try:
+                candidate = await _scan_symbol_tf_candidate(
+                    session,
+                    positions,
+                    last_exit_bar,
+                    symbol_cooldown_until,
+                    sym,
+                    tf,
                 )
-                continue
-            selected.append(candidate)
+                if candidate is not None:
+                    candidates.append(candidate)
+            except Exception as exc:
+                log.warning("agent candidate scan error %s [%s]: %s", sym, tf, exc)
 
-        for candidate in selected:
-            entries.append(await _open_selected_candidate(session, positions, candidate))
+    # Always scan the watchlist, even when the portfolio is full. Full portfolios
+    # are improved through replacement rather than becoming blind to new leaders.
+    await asyncio.gather(*[_wrapped_candidate(sym, tf) for sym in symbols for tf in config.TIMEFRAMES])
+
+    best_by_symbol: Dict[str, dict] = {}
+    for candidate in candidates:
+        symbol = str(candidate["symbol"])
+        current = best_by_symbol.get(symbol)
+        if current is None or _candidate_rank_key(candidate) > _candidate_rank_key(current):
+            best_by_symbol[symbol] = candidate
+
+    ranked_candidates = sorted(best_by_symbol.values(), key=_candidate_rank_key, reverse=True)
+
+    selected: list[dict] = []
+    for candidate in ranked_candidates:
+        if len(positions) + len(selected) >= max_positions:
+            break
+        ok, reason = _candidate_fits_portfolio(candidate, positions, selected)
+        if not ok:
+            agentlog.log_blocked(
+                str(candidate["symbol"]),
+                str(candidate["tf"]),
+                float(candidate["price"]),
+                reason,
+                signal_type="agent_portfolio_filter",
+                rsi=float(candidate["rsi"]),
+                adx=float(candidate["adx"]),
+                vol_x=float(candidate["vol_x"]),
+                daily_range=float(candidate["daily_range"]),
+            )
+            continue
+        selected.append(candidate)
+
+    for candidate in selected:
+        entries.append(await _open_selected_candidate(session, positions, candidate))
+
+    if bool(getattr(config, "AGENT_REPLACEMENT_ENABLED", True)) and len(positions) >= max_positions:
+        replacements_done = 0
+        max_replacements = max(0, int(getattr(config, "AGENT_MAX_REPLACEMENTS_PER_CYCLE", max_positions)))
+        for candidate in ranked_candidates:
+            if replacements_done >= max_replacements:
+                break
+            if any(pos.symbol == str(candidate["symbol"]) for pos in positions.values()):
+                continue
+
+            old_key, old_pos, reason = _find_replacement_target(candidate, positions)
+            if old_key is None or old_pos is None:
+                if reason:
+                    agentlog.log_blocked(
+                        str(candidate["symbol"]),
+                        str(candidate["tf"]),
+                        float(candidate["price"]),
+                        f"replacement skipped: {reason}",
+                        signal_type="agent_replacement_filter",
+                        rsi=float(candidate["rsi"]),
+                        adx=float(candidate["adx"]),
+                        vol_x=float(candidate["vol_x"]),
+                        daily_range=float(candidate["daily_range"]),
+                    )
+                continue
+
+            entries.append(
+                await _replace_position_with_candidate(
+                    session,
+                    positions,
+                    last_exit_bar,
+                    symbol_cooldown_until,
+                    old_key,
+                    old_pos,
+                    candidate,
+                )
+            )
+            replacements_done += 1
 
     agentlog.log_analysis(
         n_scanned=len(symbols) * len(config.TIMEFRAMES),
