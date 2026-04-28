@@ -106,6 +106,7 @@ def signal_mode_label(mode: str) -> str:
         "trend": "📈 Тренд",
         "strong_trend": "💪 Сильный тренд",
         "impulse_speed": "⚡ Быстрое движение",
+        "4h_leader_watch": "🧭 4h лидер",
         "retest": "🔄 Ретест EMA20",
         "breakout": "⚡ Пробой флэта",
         "impulse": "🚀 Импульс",

@@ -39,6 +39,8 @@ def _entry_signal_score(
         score += 0.4
     if mode in ("breakout", "impulse_speed"):
         score += 0.3
+    if mode == "4h_leader_watch":
+        score += 0.8
     if mode == "alignment":
         score -= 0.2
     return float(score)
@@ -371,6 +373,14 @@ async def _send_telegram(session: aiohttp.ClientSession, text: str) -> None:
 
 
 def _entry_params(mode: str, tf: str) -> tuple[float, int]:
+    if mode == "4h_leader_watch":
+        trail_k = float(getattr(config, "AGENT_4H_LEADER_TRAIL_K", 2.8))
+        hold = int(
+            getattr(config, "AGENT_4H_LEADER_MAX_HOLD_BARS_15M", 48)
+            if tf == "15m"
+            else getattr(config, "AGENT_4H_LEADER_MAX_HOLD_BARS_1H", 16)
+        )
+        return trail_k, hold
     if mode == "breakout":
         return float(getattr(config, "ATR_TRAIL_K_BREAKOUT", 1.5)), int(getattr(config, "MAX_HOLD_BARS_BREAKOUT", 6))
     if mode == "retest":
@@ -430,6 +440,7 @@ def _mode_label(mode: str) -> str:
         "trend": "📈 Тренд",
         "strong_trend": "💪 Сильный тренд",
         "impulse_speed": "⚡️ Быстрое движение",
+        "4h_leader_watch": "🧭 4h лидер",
         "retest": "🔄 Ретест EMA20",
         "breakout": "⚡️ Пробой флэта",
         "impulse": "🚀 Импульс",
@@ -492,7 +503,7 @@ def _agent_allowed_modes() -> tuple[str, ...]:
 
 
 def _mode_cluster(mode: str) -> str:
-    if mode in ("trend", "strong_trend", "impulse_speed"):
+    if mode in ("trend", "strong_trend", "impulse_speed", "4h_leader_watch"):
         return "momentum"
     if mode in ("breakout", "retest"):
         return "breakout_retest"
@@ -573,6 +584,7 @@ def _leader_score(
 ) -> float:
     mode_bonus = {
         "strong_trend": 2.2,
+        "4h_leader_watch": 3.0,
         "impulse_speed": 1.6,
         "trend": 0.9,
         "alignment": -1.0,
@@ -653,6 +665,73 @@ async def _four_h_context_score(
         return 0.0, "4h_error"
 
 
+def _four_h_leader_watch_reason(
+    *,
+    tf: str,
+    price: float,
+    ema20: float,
+    ema50: float,
+    slope: float,
+    adx: float,
+    rsi: float,
+    vol_x: float,
+    daily_range: float,
+    today_change_pct: float,
+    macd_hist: float,
+    four_h_score: float,
+    c: np.ndarray,
+    i: int,
+) -> str:
+    if not bool(getattr(config, "AGENT_4H_LEADER_WATCH_ENABLED", True)):
+        return "4h leader watch disabled"
+    if tf not in tuple(str(x) for x in getattr(config, "AGENT_ALLOWED_TIMEFRAMES", ("15m", "1h"))):
+        return f"agent timeframe disabled: {tf}"
+    min_context = float(getattr(config, "AGENT_4H_LEADER_MIN_CONTEXT_SCORE", 7.0))
+    if four_h_score < min_context:
+        return f"4h context {four_h_score:.2f} < {min_context:.2f}"
+    min_day = float(getattr(config, "AGENT_4H_LEADER_MIN_TODAY_CHANGE_PCT", 4.0))
+    if today_change_pct < min_day:
+        return f"day change {today_change_pct:.2f}% < {min_day:.2f}%"
+    max_range = float(getattr(config, "AGENT_4H_LEADER_MAX_DAILY_RANGE_PCT", 35.0))
+    if daily_range > max_range:
+        return f"daily range {daily_range:.2f}% > {max_range:.2f}%"
+    min_adx = float(getattr(config, "AGENT_4H_LEADER_MIN_ADX", 30.0))
+    if adx < min_adx:
+        return f"ADX {adx:.1f} < {min_adx:.1f}"
+    min_slope = float(getattr(config, "AGENT_4H_LEADER_MIN_SLOPE", 0.35))
+    if slope < min_slope:
+        return f"slope {slope:.2f}% < {min_slope:.2f}%"
+    min_rsi = float(getattr(config, "AGENT_4H_LEADER_MIN_RSI", 50.0))
+    max_rsi = float(getattr(config, "AGENT_4H_LEADER_MAX_RSI", 78.0))
+    if rsi < min_rsi:
+        return f"RSI {rsi:.1f} < {min_rsi:.1f}"
+    if rsi > max_rsi:
+        return f"RSI {rsi:.1f} > {max_rsi:.1f}"
+    min_vol = float(getattr(config, "AGENT_4H_LEADER_MIN_VOL_X", 0.65))
+    if vol_x < min_vol:
+        return f"vol_x {vol_x:.2f} < {min_vol:.2f}"
+    min_macd = float(getattr(config, "AGENT_4H_LEADER_MIN_MACD_HIST", 0.0))
+    if macd_hist <= min_macd:
+        return f"MACD hist {macd_hist:.6g} <= {min_macd:.6g}"
+    if price <= 0 or ema20 <= 0 or ema50 <= 0:
+        return "invalid EMA context"
+    if not (price > ema20 > ema50):
+        return "15m/1h reclaim not confirmed"
+
+    price_edge = ((price / ema20) - 1.0) * 100.0
+    reclaim_max = float(getattr(config, "AGENT_4H_LEADER_RECLAIM_MAX_PRICE_EDGE_PCT", 8.0))
+    if price_edge > reclaim_max:
+        return f"price edge {price_edge:.2f}% > {reclaim_max:.2f}%"
+
+    pullback_max = float(getattr(config, "AGENT_4H_LEADER_PULLBACK_MAX_PRICE_EDGE_PCT", 3.5))
+    prev_close = float(c[i - 1]) if i > 0 else price
+    fresh_close = price > prev_close
+    controlled_pullback = price_edge <= pullback_max
+    if not (fresh_close or controlled_pullback):
+        return "no fresh 15m/1h reclaim or controlled pullback"
+    return ""
+
+
 def _candidate_block_reason(
     *,
     symbol: str,
@@ -671,12 +750,34 @@ def _candidate_block_reason(
         return f"agent mode disabled: {mode}"
     if tf not in tuple(str(x) for x in getattr(config, "AGENT_ALLOWED_TIMEFRAMES", ("15m", "1h"))):
         return f"agent timeframe disabled: {tf}"
-    if today_change_pct < float(getattr(config, "AGENT_MIN_DAY_CHANGE_PCT", 1.25)):
-        return f"day change {today_change_pct:.2f}% < {float(getattr(config, 'AGENT_MIN_DAY_CHANGE_PCT', 1.25)):.2f}%"
+    min_day = float(
+        getattr(config, "AGENT_4H_LEADER_MIN_TODAY_CHANGE_PCT", 4.0)
+        if mode == "4h_leader_watch"
+        else getattr(config, "AGENT_MIN_DAY_CHANGE_PCT", 1.25)
+    )
+    if today_change_pct < min_day:
+        return f"day change {today_change_pct:.2f}% < {min_day:.2f}%"
     if forecast_proxy_pct < float(getattr(config, "AGENT_MIN_FORECAST_PROXY_PCT", 0.35)):
         return f"forecast proxy {forecast_proxy_pct:.2f}% < {float(getattr(config, 'AGENT_MIN_FORECAST_PROXY_PCT', 0.35)):.2f}%"
     if leader_score < float(getattr(config, "AGENT_MIN_LEADER_SCORE", 12.0)):
         return f"leader score {leader_score:.2f} < {float(getattr(config, 'AGENT_MIN_LEADER_SCORE', 12.0)):.2f}"
+    if mode == "4h_leader_watch":
+        max_range = float(getattr(config, "AGENT_4H_LEADER_MAX_DAILY_RANGE_PCT", 35.0))
+        min_adx = float(getattr(config, "AGENT_4H_LEADER_MIN_ADX", 30.0))
+        min_vol = float(getattr(config, "AGENT_4H_LEADER_MIN_VOL_X", 0.65))
+        min_rsi = float(getattr(config, "AGENT_4H_LEADER_MIN_RSI", 50.0))
+        max_rsi = float(getattr(config, "AGENT_4H_LEADER_MAX_RSI", 78.0))
+        if daily_range > max_range:
+            return f"daily range {daily_range:.2f}% > {max_range:.2f}%"
+        if adx < min_adx:
+            return f"ADX {adx:.1f} < {min_adx:.1f}"
+        if vol_x < min_vol:
+            return f"vol_x {vol_x:.2f} < {min_vol:.2f}"
+        if rsi < min_rsi:
+            return f"RSI {rsi:.1f} < {min_rsi:.1f}"
+        if rsi > max_rsi:
+            return f"RSI {rsi:.1f} > {max_rsi:.1f}"
+        return ""
     if daily_range > float(getattr(config, "AGENT_MAX_DAILY_RANGE_PCT", 14.0)):
         return f"daily range {daily_range:.2f}% > {float(getattr(config, 'AGENT_MAX_DAILY_RANGE_PCT', 14.0)):.2f}%"
     if adx < float(getattr(config, "AGENT_MIN_ADX", 18.0)):
@@ -738,9 +839,24 @@ async def _entry_candidate(
     surge_ok, _ = check_trend_surge_conditions(feat, i)
     imp_ok, _ = check_impulse_conditions(feat, i)
     aln_ok, _ = check_alignment_conditions(feat, i, tf=tf)
-    if not any((entry_ok, brk_ok, ret_ok, surge_ok, imp_ok, aln_ok)):
-        return None
+    price = float(c[i])
+    ema20 = float(feat["ema_fast"][i]) if np.isfinite(feat["ema_fast"][i]) else 0.0
+    ema50 = float(feat["ema_slow"][i]) if np.isfinite(feat["ema_slow"][i]) else 0.0
+    slope = float(feat["slope"][i]) if np.isfinite(feat["slope"][i]) else 0.0
+    adx = float(feat["adx"][i]) if np.isfinite(feat["adx"][i]) else 0.0
+    rsi = float(feat["rsi"][i]) if np.isfinite(feat["rsi"][i]) else 50.0
+    vol_x = float(feat["vol_x"][i]) if np.isfinite(feat["vol_x"][i]) else 0.0
+    daily_range = float(feat["daily_range_pct"][i]) if np.isfinite(feat["daily_range_pct"][i]) else 0.0
+    macd_hist = float(feat["macd_hist"][i]) if np.isfinite(feat["macd_hist"][i]) else 0.0
 
+    today_change_pct = _today_change_pct_from_data(data, c, i)
+    forecast_proxy_pct = _forecast_proxy_pct(
+        today_change_pct=today_change_pct,
+        slope=slope,
+        adx=adx,
+        vol_x=vol_x,
+        rsi=rsi,
+    )
     mode = _determine_signal_mode(
         entry_ok=entry_ok,
         brk_ok=brk_ok,
@@ -752,26 +868,61 @@ async def _entry_candidate(
         c=c,
         i=i,
     )
+    min_context = float(getattr(config, "AGENT_4H_LEADER_MIN_CONTEXT_SCORE", 7.0))
+    local_four_h_reason = _four_h_leader_watch_reason(
+        tf=tf,
+        price=price,
+        ema20=ema20,
+        ema50=ema50,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+        today_change_pct=today_change_pct,
+        macd_hist=macd_hist,
+        four_h_score=min_context,
+        c=c,
+        i=i,
+    )
+    if mode is None and local_four_h_reason:
+        return None
+
+    four_h_score, four_h_label = await _four_h_context_score(session, symbol)
+    four_h_watch_reason = _four_h_leader_watch_reason(
+        tf=tf,
+        price=price,
+        ema20=ema20,
+        ema50=ema50,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+        today_change_pct=today_change_pct,
+        macd_hist=macd_hist,
+        four_h_score=four_h_score,
+        c=c,
+        i=i,
+    )
+    four_h_watch_ok = four_h_watch_reason == ""
+    if four_h_watch_ok:
+        normal_range_max = float(getattr(config, "AGENT_MAX_DAILY_RANGE_PCT", 14.0))
+        normal_vol_min = float(getattr(config, "AGENT_MIN_VOL_X", 1.0))
+        normal_rsi_max = float(getattr(config, "AGENT_MAX_RSI", 72.5))
+        if (
+            mode is None
+            or mode not in _agent_allowed_modes()
+            or daily_range > normal_range_max
+            or vol_x < normal_vol_min
+            or rsi > normal_rsi_max
+        ):
+            mode = "4h_leader_watch"
+
     if mode is None:
         return None
 
     report = analyze_coin(symbol, tf, data, from_scan=False)
-    price = float(c[i])
-    ema20 = float(feat["ema_fast"][i])
-    slope = float(feat["slope"][i])
-    adx = float(feat["adx"][i])
-    rsi = float(feat["rsi"][i])
-    vol_x = float(feat["vol_x"][i])
-    daily_range = float(feat["daily_range_pct"][i]) if np.isfinite(feat["daily_range_pct"][i]) else 0.0
-
-    today_change_pct = _today_change_pct_from_data(data, c, i)
-    forecast_proxy_pct = _forecast_proxy_pct(
-        today_change_pct=today_change_pct,
-        slope=slope,
-        adx=adx,
-        vol_x=vol_x,
-        rsi=rsi,
-    )
 
     candidate_score = _entry_signal_score(
         mode=mode,
@@ -785,8 +936,9 @@ async def _entry_candidate(
     )
     candidate_score += _top_mover_score_bonus(today_change_pct)
     candidate_score += _forecast_return_score_bonus(forecast_proxy_pct)
-    four_h_score, four_h_label = await _four_h_context_score(session, symbol)
     candidate_score += four_h_score * float(getattr(config, "FOUR_H_CONTEXT_SCORE_WEIGHT", 1.0))
+    if mode == "4h_leader_watch":
+        candidate_score += float(getattr(config, "AGENT_4H_LEADER_BONUS", 10.0))
 
     continuation_profile = _time_block_1h_continuation_profile(
         tf=tf,
@@ -807,7 +959,7 @@ async def _entry_candidate(
         daily_range=daily_range,
     )
 
-    if _late_1h_continuation_guard(
+    if mode != "4h_leader_watch" and _late_1h_continuation_guard(
         tf=tf,
         mode=mode,
         continuation_profile=continuation_profile,
@@ -820,7 +972,7 @@ async def _entry_candidate(
         agentlog.log_blocked(symbol, tf, price, "late 1h continuation", signal_type="late_continuation", rsi=rsi, adx=adx, vol_x=vol_x, daily_range=daily_range)
         return None
 
-    impulse_guard_reason = _impulse_speed_entry_guard(
+    impulse_guard_reason = "" if mode == "4h_leader_watch" else _impulse_speed_entry_guard(
         tf=tf,
         mode=mode,
         feat=feat,
@@ -835,7 +987,7 @@ async def _entry_candidate(
         agentlog.log_blocked(symbol, tf, price, impulse_guard_reason, signal_type="impulse_guard", rsi=rsi, adx=adx, vol_x=vol_x, daily_range=daily_range)
         return None
 
-    if tf == "1h" and getattr(config, "MTF_ENABLED", True):
+    if mode != "4h_leader_watch" and tf == "1h" and getattr(config, "MTF_ENABLED", True):
         mtf_ok, mtf_reason = await _check_mtf(
             session,
             symbol,
@@ -927,7 +1079,7 @@ async def _entry_candidate(
         "rsi": rsi,
         "vol_x": vol_x,
         "daily_range": daily_range,
-        "macd_hist": float(feat["macd_hist"][i]) if np.isfinite(feat["macd_hist"][i]) else 0.0,
+        "macd_hist": macd_hist,
         "trail_k": trail_k,
         "max_hold_bars": max_hold_bars,
         "trail_stop": trail_stop,
@@ -1148,10 +1300,21 @@ async def _scan_symbol_tf_candidate(
     if last_exit_bar.get(key) == current_bar_ts:
         return None
     cooldown_until = int(symbol_cooldown_until.get(symbol, 0))
-    if cooldown_until and current_bar_ts < cooldown_until:
-        return None
     candidate = await _entry_candidate(session, symbol, tf, data, c, feat)
     if candidate is None:
+        return None
+    if cooldown_until and current_bar_ts < cooldown_until and not _candidate_bypasses_symbol_cooldown(candidate):
+        agentlog.log_blocked(
+            symbol,
+            tf,
+            float(candidate["price"]),
+            "symbol cooldown active",
+            signal_type="symbol_cooldown",
+            rsi=float(candidate["rsi"]),
+            adx=float(candidate["adx"]),
+            vol_x=float(candidate["vol_x"]),
+            daily_range=float(candidate["daily_range"]),
+        )
         return None
     candidate["symbol"] = symbol
     candidate["tf"] = tf
@@ -1195,6 +1358,74 @@ def _candidate_fits_portfolio(candidate: dict, positions: Dict[str, AgentPositio
             return False, f"group cap reached: {group}"
 
     return True, ""
+
+
+def _candidate_rank_key(candidate: dict) -> tuple[float, float, float, float, float, float]:
+    return (
+        float(candidate.get("leader_score", 0.0)),
+        float(candidate.get("today_change_pct", 0.0)),
+        float(candidate.get("forecast_return_pct", 0.0)),
+        float(candidate.get("four_h_context_score", 0.0)),
+        float(candidate.get("adx", 0.0)),
+        float(candidate.get("vol_x", 0.0)),
+    )
+
+
+def _position_rank_key(pos: AgentPosition) -> tuple[float, float, float, float, float, float]:
+    return (
+        float(getattr(pos, "leader_score", 0.0)),
+        float(getattr(pos, "today_change_pct", 0.0)),
+        float(getattr(pos, "forecast_return_pct", 0.0)),
+        float(getattr(pos, "four_h_context_score", 0.0)),
+        float(getattr(pos, "entry_adx", 0.0)),
+        float(getattr(pos, "entry_vol_x", 0.0)),
+    )
+
+
+def _candidate_better_than_position(candidate: dict, pos: AgentPosition) -> bool:
+    min_delta = float(getattr(config, "AGENT_REPLACEMENT_MIN_LEADER_DELTA", 0.0))
+    candidate_leader = float(candidate.get("leader_score", 0.0))
+    position_leader = float(getattr(pos, "leader_score", 0.0))
+    if candidate_leader < position_leader + min_delta:
+        return False
+    return _candidate_rank_key(candidate) > _position_rank_key(pos)
+
+
+def _candidate_bypasses_symbol_cooldown(candidate: dict) -> bool:
+    if not bool(getattr(config, "AGENT_4H_LEADER_BYPASS_SYMBOL_COOLDOWN", True)):
+        return False
+    if str(candidate.get("mode", "")) != "4h_leader_watch":
+        return False
+    min_leader = float(getattr(config, "AGENT_4H_LEADER_COOLDOWN_MIN_LEADER_SCORE", 55.0))
+    return float(candidate.get("leader_score", 0.0)) >= min_leader
+
+
+def _find_replacement_target(
+    candidate: dict,
+    positions: Dict[str, AgentPosition],
+) -> tuple[Optional[str], Optional[AgentPosition], str]:
+    symbol = str(candidate["symbol"])
+    if any(pos.symbol == symbol for pos in positions.values()):
+        return None, None, f"symbol already open: {symbol}"
+
+    ranked_open = sorted(positions.items(), key=lambda item: _position_rank_key(item[1]))
+    last_reject = ""
+    for key, pos in ranked_open:
+        if not _candidate_better_than_position(candidate, pos):
+            last_reject = (
+                f"candidate leader {float(candidate.get('leader_score', 0.0)):.2f} "
+                f"<= {pos.symbol} leader {float(getattr(pos, 'leader_score', 0.0)):.2f}"
+            )
+            continue
+
+        remaining = dict(positions)
+        remaining.pop(key, None)
+        ok, reason = _candidate_fits_portfolio(candidate, remaining, [])
+        if ok:
+            return key, pos, ""
+        last_reject = reason
+
+    return None, None, last_reject or "no weaker replaceable position"
 
 
 async def _open_selected_candidate(
@@ -1247,6 +1478,42 @@ async def _open_selected_candidate(
     )
     await _send_entry_alert(session, pos)
     return f"{pos.symbol} [{pos.tf}] {pos.signal_mode}"
+
+
+async def _replace_position_with_candidate(
+    session: aiohttp.ClientSession,
+    positions: Dict[str, AgentPosition],
+    last_exit_bar: Dict[str, int],
+    symbol_cooldown_until: Dict[str, int],
+    old_key: str,
+    old_pos: AgentPosition,
+    candidate: dict,
+) -> str:
+    exit_price = float(old_pos.mark_price or old_pos.entry_price)
+    exit_ts = int(old_pos.last_bar_ts or old_pos.entry_ts)
+    reason = (
+        "portfolio replacement: "
+        f"{candidate['symbol']} leader {float(candidate.get('leader_score', 0.0)):.2f} "
+        f"> {old_pos.symbol} leader {float(getattr(old_pos, 'leader_score', 0.0)):.2f}"
+    )
+    agentlog.log_exit(
+        sym=old_pos.symbol,
+        tf=old_pos.tf,
+        mode=old_pos.signal_mode,
+        entry_price=old_pos.entry_price,
+        exit_price=exit_price,
+        reason=reason,
+        bars_held=old_pos.bars_elapsed,
+        trail_k=old_pos.trail_k,
+    )
+    await _send_exit_alert(session, old_pos, exit_price, reason)
+    last_exit_bar[old_key] = exit_ts
+    symbol_cooldown_until[old_pos.symbol] = _next_local_day_start_utc_ms(exit_ts)
+    positions.pop(old_key, None)
+    _save_positions(positions)
+
+    opened = await _open_selected_candidate(session, positions, candidate)
+    return f"{opened} replaced {old_pos.symbol} [{old_pos.tf}]"
 
 
 async def _prune_positions_to_limit(
@@ -1343,67 +1610,98 @@ async def _run_cycle(
     await _prune_positions_to_limit(session, positions, last_exit_bar, symbol_cooldown_until)
 
     max_positions = int(getattr(config, "AGENT_MAX_POSITIONS", 2))
-    if len(positions) < max_positions:
-        sem = asyncio.Semaphore(12)
-        candidates: list[dict] = []
+    sem = asyncio.Semaphore(12)
+    candidates: list[dict] = []
 
-        async def _wrapped_candidate(sym: str, tf: str) -> None:
-            async with sem:
-                try:
-                    candidate = await _scan_symbol_tf_candidate(
-                        session,
-                        positions,
-                        last_exit_bar,
-                        symbol_cooldown_until,
-                        sym,
-                        tf,
-                    )
-                    if candidate is not None:
-                        candidates.append(candidate)
-                except Exception as exc:
-                    log.warning("agent candidate scan error %s [%s]: %s", sym, tf, exc)
-
-        await asyncio.gather(*[_wrapped_candidate(sym, tf) for sym in symbols for tf in config.TIMEFRAMES])
-
-        best_by_symbol: Dict[str, dict] = {}
-        for candidate in candidates:
-            symbol = str(candidate["symbol"])
-            current = best_by_symbol.get(symbol)
-            if current is None or float(candidate.get("leader_score", 0.0)) > float(current.get("leader_score", 0.0)):
-                best_by_symbol[symbol] = candidate
-
-        ranked_candidates = sorted(
-            best_by_symbol.values(),
-            key=lambda item: (
-                float(item.get("leader_score", 0.0)),
-                float(item.get("today_change_pct", 0.0)),
-                float(item.get("forecast_return_pct", 0.0)),
-            ),
-            reverse=True,
-        )
-
-        selected: list[dict] = []
-        for candidate in ranked_candidates:
-            if len(positions) + len(selected) >= max_positions:
-                break
-            ok, reason = _candidate_fits_portfolio(candidate, positions, selected)
-            if not ok:
-                agentlog.log_blocked(
-                    str(candidate["symbol"]),
-                    str(candidate["tf"]),
-                    float(candidate["price"]),
-                    reason,
-                    signal_type="agent_portfolio_filter",
-                    rsi=float(candidate["rsi"]),
-                    adx=float(candidate["adx"]),
-                    vol_x=float(candidate["vol_x"]),
-                    daily_range=float(candidate["daily_range"]),
+    async def _wrapped_candidate(sym: str, tf: str) -> None:
+        async with sem:
+            try:
+                candidate = await _scan_symbol_tf_candidate(
+                    session,
+                    positions,
+                    last_exit_bar,
+                    symbol_cooldown_until,
+                    sym,
+                    tf,
                 )
-                continue
-            selected.append(candidate)
+                if candidate is not None:
+                    candidates.append(candidate)
+            except Exception as exc:
+                log.warning("agent candidate scan error %s [%s]: %s", sym, tf, exc)
 
-        for candidate in selected:
-            entries.append(await _open_selected_candidate(session, positions, candidate))
+    # Always scan the watchlist, even when the portfolio is full. Full portfolios
+    # are improved through replacement rather than becoming blind to new leaders.
+    await asyncio.gather(*[_wrapped_candidate(sym, tf) for sym in symbols for tf in config.TIMEFRAMES])
+
+    best_by_symbol: Dict[str, dict] = {}
+    for candidate in candidates:
+        symbol = str(candidate["symbol"])
+        current = best_by_symbol.get(symbol)
+        if current is None or _candidate_rank_key(candidate) > _candidate_rank_key(current):
+            best_by_symbol[symbol] = candidate
+
+    ranked_candidates = sorted(best_by_symbol.values(), key=_candidate_rank_key, reverse=True)
+
+    selected: list[dict] = []
+    for candidate in ranked_candidates:
+        if len(positions) + len(selected) >= max_positions:
+            break
+        ok, reason = _candidate_fits_portfolio(candidate, positions, selected)
+        if not ok:
+            agentlog.log_blocked(
+                str(candidate["symbol"]),
+                str(candidate["tf"]),
+                float(candidate["price"]),
+                reason,
+                signal_type="agent_portfolio_filter",
+                rsi=float(candidate["rsi"]),
+                adx=float(candidate["adx"]),
+                vol_x=float(candidate["vol_x"]),
+                daily_range=float(candidate["daily_range"]),
+            )
+            continue
+        selected.append(candidate)
+
+    for candidate in selected:
+        entries.append(await _open_selected_candidate(session, positions, candidate))
+
+    if bool(getattr(config, "AGENT_REPLACEMENT_ENABLED", True)) and len(positions) >= max_positions:
+        replacements_done = 0
+        max_replacements = max(0, int(getattr(config, "AGENT_MAX_REPLACEMENTS_PER_CYCLE", max_positions)))
+        for candidate in ranked_candidates:
+            if replacements_done >= max_replacements:
+                break
+            if any(pos.symbol == str(candidate["symbol"]) for pos in positions.values()):
+                continue
+
+            old_key, old_pos, reason = _find_replacement_target(candidate, positions)
+            if old_key is None or old_pos is None:
+                if reason:
+                    agentlog.log_blocked(
+                        str(candidate["symbol"]),
+                        str(candidate["tf"]),
+                        float(candidate["price"]),
+                        f"replacement skipped: {reason}",
+                        signal_type="agent_replacement_filter",
+                        rsi=float(candidate["rsi"]),
+                        adx=float(candidate["adx"]),
+                        vol_x=float(candidate["vol_x"]),
+                        daily_range=float(candidate["daily_range"]),
+                    )
+                continue
+
+            entries.append(
+                await _replace_position_with_candidate(
+                    session,
+                    positions,
+                    last_exit_bar,
+                    symbol_cooldown_until,
+                    old_key,
+                    old_pos,
+                    candidate,
+                )
+            )
+            replacements_done += 1
 
     agentlog.log_analysis(
         n_scanned=len(symbols) * len(config.TIMEFRAMES),
