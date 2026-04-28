@@ -86,30 +86,15 @@ ML Dataset Logger — ml_dataset.jsonl
 
 import json
 import logging
-import os
-import threading
-import time
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-try:
-    import msvcrt
-except ImportError:  # pragma: no cover - non-Windows fallback
-    msvcrt = None
-
-ROOT      = Path(__file__).resolve().parent
-ML_FILE   = ROOT / "ml_dataset.jsonl"
+ML_FILE   = Path("ml_dataset.jsonl")
 SEQ_LEN   = 20   # баров контекста (20 × 15m = 5 часов)
 _pylog    = logging.getLogger("ml_dataset")
-_FILE_LOCK = threading.RLock()
-_CROSS_PROCESS_LOCK_TIMEOUT_SEC = 10.0
-_CROSS_PROCESS_LOCK_POLL_SEC = 0.05
-_REPLACE_RETRIES = 12
-_REPLACE_RETRY_SEC = 0.10
 
 SEQ_FEATURE_NAMES = [
     "close_norm", "high_norm", "low_norm", "open_norm",
@@ -128,138 +113,12 @@ class _Enc(json.JSONEncoder):
         return super().default(obj)
 
 
-def _lock_file_path() -> Path:
-    return ML_FILE.with_name(ML_FILE.name + ".lock")
-
-
-@contextmanager
-def _dataset_io_lock():
-    """
-    Cross-process dataset lock for Windows.
-
-    Threading RLock protects threads inside one process. The sidecar file lock
-    coordinates multiple Python processes, which matters when the trading bot
-    and the headless RL worker both touch ml_dataset.jsonl.
-    """
-    with _FILE_LOCK:
-        if msvcrt is None:
-            yield
-            return
-
-        lock_path = _lock_file_path()
-        lock_handle = None
-        start = time.monotonic()
-        while True:
-            try:
-                lock_path.parent.mkdir(parents=True, exist_ok=True)
-                lock_handle = lock_path.open("a+b")
-                lock_handle.seek(0, os.SEEK_END)
-                if lock_handle.tell() == 0:
-                    lock_handle.write(b"0")
-                    lock_handle.flush()
-                lock_handle.seek(0)
-                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
-                break
-            except OSError:
-                if lock_handle is not None:
-                    try:
-                        lock_handle.close()
-                    except Exception:
-                        pass
-                    lock_handle = None
-                if time.monotonic() - start >= _CROSS_PROCESS_LOCK_TIMEOUT_SEC:
-                    raise TimeoutError(f"timeout acquiring ml_dataset lock: {lock_path}")
-                time.sleep(_CROSS_PROCESS_LOCK_POLL_SEC)
-
-        try:
-            yield
-        finally:
-            try:
-                if lock_handle is not None:
-                    lock_handle.seek(0)
-                    msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
-            finally:
-                if lock_handle is not None:
-                    lock_handle.close()
-
-
-def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
-    last_error: Optional[Exception] = None
-    for attempt in range(1, _REPLACE_RETRIES + 1):
-        try:
-            tmp.replace(target)
-            return
-        except PermissionError as e:
-            last_error = e
-            if attempt >= _REPLACE_RETRIES:
-                raise
-            time.sleep(_REPLACE_RETRY_SEC * attempt)
-    if last_error is not None:
-        raise last_error
-
-
-def _collect_mutated_lines(mutator):
-    updated: List[str] = []
-    changed = False
-    had_bad_rows = False
-    for line in ML_FILE.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            had_bad_rows = True
-            continue
-        if not isinstance(rec, dict):
-            had_bad_rows = True
-            continue
-        rec_changed = bool(mutator(rec))
-        changed = changed or rec_changed
-        updated.append(json.dumps(rec, ensure_ascii=False, cls=_Enc))
-    return updated, changed, had_bad_rows
-
-
 def _w(record: Dict[str, Any]) -> None:
     try:
-        with _dataset_io_lock():
-            ML_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with ML_FILE.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False, cls=_Enc) + "\n")
+        with ML_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, cls=_Enc) + "\n")
     except Exception as e:
         _pylog.warning("ml_dataset write error: %s", e)
-
-
-def _rewrite_records(mutator) -> None:
-    """
-    Shared read-modify-write path for JSONL updates.
-
-    Uses the same lock as append writes so a concurrent label update cannot
-    overwrite rows appended while the file was being rewritten.
-    """
-    if not ML_FILE.exists():
-        return
-    try:
-        # Most rewrite attempts are no-ops. Pre-scan without the expensive
-        # cross-process lock and only take the lock when a real rewrite is
-        # needed. We still re-read under lock before writing, so we keep the
-        # latest file contents.
-        _, maybe_changed, maybe_bad_rows = _collect_mutated_lines(mutator)
-        if not (maybe_changed or maybe_bad_rows):
-            return
-
-        with _dataset_io_lock():
-            updated, changed, had_bad_rows = _collect_mutated_lines(mutator)
-            if not (changed or had_bad_rows):
-                return
-
-            ML_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp = ML_FILE.with_name(
-                f"{ML_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-            )
-            tmp.write_text("\n".join(updated) + "\n", encoding="utf-8")
-            _atomic_replace_with_retry(tmp, ML_FILE)
-    except Exception as e:
-        _pylog.warning("ml_dataset rewrite error: %s", e)
 
 
 def _safe(v) -> float:
@@ -495,35 +354,53 @@ def fill_pending_from_data(
     if not ML_FILE.exists():
         return
     try:
-        def _mutate(rec: Dict[str, Any]) -> bool:
+        lines   = ML_FILE.read_text(encoding="utf-8").splitlines()
+        updated = []
+        changed = False
+        bad_lines = 0
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                bad_lines += 1
+                continue
             if rec.get("sym") != sym or rec.get("tf") != tf:
-                return False
+                updated.append(line)
+                continue
             lab = rec.get("labels", {})
             rec_bar_ts = rec.get("bar_ts", 0)
+            rec_close  = rec.get("f", {}).get("close_vs_ema20")  # не цена, нужна entry_close
+            # Цена входного бара хранится в seq[-1][0] * (ema20 * (1 + close_vs_ema20/100))
+            # Проще: используем bar_ts для поиска в t_arr и берём close напрямую
             idx_arr = np.where(t_arr == rec_bar_ts)[0]
             if len(idx_arr) == 0:
-                return False
+                updated.append(line)
+                continue
             entry_close = float(c_arr[idx_arr[0]])
             if entry_close <= 0:
-                return False
-            changed = False
+                updated.append(line)
+                continue
             for h in (3, 5, 10):
-                key_ret = f"ret_{h}"
+                key_ret   = f"ret_{h}"
                 key_label = f"label_{h}"
                 if lab.get(key_ret) is not None:
-                    continue
-                future_ts = rec_bar_ts + h * bar_ms
-                fut_idx = np.where(t_arr >= future_ts)[0]
+                    continue  # уже заполнено
+                future_ts  = rec_bar_ts + h * bar_ms
+                fut_idx    = np.where(t_arr >= future_ts)[0]
                 if len(fut_idx) == 0:
-                    continue
+                    continue  # данных ещё нет
                 future_close = float(c_arr[fut_idx[0]])
                 ret_pct = (future_close / entry_close - 1) * 100
-                rec["labels"][key_ret] = round(ret_pct, 4)
+                rec["labels"][key_ret]   = round(ret_pct, 4)
                 rec["labels"][key_label] = ret_pct > 0
                 changed = True
-            return changed
-
-        _rewrite_records(_mutate)
+            updated.append(json.dumps(rec, ensure_ascii=False, cls=_Enc))
+        if changed:
+            ML_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        if bad_lines:
+            _pylog.warning("fill_pending_from_data skipped %d malformed jsonl lines", bad_lines)
     except Exception as e:
         _pylog.warning("fill_pending_from_data error: %s", e)
 
@@ -559,25 +436,25 @@ def fill_labels(
     if not ML_FILE.exists():
         return
     try:
-        def _mutate(rec: Dict[str, Any]) -> bool:
-            if rec.get("id") != record_id:
-                return False
-            rec.setdefault("labels", {})
-            new_exit_pnl = round(exit_pnl, 4)
-            new_exit_reason = exit_reason
-            new_bars_held = bars_held
-            if (
-                rec["labels"].get("exit_pnl") == new_exit_pnl
-                and rec["labels"].get("exit_reason") == new_exit_reason
-                and rec["labels"].get("bars_held") == new_bars_held
-            ):
-                return False
-            rec["labels"]["exit_pnl"] = new_exit_pnl
-            rec["labels"]["exit_reason"] = new_exit_reason
-            rec["labels"]["bars_held"] = new_bars_held
-            return True
-
-        _rewrite_records(_mutate)
+        lines = ML_FILE.read_text(encoding="utf-8").splitlines()
+        updated = []
+        bad_lines = 0
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                bad_lines += 1
+                continue
+            if rec.get("id") == record_id:
+                rec["labels"]["exit_pnl"]    = round(exit_pnl, 4)
+                rec["labels"]["exit_reason"] = exit_reason
+                rec["labels"]["bars_held"]   = bars_held
+            updated.append(json.dumps(rec, ensure_ascii=False, cls=_Enc))
+        ML_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        if bad_lines:
+            _pylog.warning("fill_labels skipped %d malformed jsonl lines", bad_lines)
     except Exception as e:
         _pylog.warning("fill_labels error: %s", e)
 
@@ -596,18 +473,23 @@ def fill_forward_label(
     key_ret   = f"ret_{horizon}"
     key_label = f"label_{horizon}"
     try:
-        def _mutate(rec: Dict[str, Any]) -> bool:
-            if rec.get("id") != record_id:
-                return False
-            rec.setdefault("labels", {})
-            new_ret = round(ret_pct, 4)
-            new_label = ret_pct > 0
-            if rec["labels"].get(key_ret) == new_ret and rec["labels"].get(key_label) == new_label:
-                return False
-            rec["labels"][key_ret] = new_ret
-            rec["labels"][key_label] = new_label
-            return True
-
-        _rewrite_records(_mutate)
+        lines = ML_FILE.read_text(encoding="utf-8").splitlines()
+        updated = []
+        bad_lines = 0
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                bad_lines += 1
+                continue
+            if rec.get("id") == record_id:
+                rec["labels"][key_ret]   = round(ret_pct, 4)
+                rec["labels"][key_label] = ret_pct > 0
+            updated.append(json.dumps(rec, ensure_ascii=False, cls=_Enc))
+        ML_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        if bad_lines:
+            _pylog.warning("fill_forward_label skipped %d malformed jsonl lines", bad_lines)
     except Exception as e:
         _pylog.warning("fill_forward_label error: %s", e)

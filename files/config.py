@@ -152,9 +152,9 @@ TODAY_T10_MIN: float = 40.0
 
 # РРЅС‚РµСЂРІР°Р» Р°РІС‚Рѕ-СЂРµР°РЅР°Р»РёР·Р° РІ СЃРµРєСѓРЅРґР°С… (0 = РІС‹РєР»СЋС‡РµРЅ)
 # 7200 = РєР°Р¶РґС‹Рµ 2 С‡Р°СЃР° Р±РѕС‚ СЃР°Рј РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ СЃРїРёСЃРѕРє РјРѕРЅРµС‚
-AUTO_REANALYZE_SEC: int = 0
-BOT_ENABLE_DATA_COLLECTOR: bool = False
-BOT_STARTUP_AUTO_SCAN_ENABLED: bool = False
+AUTO_REANALYZE_SEC: int = 900
+BOT_ENABLE_DATA_COLLECTOR: bool = True
+BOT_STARTUP_AUTO_SCAN_ENABLED: bool = True
 
 ATR_TRAIL_K: float = 2.0   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РґР»СЏ С‚СЂРµР№Р»РёРЅРі-СЃС‚РѕРїР°
 MACDWARN_BARS: int = 3     # Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ MACD hist РїР°РґР°РµС‚ в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рѕ СЂР°Р·РІРѕСЂРѕС‚Рµ
@@ -442,10 +442,15 @@ TOP_GAINER_OBJECTIVE_MOMENTUM_MIN_INTRADAY_CHANGE_PCT: float = 1.00
 TOP_GAINER_OBJECTIVE_STRONG_SCORE_BYPASS: float = 115.0
 TOP_GAINER_OBJECTIVE_STRONG_ADX_BYPASS: float = 32.0
 TOP_GAINER_OBJECTIVE_ALLOW_CONFIRMED_LEADER: bool = True
+TOP_GAINER_SCORE_GATE_ENABLED: bool = True
+TOP_GAINER_SCORE_GATE_MODES: tuple[str, ...] = ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse")
+TOP_GAINER_SCORE_GATE_MIN_SCORE: float = 18.0
+TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE: dict[str, float] = {"impulse": 30.0}
 
-# RL/report Telegram notifications. Keep reports on disk, but do not spam chats.
-RL_TELEGRAM_REPORTS_ENABLED: bool = False
-TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED: bool = False
+# RL/report Telegram notifications.
+RL_TELEGRAM_REPORTS_ENABLED: bool = True
+TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED: bool = True
+TOP_GAINER_CRITIC_TELEGRAM_FINAL_ONLY: bool = True
 WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED: bool = False
 RL_TRAIN_TELEGRAM_REPORTS_ENABLED: bool = False
 
