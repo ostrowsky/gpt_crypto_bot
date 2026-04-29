@@ -446,7 +446,7 @@ TOP_GAINER_OBJECTIVE_STRONG_ADX_BYPASS: float = 32.0
 TOP_GAINER_OBJECTIVE_ALLOW_CONFIRMED_LEADER: bool = True
 TOP_GAINER_SCORE_GATE_ENABLED: bool = True
 TOP_GAINER_SCORE_GATE_MODES: tuple[str, ...] = ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse")
-TOP_GAINER_SCORE_GATE_MIN_SCORE: float = 18.0
+TOP_GAINER_SCORE_GATE_MIN_SCORE: float = 34.0
 TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE: dict[str, float] = {"impulse": 30.0}
 
 # RL/report Telegram notifications.
