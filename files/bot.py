@@ -151,14 +151,20 @@ def kb_main() -> InlineKeyboardMarkup:
     #   🔄 Повторный анализ     — мониторинг уже работает (перезапустить анализ)
     #   ⏹ Стоп мониторинга     — остановить всё
     agent_positions = _load_agent_positions()
-    pos  = len(state.positions) + len(agent_positions)
+    n_main = len(state.positions)
+    n_agent = len(agent_positions)
+    pos  = n_main + n_agent
+    max_main = int(getattr(config, "MAX_OPEN_POSITIONS", 6) or 0)
+    max_agent = int(getattr(config, "AGENT_MAX_POSITIONS", 0) or 0)
+    pos_label = f"{n_main}/{max_main}+A{n_agent}/{max_agent}" if n_agent else f"{n_main}/{max_main}"
+    stop_pos_label = f"{n_main}+{n_agent}" if n_agent else str(n_main)
     wl   = len(config.load_watchlist())
     hot  = len(state.hot_coins)
     conf = len([r for r in state.hot_coins if r.today_confirmed])
 
     if state.running:
         main_btn = InlineKeyboardButton(
-            f"⏹ Стоп мониторинга  [{conf} подтв. | {pos} поз.]",
+            f"⏹ Стоп мониторинга  [{conf} подтв. | {stop_pos_label} поз.]",
             callback_data="stop_monitor",
         )
         rescan_btn = [InlineKeyboardButton(
@@ -175,7 +181,7 @@ def kb_main() -> InlineKeyboardMarkup:
             callback_data="market_scan",
         )]
 
-    signals_lbl = f"📊 Позиции  [{pos}/{getattr(config,'MAX_OPEN_POSITIONS',6)}]" if pos else "📊 Позиции"
+    signals_lbl = f"📊 Позиции  [{pos_label}]" if pos else "📊 Позиции"
     list_lbl    = f"📋 Список монет  [{wl}]"
 
     return InlineKeyboardMarkup([
@@ -609,20 +615,33 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             import html as _html
             from monitor import _get_coin_group
             MAX_LEN  = 4000
-            max_pos  = getattr(config, "MAX_OPEN_POSITIONS", 6)
+            max_pos  = int(getattr(config, "MAX_OPEN_POSITIONS", 6) or 0)
+            max_agent = int(getattr(config, "AGENT_MAX_POSITIONS", 0) or 0)
             max_grp  = getattr(config, "MAX_POSITIONS_PER_GROUP", 2)
             n_main   = len(state.positions)
             n_agent  = len(agent_positions)
             n_open   = n_main + n_agent
 
             # Портфельный статус
-            port_pct  = int(n_open / max_pos * 100)
-            port_bar  = "█" * (n_open) + "░" * (max_pos - n_open)
-            port_line = f"<b>Портфель:</b> {n_open}/{max_pos}  <code>{port_bar}</code>\n"
+            main_limit = max(max_pos, n_main)
+            agent_limit = max(max_agent, n_agent)
+            main_bar = "█" * min(n_main, main_limit) + "░" * max(0, main_limit - n_main)
+            if n_agent:
+                agent_bar = "█" * min(n_agent, agent_limit) + "░" * max(0, agent_limit - n_agent)
+                port_line = (
+                    f"<b>Портфель:</b> main {n_main}/{max_pos} <code>{main_bar}</code>  "
+                    f"agent {n_agent}/{max_agent} <code>{agent_bar}</code>\n"
+                )
+                open_line = (
+                    f"📊 <b>Открытых позиций: {n_open}</b> "
+                    f"<i>(main {n_main}/{max_pos} + agent {n_agent}/{max_agent})</i>\n"
+                )
+            else:
+                port_line = f"<b>Портфель:</b> main {n_main}/{max_pos}  <code>{main_bar}</code>\n"
+                open_line = f"📊 <b>Открытых позиций: {n_main}/{max_pos}</b>\n"
 
             lines = [
-                f"📊 <b>Открытых позиций: {n_open}/{max_pos}</b> "
-                f"<i>(main {n_main} + agent {n_agent})</i>\n",
+                open_line,
                 port_line,
             ]
             shown = 0
@@ -643,9 +662,10 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 if coin_report and coin_report.today_accuracy:
                     ev_parts = []
                     for h, fa in sorted(coin_report.today_accuracy.items()):
-                        if fa.total > 0 and fa.expected_return is not None:
-                            ev_icon = "▲" if fa.expected_return > 0 else "▼"
-                            ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{fa.expected_return:+.2f}%")
+                        expected_return = getattr(fa, "expected_return", None)
+                        if fa.total > 0 and expected_return is not None:
+                            ev_icon = "▲" if expected_return > 0 else "▼"
+                            ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{expected_return:+.2f}%")
                         elif fa.total > 0:
                             ev_parts.append(f"T+{h}:{fa.pct:.0f}%")
                     if ev_parts:
@@ -1041,8 +1061,9 @@ def _ensure_positions_monitored(state) -> None:
             from strategy import CoinReport
             dummy = CoinReport(
                 symbol=sym, tf=pos.tf,
-                today_signals=[], today_confirmed=True,
+                today_signals=0, today_confirmed=True,
                 signal_now=False, today_accuracy={},
+                best_horizon=0,
                 best_accuracy=0.0,
                 note="удерживаем позицию (exit guard)",
                 in_play=True,
