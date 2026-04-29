@@ -15,6 +15,7 @@ import numpy as np
 
 import agentlog
 import config
+from unified_portfolio import load_main_positions_raw, ranked_unified_positions
 def _entry_signal_score(
     mode: str,
     price: float,
@@ -148,6 +149,17 @@ STATE_FILE = Path(".runtime") / "market_agent_state.json"
 STATUS_FILE = Path(".runtime") / "market_agent_status.json"
 
 
+def _unified_portfolio_limit() -> int:
+    return int(
+        getattr(
+            config,
+            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
+            getattr(config, "MAX_OPEN_POSITIONS", getattr(config, "AGENT_MAX_POSITIONS", 2)),
+        )
+        or 0
+    )
+
+
 def _resolve_local_tz():
     try:
         return ZoneInfo("Europe/Budapest")
@@ -279,6 +291,49 @@ def _load_positions() -> Dict[str, AgentPosition]:
             mark_price=float(data.get("mark_price", 0.0)),
         )
     return positions
+
+
+def _agent_position_to_raw(pos: AgentPosition) -> dict:
+    return {
+        "symbol": pos.symbol,
+        "tf": pos.tf,
+        "entry_price": pos.entry_price,
+        "entry_bar": pos.entry_bar,
+        "entry_ts": pos.entry_ts,
+        "entry_ema20": pos.entry_ema20,
+        "entry_slope": pos.entry_slope,
+        "entry_adx": pos.entry_adx,
+        "entry_rsi": pos.entry_rsi,
+        "entry_vol_x": pos.entry_vol_x,
+        "forecast_return_pct": pos.forecast_return_pct,
+        "today_change_pct": pos.today_change_pct,
+        "leader_score": pos.leader_score,
+        "four_h_context_score": pos.four_h_context_score,
+        "four_h_context_label": pos.four_h_context_label,
+        "predictions": pos.predictions,
+        "bars_elapsed": pos.bars_elapsed,
+        "signal_mode": pos.signal_mode,
+        "trail_k": pos.trail_k,
+        "max_hold_bars": pos.max_hold_bars,
+        "trail_stop": pos.trail_stop,
+        "last_bar_ts": pos.last_bar_ts,
+        "mark_price": pos.mark_price,
+    }
+
+
+def _agent_allowed_slots(positions: Dict[str, AgentPosition]) -> int:
+    if not bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True)):
+        return int(getattr(config, "AGENT_MAX_POSITIONS", 2))
+    limit = _unified_portfolio_limit()
+    main_positions = load_main_positions_raw()
+    main_symbols = {
+        str(pos.get("symbol") or key)
+        for key, pos in main_positions.items()
+        if isinstance(pos, dict)
+    }
+    agent_symbols = {pos.symbol for pos in positions.values()}
+    main_only_count = len(main_symbols - agent_symbols)
+    return max(0, limit - main_only_count)
 
 
 def _save_state(last_exit_bar: Dict[str, int], symbol_cooldown_until: Dict[str, int]) -> None:
@@ -1522,19 +1577,32 @@ async def _prune_positions_to_limit(
     last_exit_bar: Dict[str, int],
     symbol_cooldown_until: Dict[str, int],
 ) -> None:
-    max_positions = int(getattr(config, "AGENT_MAX_POSITIONS", 2))
+    max_positions = _agent_allowed_slots(positions)
     if len(positions) <= max_positions:
         return
 
-    ranked = sorted(
-        positions.items(),
-        key=lambda item: (
-            float(getattr(item[1], "leader_score", 0.0)),
-            float(getattr(item[1], "today_change_pct", 0.0)),
-            float(getattr(item[1], "forecast_return_pct", 0.0)),
-        ),
-        reverse=True,
-    )
+    if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True)):
+        agent_raw = {key: _agent_position_to_raw(pos) for key, pos in positions.items()}
+        unified = ranked_unified_positions(
+            load_main_positions_raw(),
+            agent_raw,
+            limit=_unified_portfolio_limit(),
+        )
+        unified_agent_keep = [
+            str(row["key"])
+            for row in unified
+            if str(row.get("source")) == "agent"
+        ]
+        ranked = [(key, positions[key]) for key in unified_agent_keep if key in positions]
+        ranked.extend(
+            sorted(
+                [(key, pos) for key, pos in positions.items() if key not in unified_agent_keep],
+                key=lambda item: _position_rank_key(item[1]),
+                reverse=True,
+            )
+        )
+    else:
+        ranked = sorted(positions.items(), key=lambda item: _position_rank_key(item[1]), reverse=True)
     keep_keys: list[str] = []
     keep_clusters: set[str] = set()
     require_distinct = bool(getattr(config, "AGENT_REQUIRE_DISTINCT_MODE_CLUSTERS", False))
@@ -1609,7 +1677,7 @@ async def _run_cycle(
 
     await _prune_positions_to_limit(session, positions, last_exit_bar, symbol_cooldown_until)
 
-    max_positions = int(getattr(config, "AGENT_MAX_POSITIONS", 2))
+    max_positions = _agent_allowed_slots(positions)
     sem = asyncio.Semaphore(12)
     candidates: list[dict] = []
 
@@ -1665,7 +1733,11 @@ async def _run_cycle(
     for candidate in selected:
         entries.append(await _open_selected_candidate(session, positions, candidate))
 
-    if bool(getattr(config, "AGENT_REPLACEMENT_ENABLED", True)) and len(positions) >= max_positions:
+    if (
+        max_positions > 0
+        and bool(getattr(config, "AGENT_REPLACEMENT_ENABLED", True))
+        and len(positions) >= max_positions
+    ):
         replacements_done = 0
         max_replacements = max(0, int(getattr(config, "AGENT_MAX_REPLACEMENTS_PER_CYCLE", max_positions)))
         for candidate in ranked_candidates:

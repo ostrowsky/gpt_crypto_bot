@@ -358,6 +358,8 @@ _last_cross_ts:      dict  = {}     # sym в†’ timestamp РїРѕСЃР»Р�
 
 # в”Ђв”Ђ Portfolio / entry quality controls в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 MAX_OPEN_POSITIONS: int = 10
+UNIFIED_PORTFOLIO_ENABLED: bool = True
+UNIFIED_PORTFOLIO_MAX_POSITIONS: int = 10
 MAX_NEW_ENTRIES_PER_CYCLE: int = 1   # limit new entries per polling iteration
 ENTRY_SCORE_PCTL: float = 80.0       # dynamic threshold percentile among candidates
 ALIGNMENT_BUY_ENABLED: bool = False  # alignment is context/exit warning, not a buy trigger
