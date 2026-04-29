@@ -34,6 +34,8 @@ LOG_FILE = RUNTIME_DIR / "rl_worker_runtime.log"
 REPORT_DIR = RUNTIME_DIR / "reports"
 CHAT_IDS_FILE = ROOT / ".chat_ids"
 TRAIN_LOCK_FILE = RUNTIME_DIR / "rl_worker_train.lock"
+LATEST_TRAIN_JSON = REPORT_DIR / "rl_train_latest.json"
+LATEST_TRAIN_TXT = REPORT_DIR / "rl_train_latest.txt"
 
 MODEL_FILE = ROOT / "ml_candidate_ranker.json"
 TRAIN_REPORT_FILE = ROOT / "ml_candidate_ranker_report.json"
@@ -107,7 +109,7 @@ def should_train(
         return True
     if rows_total >= last_trained_rows + min_new_rows:
         return True
-    if dataset_mtime > last_dataset_mtime and last_trained_rows <= 0:
+    if dataset_mtime > last_dataset_mtime and rows_total >= last_trained_rows:
         return True
     return False
 
@@ -256,6 +258,72 @@ def _restore_training_state_from_status(state: "WorkerState") -> bool:
         state.latest_training_latest_json = str(latest.get("latest_json") or state.latest_training_latest_json)
         state.latest_training_latest_txt = str(latest.get("latest_txt") or state.latest_training_latest_txt)
     return True
+
+
+def _restore_training_state_from_latest_report(state: "WorkerState") -> bool:
+    if not LATEST_TRAIN_JSON.exists():
+        return False
+    try:
+        payload = json.loads(LATEST_TRAIN_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    changed = False
+    run_index = int(payload.get("training_run_index") or 0)
+    if run_index:
+        if run_index > state.train_runs_total:
+            state.train_runs_total = run_index
+            changed = True
+        if run_index > state.train_runs_ok:
+            state.train_runs_ok = run_index
+            changed = True
+
+    generated_at = str(payload.get("generated_at_utc") or "")
+    if generated_at and generated_at != str(state.train_last_finished_at or ""):
+        if not state.train_last_finished_at or generated_at >= str(state.train_last_finished_at):
+            state.train_last_finished_at = generated_at
+            changed = True
+
+    rows_total = int(payload.get("rows_total") or 0)
+    if rows_total and rows_total > state.last_trained_rows:
+        state.last_trained_rows = rows_total
+        changed = True
+
+    model_name = str(payload.get("model_name") or "")
+    train_report = payload.get("train_report") or {}
+    chosen_model = str(train_report.get("chosen_model") or "")
+    resolved_model = model_name or chosen_model
+    if resolved_model and resolved_model != state.last_model_name:
+        state.last_model_name = resolved_model
+        changed = True
+
+    if payload.get("top1_delta") is not None and payload.get("top1_delta") != state.last_top1_delta:
+        state.last_top1_delta = payload.get("top1_delta")
+        changed = True
+
+    latest_json = str(LATEST_TRAIN_JSON)
+    latest_txt = str(LATEST_TRAIN_TXT)
+    if state.latest_training_report_json != latest_json:
+        state.latest_training_report_json = latest_json
+        changed = True
+    if state.latest_training_report_txt != latest_txt:
+        state.latest_training_report_txt = latest_txt
+        changed = True
+    if state.latest_training_latest_json != latest_json:
+        state.latest_training_latest_json = latest_json
+        changed = True
+    if state.latest_training_latest_txt != latest_txt:
+        state.latest_training_latest_txt = latest_txt
+        changed = True
+    return changed
+
+
+def _restore_training_state(state: "WorkerState") -> bool:
+    restored = _restore_training_state_from_status(state)
+    latest_restored = _restore_training_state_from_latest_report(state)
+    return bool(restored or latest_restored)
 
 
 def _try_acquire_train_lock(stale_after_sec: int = DEFAULT_TRAIN_LOCK_STALE_SEC) -> bool:
@@ -509,10 +577,24 @@ def _render_top_gainer_telegram(result: Dict[str, Any]) -> str:
     lines = [
         f"Top gainer critic {phase}",
         f"day: {day}",
-        f"watchlist top bought: {summary.get('watchlist_top_bought')}/{summary.get('watchlist_top_count')} ({summary.get('watchlist_top_capture_rate_pct')}%)",
-        f"early captures: {summary.get('watchlist_top_early_captured')}/{summary.get('watchlist_top_count')} ({summary.get('watchlist_top_early_capture_rate_pct')}%)",
+        f"watchlist top bought: {summary.get('watchlist_top_bought')}/{summary.get('watchlist_top_count')} ({_format_pct(summary.get('watchlist_top_capture_rate_pct'))})",
+        f"early captures: {summary.get('watchlist_top_early_captured')}/{summary.get('watchlist_top_count')} ({_format_pct(summary.get('watchlist_top_early_capture_rate_pct'))})",
         f"false-positive buys: {summary.get('bot_false_positive_buys')}/{summary.get('bot_unique_buys')}",
     ]
+    if "blocked_winner_count" in summary:
+        lines.append(f"blocked winners: {summary.get('blocked_winner_count')}")
+    missed_reasons = _format_reason_counts(summary.get("missed_reason_counts"))
+    if missed_reasons:
+        lines.append(f"missed reasons: {missed_reasons}")
+    filter_harm = report.get("blocked_reason_harm") or []
+    if filter_harm:
+        top_filter = filter_harm[0]
+        lines.append(
+            "top blocker: "
+            f"{top_filter.get('reason_code')} "
+            f"{top_filter.get('missed_symbols_count')} missed "
+            f"({top_filter.get('missed_opportunity_pct')}%)"
+        )
     if bought:
         bought_line = ", ".join(
             f"{item.get('symbol')} {item.get('first_entry_mode') or ''}".strip()
@@ -521,13 +603,38 @@ def _render_top_gainer_telegram(result: Dict[str, Any]) -> str:
         lines.append(f"bought: {bought_line}")
     if missed:
         missed_line = ", ".join(
-            f"{item.get('symbol')} {item.get('status')}"
+            f"{item.get('symbol')} {item.get('missed_reason_code') or item.get('status')}"
             for item in missed
         )
         lines.append(f"missed: {missed_line}")
     if false_pos:
         lines.append("false positives: " + ", ".join(str(x) for x in false_pos))
     return "\n".join(lines)
+
+
+def _format_reason_counts(value: Any, limit: int = 3) -> str:
+    if not isinstance(value, dict) or not value:
+        return ""
+    items = sorted(
+        ((str(key), int(count or 0)) for key, count in value.items()),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return ", ".join(f"{key}: {count}" for key, count in items[:limit])
+
+
+def _format_pct(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _should_send_top_gainer_telegram(phase: str) -> bool:
+    if not bool(getattr(config, "TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED", True)):
+        return False
+    if bool(getattr(config, "TOP_GAINER_CRITIC_TELEGRAM_FINAL_ONLY", False)):
+        return phase == "final"
+    return True
 
 
 def _render_watchlist_goal_telegram(result: Dict[str, Any]) -> str:
@@ -671,7 +778,7 @@ async def _training_loop(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.training")
     while True:
         await asyncio.sleep(5.0)
-        _restore_training_state_from_status(state)
+        _restore_training_state(state)
         rows_total = await asyncio.to_thread(_count_ranker_rows, critic_dataset.CRITIC_FILE)
         dataset_mtime = _file_mtime(critic_dataset.CRITIC_FILE)
         if not should_train(
@@ -694,7 +801,7 @@ async def _training_loop(state: WorkerState) -> None:
                 await asyncio.sleep(state.train_interval_sec)
                 continue
 
-            _restore_training_state_from_status(state)
+            _restore_training_state(state)
             rows_total = await asyncio.to_thread(_count_ranker_rows, critic_dataset.CRITIC_FILE)
             dataset_mtime = _file_mtime(critic_dataset.CRITIC_FILE)
             if not should_train(
@@ -891,7 +998,7 @@ async def _top_gainer_critic_loop(state: WorkerState) -> None:
                     state.top_gainer_last_capture_rate_pct,
                     state.top_gainer_last_early_capture_rate_pct,
                 )
-                if bool(getattr(config, "TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED", True)):
+                if _should_send_top_gainer_telegram(phase):
                     await _send_telegram_text(_render_top_gainer_telegram(result))
                 await _write_status_now(state)
         except asyncio.CancelledError:
@@ -915,7 +1022,7 @@ async def _top_gainer_critic_loop(state: WorkerState) -> None:
 async def _write_status_now(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.status")
     try:
-        _restore_training_state_from_status(state)
+        _restore_training_state(state)
         critic_report = await asyncio.to_thread(report_critic_dataset.build_report)
         ml_rows_total = await asyncio.to_thread(_count_jsonl_rows, ml_dataset.ML_FILE)
         snapshot = build_status_snapshot(
@@ -945,7 +1052,7 @@ async def _amain(args: argparse.Namespace) -> int:
         min_new_rows=args.min_new_rows,
         collector_enabled=args.enable_collector,
     )
-    _restore_training_state_from_status(state)
+    _restore_training_state(state)
 
     logging.getLogger("rl_headless_worker").info(
         "Headless RL worker started: train_every=%sm min_rows=%s min_new_rows=%s collector=%s",

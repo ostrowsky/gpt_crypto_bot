@@ -39,6 +39,7 @@ from strategy import (
 import botlog
 import critic_dataset
 import ml_dataset
+from unified_portfolio import external_agent_symbol_count
 
 log = logging.getLogger(__name__)
 
@@ -3053,14 +3054,28 @@ def _check_portfolio_limits(
       2. MAX_POSITIONS_PER_GROUP — не более M позиций в одной группе монет
          (защита от ситуации 11.03.2026 когда 12 L1/AI вошли одновременно)
     """
-    max_pos_cfg = int(getattr(config, "MAX_OPEN_POSITIONS", 6))
+    max_pos_cfg = int(
+        getattr(
+            config,
+            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
+            getattr(config, "MAX_OPEN_POSITIONS", 6),
+        )
+        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
+        else getattr(config, "MAX_OPEN_POSITIONS", 6)
+    )
     max_pos  = int(max_positions_override if max_positions_override is not None else max_pos_cfg)
     max_grp  = getattr(config, "MAX_POSITIONS_PER_GROUP", 2)
 
     # Лимит 1: общее число позиций
-    n_open = len(state.positions)
+    main_symbols = set(state.positions)
+    n_external = (
+        external_agent_symbol_count(main_symbols)
+        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
+        else 0
+    )
+    n_open = len(state.positions) + n_external
     if n_open >= max_pos:
-        return False, f"портфель полон: {n_open}/{max_pos} позиций"
+        return False, f"единый портфель полон: {n_open}/{max_pos} позиций"
 
     # Лимит 2: группа монеты
     my_group = _get_coin_group(sym)

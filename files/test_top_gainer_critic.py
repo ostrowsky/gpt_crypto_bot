@@ -17,6 +17,7 @@ class TestTopGainerCritic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             bot_events = tmp / "bot_events.jsonl"
+            agent_events = tmp / "agent_events.jsonl"
 
             events = [
                 {
@@ -44,10 +45,13 @@ class TestTopGainerCritic(unittest.TestCase):
                 "\n".join(json.dumps(x, ensure_ascii=False) for x in events) + "\n",
                 encoding="utf-8",
             )
+            agent_events.write_text("", encoding="utf-8")
 
             old_bot = top_gainer_critic.BOT_EVENTS_FILE
+            old_agent = top_gainer_critic.AGENT_EVENTS_FILE
             try:
                 top_gainer_critic.BOT_EVENTS_FILE = bot_events
+                top_gainer_critic.AGENT_EVENTS_FILE = agent_events
                 perf = [
                     top_gainer_critic.DayPerformance(
                         symbol="ZZZUSDT",
@@ -90,17 +94,104 @@ class TestTopGainerCritic(unittest.TestCase):
                 )
             finally:
                 top_gainer_critic.BOT_EVENTS_FILE = old_bot
+                top_gainer_critic.AGENT_EVENTS_FILE = old_agent
 
             self.assertEqual(report["summary"]["exchange_top_in_watchlist"], 2)
             self.assertEqual(report["summary"]["watchlist_top_count"], 2)
             self.assertEqual(report["summary"]["watchlist_top_bought"], 1)
             self.assertEqual(report["summary"]["watchlist_top_missed"], 1)
+            self.assertEqual(report["summary"]["blocked_winner_count"], 1)
+            self.assertEqual(report["summary"]["missed_reason_counts"]["portfolio_full"], 1)
             self.assertIn("XXXUSDT", report["bot_false_positive_symbols"])
 
             rows = {item["symbol"]: item for item in report["watchlist_top_gainers"]}
             self.assertEqual(rows["AAAUSDT"]["status"], "bought")
             self.assertEqual(rows["BBBUSDT"]["status"], "blocked_portfolio")
+            self.assertEqual(rows["BBBUSDT"]["missed_reason_code"], "portfolio_full")
             self.assertGreater(rows["AAAUSDT"]["capture_ratio"], 0.0)
+
+    def test_build_report_reads_agent_events_and_filter_harm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            bot_events = tmp / "bot_events.jsonl"
+            agent_events = tmp / "agent_events.jsonl"
+
+            bot_events.write_text("", encoding="utf-8")
+            agent_events.write_text(
+                "\n".join(
+                    json.dumps(x, ensure_ascii=False)
+                    for x in [
+                        {
+                            "event": "entry",
+                            "sym": "AAAUSDT",
+                            "mode": "4h_leader_watch",
+                            "price": 1.1,
+                            "ts": "2026-03-31T00:20:00Z",
+                            "source": "market_agent",
+                        },
+                        {
+                            "event": "blocked",
+                            "sym": "BBBUSDT",
+                            "signal_type": "top_gainer_score_gate",
+                            "reason": "top_gainer_score_gate score 0.52 < 0.60",
+                            "price": 1.2,
+                            "ts": "2026-03-31T01:20:00Z",
+                            "source": "market_agent",
+                        },
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            old_bot = top_gainer_critic.BOT_EVENTS_FILE
+            old_agent = top_gainer_critic.AGENT_EVENTS_FILE
+            try:
+                top_gainer_critic.BOT_EVENTS_FILE = bot_events
+                top_gainer_critic.AGENT_EVENTS_FILE = agent_events
+                report = top_gainer_critic.build_report(
+                    target_day=date(2026, 3, 31),
+                    phase="final",
+                    timezone_name="Europe/Budapest",
+                    top_n=2,
+                    min_quote_volume=0.0,
+                    day_performance=[
+                        top_gainer_critic.DayPerformance(
+                            symbol="AAAUSDT",
+                            day_open=1.0,
+                            day_close=1.4,
+                            day_high=1.4,
+                            day_low=1.0,
+                            day_change_pct=40.0,
+                            quote_volume_24h=5_000_000.0,
+                            in_watchlist=True,
+                        ),
+                        top_gainer_critic.DayPerformance(
+                            symbol="BBBUSDT",
+                            day_open=1.0,
+                            day_close=1.3,
+                            day_high=1.3,
+                            day_low=1.0,
+                            day_change_pct=30.0,
+                            quote_volume_24h=5_000_000.0,
+                            in_watchlist=True,
+                        ),
+                    ],
+                )
+            finally:
+                top_gainer_critic.BOT_EVENTS_FILE = old_bot
+                top_gainer_critic.AGENT_EVENTS_FILE = old_agent
+
+            self.assertEqual(report["summary"]["watchlist_top_bought"], 1)
+            self.assertEqual(report["summary"]["entry_source_counts"]["market_agent"], 1)
+            self.assertEqual(report["summary"]["blocked_winner_count"], 1)
+            self.assertEqual(report["summary"]["missed_reason_counts"]["top_gainer_score_gate"], 1)
+
+            rows = {item["symbol"]: item for item in report["watchlist_top_gainers"]}
+            self.assertEqual(rows["AAAUSDT"]["first_entry_source"], "market_agent")
+            self.assertEqual(rows["BBBUSDT"]["missed_reason_code"], "top_gainer_score_gate")
+            self.assertEqual(report["blocked_reason_harm"][0]["reason_code"], "top_gainer_score_gate")
+            self.assertEqual(report["blocked_reason_harm"][0]["missed_symbols"], ["BBBUSDT"])
 
     def test_scheduled_slots_map_to_midday_and_previous_day_final(self) -> None:
         tz = ZoneInfo("Europe/Budapest")
@@ -121,6 +212,7 @@ class TestTopGainerCritic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             bot_events = tmp / "bot_events.jsonl"
+            agent_events = tmp / "agent_events.jsonl"
             critic_file = tmp / "critic_dataset.jsonl"
 
             events = [
@@ -149,6 +241,7 @@ class TestTopGainerCritic(unittest.TestCase):
                 "\n".join(json.dumps(x, ensure_ascii=False) for x in events) + "\n",
                 encoding="utf-8",
             )
+            agent_events.write_text("", encoding="utf-8")
 
             critic_rows = [
                 {
@@ -223,9 +316,11 @@ class TestTopGainerCritic(unittest.TestCase):
             ]
 
             old_bot = top_gainer_critic.BOT_EVENTS_FILE
+            old_agent = top_gainer_critic.AGENT_EVENTS_FILE
             old_critic = critic_dataset.CRITIC_FILE
             try:
                 top_gainer_critic.BOT_EVENTS_FILE = bot_events
+                top_gainer_critic.AGENT_EVENTS_FILE = agent_events
                 critic_dataset.CRITIC_FILE = critic_file
                 report = top_gainer_critic.build_report(
                     target_day=date(2026, 3, 31),
@@ -238,6 +333,7 @@ class TestTopGainerCritic(unittest.TestCase):
                 summary = critic_dataset.annotate_top_gainer_teacher(report)
             finally:
                 top_gainer_critic.BOT_EVENTS_FILE = old_bot
+                top_gainer_critic.AGENT_EVENTS_FILE = old_agent
                 critic_dataset.CRITIC_FILE = old_critic
 
             self.assertEqual(summary["rows_annotated"], 3)

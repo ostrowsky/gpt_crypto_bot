@@ -97,6 +97,17 @@ state.positions = load_positions()
 AGENT_POSITIONS_PATH = Path(__file__).resolve().parent / "agent_positions.json"
 
 
+def _unified_portfolio_limit() -> int:
+    return int(
+        getattr(
+            config,
+            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
+            getattr(config, "MAX_OPEN_POSITIONS", 6),
+        )
+        or 0
+    )
+
+
 def build_badge() -> str:
     return f"`v:{BUILD_ID}`  `build:{BUILD_DATE}`"
 
@@ -129,6 +140,36 @@ def _load_agent_positions() -> dict:
         return {}
 
 
+def _position_to_raw(pos) -> dict:
+    fields = (
+        "symbol", "tf", "entry_price", "entry_bar", "entry_ts", "entry_ema20",
+        "entry_slope", "entry_adx", "entry_rsi", "entry_vol_x",
+        "forecast_return_pct", "today_change_pct", "candidate_score_at_entry",
+        "ranker_final_score", "ranker_ev", "ranker_top_gainer_prob",
+        "four_h_context_score", "four_h_context_label", "predictions",
+        "bars_elapsed", "signal_mode", "trail_k", "max_hold_bars",
+        "trail_stop",
+    )
+    raw = {name: getattr(pos, name, None) for name in fields}
+    raw["symbol"] = str(raw.get("symbol") or "")
+    raw["tf"] = str(raw.get("tf") or "15m")
+    return raw
+
+
+def _main_positions_raw() -> dict:
+    return {sym: _position_to_raw(pos) for sym, pos in state.positions.items()}
+
+
+def _unified_position_rows(*, limit: int | None = None) -> list[dict]:
+    from unified_portfolio import ranked_unified_positions
+
+    return ranked_unified_positions(
+        _main_positions_raw(),
+        _load_agent_positions(),
+        limit=limit,
+    )
+
+
 def _agent_prediction_summary(pos: dict) -> str:
     predictions = pos.get("predictions") if isinstance(pos.get("predictions"), dict) else {}
     horizons = list(predictions.keys()) or [3, 5, 10]
@@ -150,8 +191,9 @@ def kb_main() -> InlineKeyboardMarkup:
     #   ▶️ Анализ + Мониторинг  — ни анализа, ни мониторинга нет
     #   🔄 Повторный анализ     — мониторинг уже работает (перезапустить анализ)
     #   ⏹ Стоп мониторинга     — остановить всё
-    agent_positions = _load_agent_positions()
-    pos  = len(state.positions) + len(agent_positions)
+    max_pos = _unified_portfolio_limit()
+    pos = min(len(_unified_position_rows(limit=None)), max_pos)
+    pos_label = f"{pos}/{max_pos}"
     wl   = len(config.load_watchlist())
     hot  = len(state.hot_coins)
     conf = len([r for r in state.hot_coins if r.today_confirmed])
@@ -175,7 +217,7 @@ def kb_main() -> InlineKeyboardMarkup:
             callback_data="market_scan",
         )]
 
-    signals_lbl = f"📊 Позиции  [{pos}/{getattr(config,'MAX_OPEN_POSITIONS',6)}]" if pos else "📊 Позиции"
+    signals_lbl = f"📊 Позиции  [{pos_label}]" if pos else "📊 Позиции"
     list_lbl    = f"📋 Список монет  [{wl}]"
 
     return InlineKeyboardMarkup([
@@ -601,34 +643,39 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 📊 Активные сигналы ───────────────────────────────────────────────────
     elif action == "positions":
-        agent_positions = _load_agent_positions()
-        if not state.positions and not agent_positions:
-            max_pos = getattr(config, "MAX_OPEN_POSITIONS", 6)
+        max_pos = _unified_portfolio_limit()
+        rows_all = _unified_position_rows(limit=None)
+        rows = rows_all[:max_pos]
+        if not rows:
             txt = f"📊 Активных позиций нет.  <i>(лимит: {max_pos})</i>"
         else:
             import html as _html
             from monitor import _get_coin_group
             MAX_LEN  = 4000
-            max_pos  = getattr(config, "MAX_OPEN_POSITIONS", 6)
-            max_grp  = getattr(config, "MAX_POSITIONS_PER_GROUP", 2)
-            n_main   = len(state.positions)
-            n_agent  = len(agent_positions)
-            n_open   = n_main + n_agent
-
-            # Портфельный статус
-            port_pct  = int(n_open / max_pos * 100)
-            port_bar  = "█" * (n_open) + "░" * (max_pos - n_open)
-            port_line = f"<b>Портфель:</b> {n_open}/{max_pos}  <code>{port_bar}</code>\n"
-
+            filled = min(len(rows), max_pos)
+            port_bar = "█" * filled + "░" * max(0, max_pos - filled)
             lines = [
-                f"📊 <b>Открытых позиций: {n_open}/{max_pos}</b> "
-                f"<i>(main {n_main} + agent {n_agent})</i>\n",
-                port_line,
+                f"📊 <b>Единый портфель: {len(rows)}/{max_pos}</b>\n",
+                f"<b>Top-{max_pos} по перспективности:</b> <code>{port_bar}</code>\n",
             ]
+            if len(rows_all) > len(rows):
+                lines.append(f"<i>Скрыто слабее лимита: {len(rows_all) - len(rows)}</i>\n")
             shown = 0
-            if state.positions:
-                lines.append("<b>Main portfolio</b>\n")
-            for sym, pos in state.positions.items():
+            for idx, row in enumerate(rows, start=1):
+                pos = row["position"]
+                source = str(row["source"])
+                sym = str(row["symbol"])
+                tf = str(pos.get("tf") or "15m")
+                mode = str(pos.get("signal_mode") or "trend")
+                entry = float(pos.get("entry_price") or 0.0)
+                bars = int(pos.get("bars_elapsed") or 0)
+                slope = float(pos.get("entry_slope") or 0.0)
+                adx = float(pos.get("entry_adx") or 0.0)
+                score = float(row.get("score") or 0.0)
+                forecast_return = float(pos.get("forecast_return_pct") or 0.0)
+                today_change = float(pos.get("today_change_pct") or 0.0)
+                four_h_score = float(pos.get("four_h_context_score") or 0.0)
+                four_h_label = str(pos.get("four_h_context_label") or "")
                 scan_icon = " 🔍" if any(
                     r.symbol == sym and r.from_scan for r in state.hot_coins
                 ) else ""
@@ -643,76 +690,50 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 if coin_report and coin_report.today_accuracy:
                     ev_parts = []
                     for h, fa in sorted(coin_report.today_accuracy.items()):
-                        if fa.total > 0 and fa.expected_return is not None:
-                            ev_icon = "▲" if fa.expected_return > 0 else "▼"
-                            ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{fa.expected_return:+.2f}%")
+                        expected_return = getattr(fa, "expected_return", None)
+                        if fa.total > 0 and expected_return is not None:
+                            ev_icon = "▲" if expected_return > 0 else "▼"
+                            ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{expected_return:+.2f}%")
                         elif fa.total > 0:
                             ev_parts.append(f"T+{h}:{fa.pct:.0f}%")
                     if ev_parts:
                         ev_line = f"  📊 {' '.join(ev_parts)}\n"
-
-                block = (
-                    f"<b>{_html.escape(sym)}</b>{scan_icon}{grp_str}  "
-                    f"<code>[{_html.escape(pos.tf)}]</code>\n"
-                    f"  🧭 {_html.escape(signal_mode_label(getattr(pos, 'signal_mode', 'trend')))}  "
-                    f"📈 slope <code>{getattr(pos, 'entry_slope', 0.0):+.2f}%</code>  "
-                    f"💪 ADX <code>{getattr(pos, 'entry_adx', 0.0):.1f}</code>\n"
-                    f"  💰 Вход: <code>{pos.entry_price:.6g}</code>  "
-                    f"⏱ {pos.bars_elapsed}б\n"
-                    + ev_line +
-                    f"  🎯 {pos.prediction_summary()}\n"
-                )
-                current_len = sum(len(l) for l in lines)
-                if current_len + len(block) > MAX_LEN:
-                    remaining = len(state.positions) - shown
-                    lines.append(f"\n<i>...и ещё {remaining} позиций</i>")
-                    break
-                lines.append(block)
-                shown += 1
-            if agent_positions:
-                lines.append("\n<b>Market agent</b>\n")
-            for key, pos in agent_positions.items():
-                if not isinstance(pos, dict):
-                    continue
-                sym = str(pos.get("symbol") or str(key).split("|")[0])
-                tf = str(pos.get("tf") or "15m")
-                mode = str(pos.get("signal_mode") or "trend")
-                entry = float(pos.get("entry_price") or 0.0)
-                bars = int(pos.get("bars_elapsed") or 0)
-                slope = float(pos.get("entry_slope") or 0.0)
-                adx = float(pos.get("entry_adx") or 0.0)
-                leader_score = float(pos.get("leader_score") or 0.0)
-                today_change = float(pos.get("today_change_pct") or 0.0)
-                four_h_score = float(pos.get("four_h_context_score") or 0.0)
-                four_h_label = str(pos.get("four_h_context_label") or "")
                 four_h_line = ""
                 if four_h_label:
                     four_h_line = f"  🕓 4h: <code>{four_h_score:+.1f}</code> {_html.escape(four_h_label)}\n"
+
                 block = (
-                    f"<b>{_html.escape(sym)}</b> <i>[agent]</i>  "
+                    f"<b>{idx}. {_html.escape(sym)}</b>{scan_icon} <i>[{source}]</i>{grp_str}  "
                     f"<code>[{_html.escape(tf)}]</code>\n"
                     f"  🧭 {_html.escape(signal_mode_label(mode))}  "
+                    f"score <code>{score:.1f}</code>  "
                     f"📈 slope <code>{slope:+.2f}%</code>  "
                     f"💪 ADX <code>{adx:.1f}</code>\n"
                     f"  💰 Вход: <code>{entry:.6g}</code>  "
                     f"⏱ {bars}б  "
-                    f"🎯 leader <code>{leader_score:.1f}</code> today <code>{today_change:+.2f}%</code>\n"
-                    + four_h_line +
-                    f"  🎯 {_agent_prediction_summary(pos)}\n"
+                    f"forecast <code>{forecast_return:+.2f}%</code> today <code>{today_change:+.2f}%</code>\n"
+                    + four_h_line
+                    + ev_line
+                    + f"  🎯 {_agent_prediction_summary(pos)}\n"
                 )
                 current_len = sum(len(l) for l in lines)
                 if current_len + len(block) > MAX_LEN:
-                    remaining = n_open - shown
+                    remaining = len(rows) - shown
                     lines.append(f"\n<i>...и ещё {remaining} позиций</i>")
                     break
                 lines.append(block)
                 shown += 1
             txt = "\n".join(lines)
-        # edit_message_text: ensure positions button uses ParseMode.HTML
-        await _edit_or_send(
-            query,
-            ctx.application,
-            txt, parse_mode=ParseMode.HTML, reply_markup=kb_main(),
+        # Positions are easier to miss when Telegram edits an older menu message.
+        # Send them as a fresh message so the button always has visible feedback.
+        await asyncio.wait_for(
+            ctx.application.bot.send_message(
+                chat_id=chat_id,
+                text=_safe_truncate(txt),
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb_main(),
+            ),
+            timeout=5.0,
         )
 
     # ── 📋 Список монет ───────────────────────────────────────────────────────
@@ -1041,8 +1062,9 @@ def _ensure_positions_monitored(state) -> None:
             from strategy import CoinReport
             dummy = CoinReport(
                 symbol=sym, tf=pos.tf,
-                today_signals=[], today_confirmed=True,
+                today_signals=0, today_confirmed=True,
                 signal_now=False, today_accuracy={},
+                best_horizon=0,
                 best_accuracy=0.0,
                 note="удерживаем позицию (exit guard)",
                 in_play=True,
