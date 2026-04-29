@@ -728,11 +728,16 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 lines.append(block)
                 shown += 1
             txt = "\n".join(lines)
-        # edit_message_text: ensure positions button uses ParseMode.HTML
-        await _edit_or_send(
-            query,
-            ctx.application,
-            txt, parse_mode=ParseMode.HTML, reply_markup=kb_main(),
+        # Positions are easier to miss when Telegram edits an older menu message.
+        # Send them as a fresh message so the button always has visible feedback.
+        await asyncio.wait_for(
+            ctx.application.bot.send_message(
+                chat_id=chat_id,
+                text=_safe_truncate(txt),
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb_main(),
+            ),
+            timeout=5.0,
         )
 
     # ── 📋 Список монет ───────────────────────────────────────────────────────
