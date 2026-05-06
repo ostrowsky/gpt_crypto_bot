@@ -14,6 +14,7 @@ $pidFile = Join-Path $runtimeDir "rl_worker_bg.json"
 $heartbeatFile = Join-Path $runtimeDir "rl_worker_wrapper_heartbeat.json"
 $stdout = Join-Path $runtimeDir "rl_worker_wrapper_stdout.log"
 $stderr = Join-Path $runtimeDir "rl_worker_wrapper_stderr.log"
+$trainLockFile = Join-Path $runtimeDir "rl_worker_train.lock"
 
 if (-not (Test-Path $runtimeDir)) {
     New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
@@ -57,8 +58,57 @@ function Stop-StaleWorker {
     Remove-Item $heartbeatFile -Force -ErrorAction SilentlyContinue
 }
 
+function Stop-ExistingRLWorkers {
+    try {
+        $workers = Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq "python.exe" -and
+            $_.ExecutablePath -eq $python -and
+            $_.CommandLine -like "*rl_headless_worker.py*"
+        }
+        foreach ($worker in $workers) {
+            Stop-Process -Id $worker.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+    }
+}
+
+function Stop-ExistingRLWrappers {
+    try {
+        $escapedLoopScript = $loopScript.Replace("\", "\\")
+        $wrappers = Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq "powershell.exe" -and
+            (
+                $_.CommandLine -like "*$loopScript*" -or
+                $_.CommandLine -like "*$escapedLoopScript*"
+            )
+        }
+        foreach ($wrapper in $wrappers) {
+            Stop-Process -Id $wrapper.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+    }
+}
+
+function Clear-OrphanedTrainLock {
+    if (-not (Test-Path $trainLockFile)) {
+        return
+    }
+    try {
+        $lock = Get-Content $trainLockFile -Raw | ConvertFrom-Json
+        $ownerPid = [int]$lock.pid
+        if ($ownerPid -and (Get-Process -Id $ownerPid -ErrorAction SilentlyContinue)) {
+            return
+        }
+    } catch {
+    }
+    Remove-Item $trainLockFile -Force -ErrorAction SilentlyContinue
+}
+
 Stop-StaleWorker
+Stop-ExistingRLWrappers
+Stop-ExistingRLWorkers
 Start-Sleep -Seconds 1
+Clear-OrphanedTrainLock
 
 Remove-Item $stdout -Force -ErrorAction SilentlyContinue
 Remove-Item $stderr -Force -ErrorAction SilentlyContinue
@@ -69,7 +119,7 @@ Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
 
 $wrapperProc = Start-Process `
     -FilePath "powershell.exe" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $loopScript, "--disable-collector") `
+    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $loopScript, "--enable-collector") `
     -WindowStyle Hidden `
     -PassThru
 

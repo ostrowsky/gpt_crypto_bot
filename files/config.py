@@ -153,8 +153,9 @@ TODAY_T10_MIN: float = 40.0
 # РРЅС‚РµСЂРІР°Р» Р°РІС‚Рѕ-СЂРµР°РЅР°Р»РёР·Р° РІ СЃРµРєСѓРЅРґР°С… (0 = РІС‹РєР»СЋС‡РµРЅ)
 # 7200 = РєР°Р¶РґС‹Рµ 2 С‡Р°СЃР° Р±РѕС‚ СЃР°Рј РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ СЃРїРёСЃРѕРє РјРѕРЅРµС‚
 AUTO_REANALYZE_SEC: int = 900
-BOT_ENABLE_DATA_COLLECTOR: bool = True
+BOT_ENABLE_DATA_COLLECTOR: bool = False
 BOT_STARTUP_AUTO_SCAN_ENABLED: bool = True
+RL_WORKER_ENABLE_COLLECTOR: bool = True
 
 ATR_TRAIL_K: float = 2.0   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РґР»СЏ С‚СЂРµР№Р»РёРЅРі-СЃС‚РѕРїР°
 MACDWARN_BARS: int = 3     # Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ MACD hist РїР°РґР°РµС‚ в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рѕ СЂР°Р·РІРѕСЂРѕС‚Рµ
@@ -382,6 +383,7 @@ AGENT_MIN_DAY_CHANGE_PCT: float = 1.25
 AGENT_MIN_FORECAST_PROXY_PCT: float = 0.35
 AGENT_MIN_LEADER_SCORE: float = 12.0
 AGENT_MIN_ADX: float = 18.0
+AGENT_TREND_MIN_ADX: float = 35.0
 AGENT_MIN_VOL_X: float = 1.0
 AGENT_MAX_RSI: float = 72.5
 AGENT_MAX_DAILY_RANGE_PCT: float = 14.0
@@ -415,6 +417,9 @@ AGENT_4H_LEADER_MIN_SLOPE: float = 0.35
 AGENT_4H_LEADER_MIN_RSI: float = 50.0
 AGENT_4H_LEADER_MAX_RSI: float = 78.0
 AGENT_4H_LEADER_MIN_VOL_X: float = 0.35
+AGENT_4H_LEADER_STRENGTH_GATE_ENABLED: bool = True
+AGENT_4H_LEADER_STRENGTH_MIN_VOL_X: float = 3.0
+AGENT_4H_LEADER_STRENGTH_MIN_TODAY_CHANGE_PCT: float = 10.0
 AGENT_4H_LEADER_RECLAIM_MAX_PRICE_EDGE_PCT: float = 8.0
 AGENT_4H_LEADER_PULLBACK_MAX_PRICE_EDGE_PCT: float = 3.5
 AGENT_4H_LEADER_MIN_MACD_HIST: float = 0.0
@@ -449,12 +454,54 @@ TOP_GAINER_SCORE_GATE_MODES: tuple[str, ...] = ("breakout", "retest", "trend", "
 TOP_GAINER_SCORE_GATE_MIN_SCORE: float = 34.0
 TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE: dict[str, float] = {"impulse": 30.0}
 
+# Watch-only alerts for strong candidates blocked by quality gates. These do not
+# open positions; they explain "why no signal" without weakening production BUYs.
+TOP_GAINER_WATCH_ALERTS_ENABLED: bool = True
+TOP_GAINER_WATCH_ALERT_MODES: tuple[str, ...] = ("impulse_speed",)
+TOP_GAINER_WATCH_ALERT_MIN_SCORE: float = 30.0
+AGENT_SOFT_BLOCK_WATCH_ALERTS_ENABLED: bool = True
+AGENT_SOFT_BLOCK_RSI_MAX: float = 75.0
+AGENT_SOFT_BLOCK_RSI_MIN_VOL_X: float = 3.0
+AGENT_SOFT_BLOCK_IMPULSE_MIN_ADX: float = 15.0
+AGENT_SOFT_BLOCK_IMPULSE_MAX_RSI: float = 75.0
+AGENT_SOFT_BLOCK_IMPULSE_MIN_VOL_X: float = 2.0
+AGENT_SOFT_BLOCK_DAILY_RANGE_MAX_PCT: float = 20.0
+
 # RL/report Telegram notifications.
 RL_TELEGRAM_REPORTS_ENABLED: bool = True
 TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED: bool = True
 TOP_GAINER_CRITIC_TELEGRAM_FINAL_ONLY: bool = True
 WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED: bool = False
 RL_TRAIN_TELEGRAM_REPORTS_ENABLED: bool = False
+
+# Post-factum signal quality evaluator. It reads already emitted BUY/SELL
+# events and historical candles; it never generates live signals.
+SIGNAL_QUALITY_EVALUATOR_ENABLED: bool = True
+SIGNAL_QUALITY_EVALUATOR_TELEGRAM_REPORTS_ENABLED: bool = True
+SIGNAL_QUALITY_EVALUATOR_TIMEZONE: str = "Europe/Budapest"
+SIGNAL_QUALITY_EVALUATOR_RUN_HOUR_LOCAL: int = 0
+SIGNAL_QUALITY_EVALUATOR_RUN_MINUTE_LOCAL: int = 15
+SIGNAL_QUALITY_EVALUATOR_RUN_WINDOW_MINUTES: int = 45
+SIGNAL_QUALITY_EVALUATOR_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
+SIGNAL_QUALITY_EVALUATOR_SOURCE: str = "all"
+SIGNAL_QUALITY_EVALUATOR_TOP_MOVERS_N: int = 15
+SIGNAL_QUALITY_EVALUATOR_SYMBOLS: tuple[str, ...] = ()
+
+# Automatic post-factum feedback from the signal-quality evaluator. The feedback
+# layer may only apply narrow, replay-confirmed runtime adjustments. Wider BUY,
+# exit, cluster, or replacement rule changes must stay disabled until a replay
+# confirms them separately.
+SIGNAL_QUALITY_FEEDBACK_ENABLED: bool = True
+SIGNAL_QUALITY_FEEDBACK_AUTO_APPLY_COOLDOWN: bool = True
+SIGNAL_QUALITY_FEEDBACK_FILE: str = "../.runtime/signal_quality_feedback.json"
+SIGNAL_QUALITY_FEEDBACK_MAX_AGE_HOURS: int = 48
+SIGNAL_QUALITY_FEEDBACK_MISS_RATE_MIN: float = 0.65
+SIGNAL_QUALITY_FEEDBACK_TOP_MOVER_MISSED_MIN: int = 20
+SIGNAL_QUALITY_FEEDBACK_FALSE_POSITIVE_MAX: float = 0.22
+SIGNAL_QUALITY_FEEDBACK_COOLDOWN_BARS_ON_PRESSURE: int = 2
+SIGNAL_QUALITY_FEEDBACK_EXIT_RULES_ENABLED: bool = False
+SIGNAL_QUALITY_FEEDBACK_CLUSTER_RULES_ENABLED: bool = False
+SIGNAL_QUALITY_FEEDBACK_REPLACEMENT_RULES_ENABLED: bool = False
 
 # в”Ђв”Ђ Early trend warnings (Stage-1, NO ENTRY) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Stage-1 only sends РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ (watch), РЅРµ РѕС‚РєСЂС‹РІР°РµС‚ РїРѕР·РёС†РёСЋ.

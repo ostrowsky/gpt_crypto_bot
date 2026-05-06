@@ -606,9 +606,14 @@ def _phase_teacher_payload(
         "first_entry_time": chosen.get("first_entry_time"),
         "first_entry_mode": chosen.get("first_entry_mode"),
         "first_entry_price": None if chosen.get("first_entry_price") is None else round(_safe(chosen.get("first_entry_price")), 8),
+        "capture_ratio_at_entry": None if chosen.get("capture_ratio_at_entry") is None else round(_safe(chosen.get("capture_ratio_at_entry")), 4),
+        "lead_time_to_final_top_min": _safe_int(chosen.get("lead_time_to_final_top_min")),
         "opportunity_from_entry_pct": None if chosen.get("opportunity_from_entry_pct") is None else round(_safe(chosen.get("opportunity_from_entry_pct")), 4),
         "latest_exit_time": chosen.get("latest_exit_time"),
         "latest_exit_pnl_pct": None if chosen.get("latest_exit_pnl_pct") is None else round(_safe(chosen.get("latest_exit_pnl_pct")), 4),
+        "exit_efficiency": None if chosen.get("exit_efficiency") is None else round(_safe(chosen.get("exit_efficiency")), 4),
+        "giveback_pct": None if chosen.get("giveback_pct") is None else round(_safe(chosen.get("giveback_pct")), 4),
+        "cooldown_harm_pct": None if chosen.get("cooldown_harm_pct") is None else round(_safe(chosen.get("cooldown_harm_pct")), 4),
     }
 
 

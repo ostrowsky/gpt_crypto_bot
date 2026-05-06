@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import threading
 from collections import Counter
 from datetime import date, datetime, time, timezone
 from pathlib import Path
@@ -13,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import ml_dataset
 import top_gainer_critic
+from ml_dataset_compat import collect_mutated_lines, dataset_lock, write_dataset_lines
 
 
 ROOT = Path(__file__).resolve().parent
@@ -199,6 +198,7 @@ def annotate_ml_dataset_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
     negative_rows = 0
     symbols_in_window: set[str] = set()
     positive_symbols_with_rows: set[str] = set()
+    positive_symbol_stats: Dict[str, Dict[str, Any]] = {}
 
     def _payload_for_row(rec: Dict[str, Any]) -> tuple[str, Dict[str, Any]] | None:
         local_dt = _record_local_dt(rec, tz)
@@ -237,12 +237,33 @@ def annotate_ml_dataset_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
         if payload["watchlist_top_gainer"]:
             positive_rows += 1
             positive_symbols_with_rows.add(sym)
+            stat = positive_symbol_stats.setdefault(
+                sym,
+                {
+                    "rows": 0,
+                    "signal_rows": 0,
+                    "modes": Counter(),
+                    "first_ts_signal": "",
+                    "last_ts_signal": "",
+                },
+            )
+            stat["rows"] += 1
+            signal_type = str(rec.get("signal_type") or rec.get("mode") or "none")
+            if signal_type != "none":
+                stat["signal_rows"] += 1
+                stat["modes"][signal_type] += 1
+            ts_signal = str(rec.get("ts_signal") or "")
+            if ts_signal:
+                if not stat["first_ts_signal"] or ts_signal < stat["first_ts_signal"]:
+                    stat["first_ts_signal"] = ts_signal
+                if ts_signal > stat["last_ts_signal"]:
+                    stat["last_ts_signal"] = ts_signal
         else:
             negative_rows += 1
         teacher = rec.get("teacher") or {}
         return teacher.get(teacher_key) != payload
 
-    _, maybe_changed, maybe_bad_rows = ml_dataset._collect_mutated_lines(_preview_mutate)
+    _, maybe_changed, maybe_bad_rows = collect_mutated_lines(ml_dataset, _preview_mutate)
     rows_annotated = 0
     if maybe_changed or maybe_bad_rows:
         def _commit_mutate(rec: Dict[str, Any]) -> bool:
@@ -258,15 +279,10 @@ def annotate_ml_dataset_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
             rows_annotated += 1
             return True
 
-        with ml_dataset._dataset_io_lock():
-            updated, changed, had_bad_rows = ml_dataset._collect_mutated_lines(_commit_mutate)
+        with dataset_lock(ml_dataset):
+            updated, changed, had_bad_rows = collect_mutated_lines(ml_dataset, _commit_mutate)
             if changed or had_bad_rows:
-                ml_dataset.ML_FILE.parent.mkdir(parents=True, exist_ok=True)
-                tmp = ml_dataset.ML_FILE.with_name(
-                    f"{ml_dataset.ML_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-                )
-                tmp.write_text("\n".join(updated) + "\n", encoding="utf-8")
-                ml_dataset._atomic_replace_with_retry(tmp, ml_dataset.ML_FILE)
+                write_dataset_lines(ml_dataset, updated)
 
     missing_positive_symbols = sorted(sym for sym in watchlist_map if sym not in positive_symbols_with_rows)
     mandatory_positive_coverage_pct = (
@@ -284,6 +300,16 @@ def annotate_ml_dataset_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
         "symbols_in_window": len(symbols_in_window),
         "positive_symbols_with_rows": len(positive_symbols_with_rows),
         "positive_symbols_missing_rows": missing_positive_symbols,
+        "positive_symbol_diagnostics": {
+            sym: {
+                "rows": int(stat["rows"]),
+                "signal_rows": int(stat["signal_rows"]),
+                "modes": dict(stat["modes"].most_common(5)),
+                "first_ts_signal": stat["first_ts_signal"],
+                "last_ts_signal": stat["last_ts_signal"],
+            }
+            for sym, stat in sorted(positive_symbol_stats.items())
+        },
         "mandatory_positive_coverage_pct": mandatory_positive_coverage_pct,
     }
 
@@ -440,6 +466,17 @@ def render_text(report: Dict[str, Any]) -> str:
         lines.append("")
         lines.append("Positive symbols missing ml_dataset rows:")
         lines.append("  " + ", ".join(str(x) for x in missing_rows[:15]))
+    diagnostics = (report.get("teacher_annotation") or {}).get("positive_symbol_diagnostics") or {}
+    if diagnostics:
+        lines.append("")
+        lines.append("Positive symbol ml_dataset diagnostics:")
+        for sym, stat in list(sorted(diagnostics.items()))[:15]:
+            modes = stat.get("modes") or {}
+            mode_text = ", ".join(f"{key}={value}" for key, value in modes.items()) or "none"
+            lines.append(
+                f"  {sym}: rows={stat.get('rows', 0)} "
+                f"signal_rows={stat.get('signal_rows', 0)} modes={mode_text}"
+            )
     return "\n".join(lines)
 
 

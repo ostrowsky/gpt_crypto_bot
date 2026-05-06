@@ -104,7 +104,13 @@ def _parse_utc_ts(raw: str | None) -> datetime | None:
             return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-    return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _event_log_files() -> tuple[tuple[Path, str], ...]:
@@ -387,6 +393,46 @@ def _capture_ratio(day_open: float, day_close: float, entry_price: float) -> flo
     return max(0.0, min(1.5, ratio))
 
 
+def _event_local_dt(rec: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None:
+    if not rec:
+        return None
+    ts = _parse_utc_ts(rec.get("ts"))
+    if not ts:
+        return None
+    return ts.astimezone(tz)
+
+
+def _event_price(rec: dict[str, Any] | None, field: str) -> float | None:
+    if not rec:
+        return None
+    try:
+        value = float(rec.get(field, 0.0))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _exit_quality_metrics(
+    *,
+    entry_price: float | None,
+    day_high: float,
+    last_exit: dict[str, Any] | None,
+) -> tuple[float | None, float | None]:
+    if not entry_price or entry_price <= 0 or not last_exit:
+        return None, None
+    try:
+        exit_pnl = float(last_exit.get("pnl_pct"))
+    except (TypeError, ValueError):
+        exit_price = _event_price(last_exit, "exit_price")
+        exit_pnl = ((exit_price / entry_price) - 1.0) * 100.0 if exit_price else 0.0
+    max_favorable = (day_high / entry_price - 1.0) * 100.0
+    if max_favorable <= 0:
+        return None, None
+    exit_efficiency = exit_pnl / max_favorable
+    giveback_pct = max(0.0, max_favorable - exit_pnl)
+    return exit_efficiency, giveback_pct
+
+
 def _status_for_symbol(in_watchlist: bool, events: dict[str, list[dict[str, Any]]]) -> tuple[str, str | None]:
     if not in_watchlist:
         return "not_in_watchlist", None
@@ -408,7 +454,11 @@ def _status_for_symbol(in_watchlist: bool, events: dict[str, list[dict[str, Any]
 def summarize_top_gainer(
     perf: DayPerformance,
     events: dict[str, list[dict[str, Any]]],
+    *,
+    end_local: datetime | None = None,
+    tz: ZoneInfo | None = None,
 ) -> dict[str, Any]:
+    tz = tz or ZoneInfo(DEFAULT_TZ)
     entries = sorted(events.get("entries", []), key=lambda x: x.get("ts", ""))
     exits = sorted(events.get("exits", []), key=lambda x: x.get("ts", ""))
     blocked = sorted(events.get("blocked", []), key=lambda x: x.get("ts", ""))
@@ -416,19 +466,27 @@ def summarize_top_gainer(
     last_exit = exits[-1] if exits else None
     first_block = blocked[0] if blocked else None
     last_block = blocked[-1] if blocked else None
+    first_cooldown_block = next((item for item in blocked if _blocked_reason_code(item) == "symbol_cooldown"), None)
     status, reason = _status_for_symbol(perf.in_watchlist, events)
 
     first_entry_price = float(first_entry.get("price", 0.0)) if first_entry else None
-    first_block_price = None
-    if first_block:
-        try:
-            first_block_price = float(first_block.get("price", 0.0))
-        except (TypeError, ValueError):
-            first_block_price = None
+    first_block_price = _event_price(first_block, "price")
+    first_cooldown_block_price = _event_price(first_cooldown_block, "price")
     capture_ratio = (
         _capture_ratio(perf.day_open, perf.day_close, first_entry_price)
         if first_entry_price
         else None
+    )
+    first_entry_dt = _event_local_dt(first_entry, tz)
+    lead_time_to_final_top_min = (
+        max(0, int((end_local - first_entry_dt).total_seconds() // 60))
+        if end_local is not None and first_entry_dt is not None
+        else None
+    )
+    exit_efficiency, giveback_pct = _exit_quality_metrics(
+        entry_price=first_entry_price,
+        day_high=perf.day_high,
+        last_exit=last_exit,
     )
     opportunity_from_entry = (
         (perf.day_close / first_entry_price - 1.0) * 100.0
@@ -440,6 +498,10 @@ def summarize_top_gainer(
         if first_block_price and first_block_price > 0 and not first_entry
         else None
     )
+    cooldown_harm = None
+    if first_cooldown_block_price and first_cooldown_block_price > 0:
+        cooldown_move = (perf.day_close / first_cooldown_block_price - 1.0) * 100.0
+        cooldown_harm = max(0.0, cooldown_move)
     blocked_reason_counts = Counter(_blocked_reason_code(item) for item in blocked)
     missed_reason_code = None
     if status != "bought":
@@ -475,10 +537,17 @@ def summarize_top_gainer(
         "first_entry_source": _event_source(first_entry) if first_entry else None,
         "first_entry_price": first_entry_price,
         "capture_ratio": None if capture_ratio is None else round(capture_ratio, 4),
+        "capture_ratio_at_entry": None if capture_ratio is None else round(capture_ratio, 4),
+        "lead_time_to_final_top_min": lead_time_to_final_top_min,
         "opportunity_from_entry_pct": None if opportunity_from_entry is None else round(opportunity_from_entry, 3),
         "latest_exit_time": last_exit.get("_ts_local") if last_exit else None,
         "latest_exit_pnl_pct": last_exit.get("pnl_pct") if last_exit else None,
         "latest_exit_reason": last_exit.get("reason") if last_exit else None,
+        "exit_efficiency": None if exit_efficiency is None else round(exit_efficiency, 4),
+        "giveback_pct": None if giveback_pct is None else round(giveback_pct, 4),
+        "first_cooldown_block_time": first_cooldown_block.get("_ts_local") if first_cooldown_block else None,
+        "first_cooldown_block_price": first_cooldown_block_price,
+        "cooldown_harm_pct": None if cooldown_harm is None else round(cooldown_harm, 4),
     }
     return summary
 
@@ -581,8 +650,14 @@ def build_report(
     watchlist_top = [x for x in day_performance if x.in_watchlist][:top_n]
     event_rows = _load_day_events(start_local, end_local, tz)
 
-    all_top_summary = [summarize_top_gainer(item, event_rows.get(item.symbol, {})) for item in all_top]
-    watchlist_top_summary = [summarize_top_gainer(item, event_rows.get(item.symbol, {})) for item in watchlist_top]
+    all_top_summary = [
+        summarize_top_gainer(item, event_rows.get(item.symbol, {}), end_local=end_local, tz=tz)
+        for item in all_top
+    ]
+    watchlist_top_summary = [
+        summarize_top_gainer(item, event_rows.get(item.symbol, {}), end_local=end_local, tz=tz)
+        for item in watchlist_top
+    ]
 
     watchlist_top_set = {item["symbol"] for item in watchlist_top_summary}
     bought_symbols: set[str] = set()
@@ -695,8 +770,11 @@ def render_text(report: dict[str, Any]) -> str:
         )
         if item["first_entry_time"]:
             capture = "n/a" if item["capture_ratio"] is None else f"{float(item['capture_ratio']) * 100:.1f}%"
+            lead = item.get("lead_time_to_final_top_min")
+            lead_text = "n/a" if lead is None else f"{int(lead)}m"
             lines.append(
                 f"   BUY {item['first_entry_time']} mode={item['first_entry_mode']} source={item.get('first_entry_source')} entry={item['first_entry_price']} capture={capture}"
+                f" lead={lead_text}"
             )
         if item.get("first_block_time"):
             opp = item.get("opportunity_from_first_block_pct")
@@ -708,8 +786,18 @@ def render_text(report: dict[str, Any]) -> str:
                 f"opp_from_first_block={opp_text}"
             )
         if item["latest_exit_pnl_pct"] is not None:
+            eff = item.get("exit_efficiency")
+            giveback = item.get("giveback_pct")
+            eff_text = "n/a" if eff is None else f"{float(eff) * 100:.1f}%"
+            giveback_text = "n/a" if giveback is None else f"{float(giveback):+.2f}%"
             lines.append(
-                f"   EXIT {item['latest_exit_time']} pnl={float(item['latest_exit_pnl_pct']):+.2f}%"
+                f"   EXIT {item['latest_exit_time']} pnl={float(item['latest_exit_pnl_pct']):+.2f}% "
+                f"eff={eff_text} giveback={giveback_text}"
+            )
+        if item.get("cooldown_harm_pct") is not None:
+            lines.append(
+                f"   COOLDOWN harm={float(item['cooldown_harm_pct']):+.2f}% "
+                f"from={item.get('first_cooldown_block_time')}"
             )
         if item["reason"]:
             code = item.get("missed_reason_code") or item.get("first_block_reason_code") or "rule"
