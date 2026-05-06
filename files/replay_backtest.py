@@ -7,8 +7,9 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import numpy as np
@@ -42,6 +43,8 @@ from strategy import (
 BINANCE_URL = "https://api.binance.com/api/v3/klines"
 BAR_MS = {"15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000, "4h": 4 * 60 * 60 * 1000}
 _ML_MODEL_CACHE: Optional[dict] = None
+OBJECTIVE_TZ = "Europe/Budapest"
+OBJECTIVE_CUTOFF_HOUR = 22
 
 
 @dataclass
@@ -62,6 +65,10 @@ class ReplayTrade:
     entry_rsi: float = 50.0
     entry_daily_range: float = 0.0
     entry_intraday_change_pct: float = 0.0
+    capture_ratio_at_entry: Optional[float] = None
+    lead_time_to_final_top_min: Optional[float] = None
+    day_open_price: float = 0.0
+    day_final_price: float = 0.0
     exit_ts: int = 0
     exit_price: float = 0.0
     exit_reason: str = ""
@@ -69,6 +76,15 @@ class ReplayTrade:
     ret_3: Optional[float] = None
     ret_5: Optional[float] = None
     ret_10: Optional[float] = None
+    max_price_since_entry: float = 0.0
+    min_price_since_entry: float = 0.0
+    max_favorable_pct: float = 0.0
+    max_adverse_pct: float = 0.0
+    exit_efficiency: Optional[float] = None
+    giveback_pct: float = 0.0
+    cooldown_blocked_count: int = 0
+    cooldown_positive_blocked_count: int = 0
+    cooldown_harm_pct: float = 0.0
 
     @property
     def pnl_pct(self) -> float:
@@ -109,6 +125,9 @@ class ReplayRunStats:
     replacements_worsened: int = 0
     skipped_top_gainer_score: int = 0
     skipped_cluster_cap: int = 0
+    cooldown_skipped_candidates: int = 0
+    cooldown_positive_skips: int = 0
+    cooldown_harm_pct: float = 0.0
 
 
 def _load_ml_model_payload() -> dict:
@@ -126,6 +145,71 @@ def _load_ml_model_payload() -> dict:
 def _load_ml_segment_payloads() -> dict:
     raw = _load_ml_model_payload()
     return raw.get("segment_model_payloads", {}) if isinstance(raw, dict) else {}
+
+
+def _objective_tz() -> timezone:
+    try:
+        return ZoneInfo(OBJECTIVE_TZ)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+def _finite_or_none(value: Optional[float], digits: int = 4) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        value_f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(value_f):
+        return None
+    return round(value_f, digits)
+
+
+def _entry_day_metrics(data: np.ndarray, entry_i: int, entry_price: float) -> dict:
+    if entry_i < 0 or entry_i >= len(data["t"]) or entry_price <= 0:
+        return {
+            "capture_ratio_at_entry": None,
+            "lead_time_to_final_top_min": None,
+            "day_open_price": 0.0,
+            "day_final_price": 0.0,
+        }
+    tz = _objective_tz()
+    entry_dt = datetime.fromtimestamp(int(data["t"][entry_i]) / 1000, tz=timezone.utc).astimezone(tz)
+    start_local = datetime.combine(entry_dt.date(), datetime.min.time(), tzinfo=tz)
+    cutoff_local = datetime.combine(
+        entry_dt.date(),
+        datetime.min.time().replace(hour=OBJECTIVE_CUTOFF_HOUR),
+        tzinfo=tz,
+    )
+    final_local = cutoff_local if entry_dt <= cutoff_local else datetime.combine(
+        entry_dt.date(),
+        datetime.max.time(),
+        tzinfo=tz,
+    )
+    start_ms = int(start_local.astimezone(timezone.utc).timestamp() * 1000)
+    final_ms = int(final_local.astimezone(timezone.utc).timestamp() * 1000)
+
+    day_open_idx = _find_last_closed_index(data["t"], start_ms)
+    if day_open_idx is None:
+        candidates = np.where(data["t"] >= start_ms)[0]
+        day_open_idx = int(candidates[0]) if len(candidates) else 0
+    day_final_idx = _find_last_closed_index(data["t"], final_ms)
+    if day_final_idx is None:
+        day_final_idx = len(data["c"]) - 2
+    day_open = float(data["o"][day_open_idx]) if "o" in data.dtype.names else float(data["c"][day_open_idx])
+    day_final = float(data["c"][day_final_idx])
+    move = day_final - day_open
+    capture_ratio = None
+    if move > 0:
+        capture_ratio = max(0.0, min(1.5, (day_final - entry_price) / move))
+    lead_min = max(0.0, (cutoff_local - entry_dt).total_seconds() / 60.0)
+    return {
+        "capture_ratio_at_entry": _finite_or_none(capture_ratio),
+        "lead_time_to_final_top_min": _finite_or_none(lead_min, digits=2),
+        "day_open_price": round(day_open, 10),
+        "day_final_price": round(day_final, 10),
+    }
 
 
 def _load_ml_general_payload() -> Optional[dict]:
@@ -1290,6 +1374,14 @@ def _signal_cluster_bucket_replay(tf: str, mode: str) -> str:
     return f"{tf}_{mode}"
 
 
+def _top_gainer_score_min_for_mode(mode: str, default_min: float) -> float:
+    mode_min_scores = getattr(config, "TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE", {}) or {}
+    try:
+        return float(mode_min_scores.get(mode, default_min))
+    except Exception:
+        return float(default_min)
+
+
 def _signal_cluster_cap_replay(bucket: str) -> int:
     mapping = {
         "15m_short_bounce": "OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX",
@@ -1677,6 +1769,94 @@ def _stats(values: List[float]) -> Optional[dict]:
     }
 
 
+def _metric_stats(values: List[float]) -> Optional[dict]:
+    clean = [float(v) for v in values if np.isfinite(float(v))]
+    if not clean:
+        return None
+    clean_sorted = sorted(clean)
+    return {
+        "n": len(clean_sorted),
+        "avg": round(mean(clean_sorted), 4),
+        "median": round(median(clean_sorted), 4),
+        "min": round(clean_sorted[0], 4),
+        "max": round(clean_sorted[-1], 4),
+    }
+
+
+def _update_trade_extrema(trade: ReplayTrade, data: np.ndarray, idx: int) -> None:
+    if idx < 0 or idx >= len(data["c"]) or trade.entry_price <= 0:
+        return
+    high_now = float(data["h"][idx]) if "h" in data.dtype.names else float(data["c"][idx])
+    low_now = float(data["l"][idx]) if "l" in data.dtype.names else float(data["c"][idx])
+    if not np.isfinite(high_now):
+        high_now = float(data["c"][idx])
+    if not np.isfinite(low_now):
+        low_now = float(data["c"][idx])
+    if trade.max_price_since_entry <= 0:
+        trade.max_price_since_entry = trade.entry_price
+    if trade.min_price_since_entry <= 0:
+        trade.min_price_since_entry = trade.entry_price
+    trade.max_price_since_entry = max(trade.max_price_since_entry, high_now)
+    trade.min_price_since_entry = min(trade.min_price_since_entry, low_now)
+    trade.max_favorable_pct = max(0.0, (trade.max_price_since_entry / trade.entry_price - 1.0) * 100.0)
+    trade.max_adverse_pct = min(0.0, (trade.min_price_since_entry / trade.entry_price - 1.0) * 100.0)
+
+
+def _finalize_trade_metrics(trade: ReplayTrade) -> None:
+    if trade.entry_price <= 0:
+        return
+    if trade.max_price_since_entry <= 0:
+        trade.max_price_since_entry = max(trade.entry_price, trade.exit_price)
+    if trade.min_price_since_entry <= 0:
+        trade.min_price_since_entry = min(trade.entry_price, trade.exit_price or trade.entry_price)
+    trade.max_favorable_pct = max(0.0, (trade.max_price_since_entry / trade.entry_price - 1.0) * 100.0)
+    trade.max_adverse_pct = min(0.0, (trade.min_price_since_entry / trade.entry_price - 1.0) * 100.0)
+    if trade.max_favorable_pct > 0:
+        trade.exit_efficiency = trade.pnl_pct / trade.max_favorable_pct
+    else:
+        trade.exit_efficiency = None
+    trade.giveback_pct = max(0.0, trade.max_favorable_pct - trade.pnl_pct)
+
+
+def _candidate_forward_return_pct(
+    candidate: ReplayCandidate,
+    cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
+    *,
+    horizon: int = 5,
+) -> Optional[float]:
+    pack = cache.get((candidate.sym, candidate.tf))
+    if not pack:
+        return None
+    data, _ = pack
+    future_i = candidate.i + int(horizon)
+    if candidate.price <= 0 or future_i >= len(data["c"]):
+        return None
+    future_close = float(data["c"][future_i])
+    if not np.isfinite(future_close):
+        return None
+    return (future_close / candidate.price - 1.0) * 100.0
+
+
+def _record_cooldown_skip(
+    trade: Optional[ReplayTrade],
+    candidate: ReplayCandidate,
+    cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
+    stats: ReplayRunStats,
+) -> None:
+    stats.cooldown_skipped_candidates += 1
+    if trade is None:
+        return
+    trade.cooldown_blocked_count += 1
+    forward_ret = _candidate_forward_return_pct(candidate, cache, horizon=5)
+    if forward_ret is None or forward_ret <= 0:
+        return
+    harm = float(forward_ret)
+    trade.cooldown_positive_blocked_count += 1
+    trade.cooldown_harm_pct += harm
+    stats.cooldown_positive_skips += 1
+    stats.cooldown_harm_pct += harm
+
+
 def _trade_to_example(trade: ReplayTrade) -> dict:
     return {
         "sym": trade.sym,
@@ -1686,6 +1866,11 @@ def _trade_to_example(trade: ReplayTrade) -> dict:
         "exit_ts": datetime.fromtimestamp(trade.exit_ts / 1000, tz=timezone.utc).isoformat(),
         "pnl_pct": round(trade.pnl_pct, 4),
         "reason": trade.exit_reason,
+        "capture_ratio_at_entry": _finite_or_none(trade.capture_ratio_at_entry),
+        "lead_time_to_final_top_min": _finite_or_none(trade.lead_time_to_final_top_min, digits=2),
+        "exit_efficiency": _finite_or_none(trade.exit_efficiency),
+        "giveback_pct": round(float(trade.giveback_pct), 4),
+        "cooldown_harm_pct": round(float(trade.cooldown_harm_pct), 4),
     }
 
 
@@ -1790,6 +1975,7 @@ def _update_trade_progress(
     micro_pack: Optional[Tuple[np.ndarray, dict]] = None,
 ) -> Optional[str]:
     close_now = float(data["c"][idx])
+    _update_trade_extrema(trade, data, idx)
     atr_now = float(feat["atr"][idx]) if np.isfinite(feat["atr"][idx]) else 0.0
     trade.bars_held = idx - trade.entry_i
     for horizon in (3, 5, 10):
@@ -1912,6 +2098,17 @@ def summarize_trades(trades: List[ReplayTrade]) -> dict:
             "ret_3": _stats([t.ret_3 for t in rows if t.ret_3 is not None]),
             "ret_5": _stats([t.ret_5 for t in rows if t.ret_5 is not None]),
             "ret_10": _stats([t.ret_10 for t in rows if t.ret_10 is not None]),
+            "capture_ratio_at_entry": _metric_stats([
+                t.capture_ratio_at_entry for t in rows if t.capture_ratio_at_entry is not None
+            ]),
+            "lead_time_to_final_top_min": _metric_stats([
+                t.lead_time_to_final_top_min for t in rows if t.lead_time_to_final_top_min is not None
+            ]),
+            "exit_efficiency": _metric_stats([
+                t.exit_efficiency for t in rows if t.exit_efficiency is not None
+            ]),
+            "giveback_pct": _metric_stats([t.giveback_pct for t in rows]),
+            "cooldown_harm_pct": _metric_stats([t.cooldown_harm_pct for t in rows]),
         }
     return out
 
@@ -1926,6 +2123,17 @@ def summarize_totals(trades: List[ReplayTrade]) -> dict:
         "ret_3": _stats([t.ret_3 for t in trades if t.ret_3 is not None]),
         "ret_5": _stats([t.ret_5 for t in trades if t.ret_5 is not None]),
         "ret_10": _stats([t.ret_10 for t in trades if t.ret_10 is not None]),
+        "capture_ratio_at_entry": _metric_stats([
+            t.capture_ratio_at_entry for t in trades if t.capture_ratio_at_entry is not None
+        ]),
+        "lead_time_to_final_top_min": _metric_stats([
+            t.lead_time_to_final_top_min for t in trades if t.lead_time_to_final_top_min is not None
+        ]),
+        "exit_efficiency": _metric_stats([
+            t.exit_efficiency for t in trades if t.exit_efficiency is not None
+        ]),
+        "giveback_pct": _metric_stats([t.giveback_pct for t in trades]),
+        "cooldown_harm_pct": _metric_stats([t.cooldown_harm_pct for t in trades]),
     }
 
 
@@ -1980,6 +2188,7 @@ async def simulate_portfolio(
     ordered_ts = sorted(timestamps)
     open_positions: Dict[Tuple[str, str], ReplayTrade] = {}
     cooldown_until: Dict[str, int] = {}
+    last_closed_by_symbol: Dict[str, ReplayTrade] = {}
     trades: List[ReplayTrade] = []
 
     for ts_ms in ordered_ts:
@@ -2008,9 +2217,11 @@ async def simulate_portfolio(
             to_close.append((key, trade))
 
         for key, trade in to_close:
+            _finalize_trade_metrics(trade)
             trades.append(trade)
             cooldown_bars = _cooldown_bars_after_exit(trade.mode, trade.exit_reason)
             cooldown_until[trade.sym] = trade.exit_ts + cooldown_bars * BAR_MS[trade.tf]
+            last_closed_by_symbol[trade.sym] = trade
             open_positions.pop(key, None)
 
         ts_candidates = candidates_by_ts.get(ts_ms, [])
@@ -2029,11 +2240,16 @@ async def simulate_portfolio(
             reverse=True,
         )
         for candidate in ts_candidates:
-            if use_top_gainer_score and candidate.top_gainer_score < top_gainer_score_min:
+            candidate_top_gainer_score_min = _top_gainer_score_min_for_mode(
+                candidate.mode,
+                top_gainer_score_min,
+            )
+            if use_top_gainer_score and candidate.top_gainer_score < candidate_top_gainer_score_min:
                 stats.skipped_top_gainer_score += 1
                 continue
             sym_cooldown = cooldown_until.get(candidate.sym, 0)
             if ts_ms < sym_cooldown:
+                _record_cooldown_skip(last_closed_by_symbol.get(candidate.sym), candidate, cache, stats)
                 continue
             if any(trade.sym == candidate.sym for trade in open_positions.values()):
                 continue
@@ -2139,9 +2355,11 @@ async def simulate_portfolio(
                 replaceable.sort(key=lambda item: item[0])
                 _, weakest_key, weakest_trade, idx, price = replaceable[0]
                 weakest_data, _ = cache[(weakest_trade.sym, weakest_trade.tf)]
+                _update_trade_extrema(weakest_trade, weakest_data, idx)
                 weakest_trade.exit_ts = int(weakest_data["t"][idx])
                 weakest_trade.exit_price = price
                 weakest_trade.exit_reason = f"replaced_by_{candidate.sym}_{candidate.mode}"
+                _finalize_trade_metrics(weakest_trade)
                 trades.append(weakest_trade)
                 stats.replacements_total += 1
                 if weakest_trade.pnl_pct > 0:
@@ -2150,11 +2368,13 @@ async def simulate_portfolio(
                     stats.replacements_improved += 1
                 cooldown_bars = _cooldown_bars_after_exit(weakest_trade.mode, weakest_trade.exit_reason)
                 cooldown_until[weakest_trade.sym] = weakest_trade.exit_ts + cooldown_bars * BAR_MS[weakest_trade.tf]
+                last_closed_by_symbol[weakest_trade.sym] = weakest_trade
                 open_positions.pop(weakest_key, None)
 
             data, feat = cache[(candidate.sym, candidate.tf)]
             atr_val = float(feat["atr"][candidate.i]) if np.isfinite(feat["atr"][candidate.i]) else 0.0
             trail_stop = candidate.price - candidate.trail_k * atr_val if atr_val > 0 else 0.0
+            day_metrics = _entry_day_metrics(data, candidate.i, candidate.price)
             open_positions[(candidate.sym, candidate.tf)] = ReplayTrade(
                 sym=candidate.sym,
                 tf=candidate.tf,
@@ -2172,6 +2392,12 @@ async def simulate_portfolio(
                 entry_rsi=float(getattr(candidate, "rsi", 50.0)),
                 entry_daily_range=float(getattr(candidate, "daily_range", 0.0)),
                 entry_intraday_change_pct=float(getattr(candidate, "intraday_change_pct", 0.0)),
+                capture_ratio_at_entry=day_metrics["capture_ratio_at_entry"],
+                lead_time_to_final_top_min=day_metrics["lead_time_to_final_top_min"],
+                day_open_price=float(day_metrics["day_open_price"]),
+                day_final_price=float(day_metrics["day_final_price"]),
+                max_price_since_entry=float(candidate.price),
+                min_price_since_entry=float(candidate.price),
             )
 
     for key, trade in list(open_positions.items()):
@@ -2184,6 +2410,7 @@ async def simulate_portfolio(
         if trade.exit_price <= 0:
             trade.exit_price = float(data["c"][idx])
         trade.exit_reason = "open_at_end"
+        _finalize_trade_metrics(trade)
         trades.append(trade)
         open_positions.pop(key, None)
 
@@ -2260,6 +2487,9 @@ def _make_report(
             "replacements_worsened": run_stats.replacements_worsened,
             "skipped_top_gainer_score": run_stats.skipped_top_gainer_score,
             "skipped_cluster_cap": run_stats.skipped_cluster_cap,
+            "cooldown_skipped_candidates": run_stats.cooldown_skipped_candidates,
+            "cooldown_positive_skips": run_stats.cooldown_positive_skips,
+            "cooldown_harm_pct": round(float(run_stats.cooldown_harm_pct), 4),
         },
         "summary": summary,
         "objective": objective,
@@ -2438,6 +2668,7 @@ def render_text(report: dict) -> str:
                 f"  Flow: candidates={run_stats['candidates_total']} skipped_full={run_stats['skipped_portfolio_full']} replacements={run_stats['replacements_total']}",
                 f"  Objective: symbol_precision={sub['objective']['symbol_precision']:.1%} trade_precision={sub['objective']['trade_precision']:.1%} recall={sub['objective']['capture_rate']:.1%} captured={len(sub['objective']['captured_top_symbols'])}/{sub['objective']['final_top_n']}",
                 f"  Score/cluster skips: score={run_stats.get('skipped_top_gainer_score', 0)} cluster={run_stats.get('skipped_cluster_cap', 0)}",
+                f"  Cooldown harm: skips={run_stats.get('cooldown_skipped_candidates', 0)} positive={run_stats.get('cooldown_positive_skips', 0)} harm={run_stats.get('cooldown_harm_pct', 0.0):+.4f}%",
                 "  By mode:",
             ]
         )
@@ -2445,6 +2676,12 @@ def render_text(report: dict) -> str:
             val = totals.get(key)
             if val:
                 lines.append(f"    total_{key}: n={val['n']} avg={val['avg']:+.4f}% wr={val['win_rate']:.1%}")
+        for key in ("capture_ratio_at_entry", "lead_time_to_final_top_min", "exit_efficiency", "giveback_pct"):
+            val = totals.get(key)
+            if val:
+                lines.append(
+                    f"    total_{key}: n={val['n']} avg={val['avg']:+.4f} median={val['median']:+.4f}"
+                )
         for mode, stats in sub["summary"].items():
             pnl = stats.get("pnl")
             if not pnl:

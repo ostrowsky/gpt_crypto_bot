@@ -154,6 +154,17 @@ Create a project MCP server, for example `crypto_bot_context`, that reads local 
 - Duplicate noon audit exists (`top-movers-noon-audit` and `top-movers-noon-audit-2`); keep only one before re-enabling schedules.
 
 ## Latest Update
+- 2026-04-30 Europe/Budapest
+- Lowering the production top-gainer BUY score gate was rejected by replay:
+  - current `34` beat global `30`, `impulse_speed=30`, and `impulse_speed=26` on 4d/7d PnL and precision while keeping capture.
+- Added watch-only soft-block alerts, not BUY relaxations:
+  - main monitor alerts only `impulse_speed` candidates with top-gainer score 30..34.
+  - market agent alerts only historically confirmed soft-blocks: high RSI with vol_x>=3, disabled impulse with ADX>=15/RSI<=75/vol_x>=2, and daily-range blocks <=20%.
+- Version badge policy: after any code change, increment `BUILD_ID` in `D:\Projects\gpt_crypto_bot\files\bot.py` and set `BUILD_APPLIED_AT` to the static local timestamp when the version was applied. Do not derive build date from process start time.
+- Sweep artifacts:
+  - `D:\Projects\gpt_crypto_bot\.runtime\reports\near_miss_alert_sweep_2026-04-27_2026-04-29.json`
+  - `D:\Projects\gpt_crypto_bot\.runtime\reports\agent_soft_block_alert_sweep_2026-04-27_2026-04-29.json`
+
 - 2026-04-18 20:14 Europe/Budapest
 - All project-linked Codex automations are paused to stop background token spend.
 - `CODEX_CONTEXT.md` is now the first file to read before any broader repo inspection.
@@ -424,3 +435,128 @@ Create a project MCP server, for example `crypto_bot_context`, that reads local 
   - Bot running PID 21236.
   - RL worker running PID 7456.
   - Market agent running actual Python PID 14252; status heartbeat fresh and first cycle completed.
+
+- 2026-04-30 16:21 Europe/Budapest
+- User asked to implement the backtest-confirmed agent quality gates and observe.
+- Implemented in `files\config.py` / `files\market_signal_agent.py`:
+  - `trend` candidates now use `AGENT_TREND_MIN_ADX = 35.0` instead of generic agent ADX 18.0.
+  - `4h_leader_watch` candidates now require strength confirmation: `AGENT_4H_LEADER_STRENGTH_MIN_TODAY_CHANGE_PCT = 10.0` and `AGENT_4H_LEADER_STRENGTH_MIN_VOL_X = 3.0`.
+  - `strong_trend` was intentionally left unchanged.
+- Version badge bumped in `files\bot.py` to `menu_build_v5`, `BUILD_APPLIED_AT = 2026-04-30 16:21:20 +02:00`.
+
+- 2026-05-01 18:31 Europe/Budapest
+- Completed complex audit requested by user: mode contradictions, metric quality, and hypotheses for early stable-trend capture / reversal exits.
+- Available history used:
+  - Event logs: `bot_events.jsonl` from 2026-03-03, `agent_events.jsonl` from 2026-03-29.
+  - Critic history: top-gainer reports from 2026-04-01.
+  - Fresh replay/sweeps written to:
+    - `.runtime/reports/replay_top_gainer_score_min34_30d_20260501.json`
+    - `.runtime/reports/stable_trend_watch_sweep_30d_20260501.json`
+    - `.runtime/reports/top_gainer_score_gate_nearmiss_sweep_30d_20260501.json`
+    - `.runtime/reports/top_gainer_score_gate_nearmiss_quality_sweep_30d_20260501.json`
+- 30d production replay ending 2026-05-01 16:03 UTC:
+  - Score-gated production variant: 896 trades, +180.14% total PnL, +0.201% avg, 46.65% win rate, top15 recall 100%.
+  - Baseline: 2575 trades, +29.99% total PnL, +0.0116% avg, 37.13% win rate, top15 recall 100%.
+  - Decision: keep `TOP_GAINER_SCORE_GATE_MIN_SCORE=34.0`; do not lower BUY gates.
+- Stable trend watch-only sweep over 30 complete local days:
+  - Broad MTF version covered 59.78% of top15 pairs and 38.89% early, but precision was only 25.89% and noise was 34.63 alerts/day.
+  - Strict versions still had precision only 27-31% with 19-31 alerts/day.
+  - Decision: reject as user-facing alert; may be useful as offline diagnostic only.
+- Score-gate near-miss watch expansion over 30 complete local days:
+  - `all_30_34`: 1170 alerts, precision 27.26%, 39 alerts/day.
+  - `impulse_speed_33_34`: precision 42.52% but only 12% coverage and weak capture ratio.
+  - Quality-filter variants were either empty or still too noisy.
+  - Decision: do not broaden live top-gainer watch alerts beyond already accepted narrow rules.
+- Exit/re-entry audit:
+  - Existing 7d weak-exit hold policies worsened total PnL versus current.
+  - Profitable weak-exit re-entry brackets were negative after fees.
+  - Decision: do not relax exits/cooldown yet.
+- Main contradictions documented in `SCOUT_OPTIMIZATION_SPEC.md`:
+  - BUY gates optimize PnL/precision and intentionally block many visible trends; this should not be solved by weakening BUY.
+  - `ALIGNMENT/TREND_SURGE` create diagnostic visibility but not BUY; watch layer is intentionally narrow.
+  - Agent day-long cooldown can block continuing trends; needs `cooldown_harm` before relaxation.
+  - 4h context is not standalone BUY.
+  - Main+agent duplicate symbols must be treated as unified exposure risk.
+- Next safe work: metric-only implementation for `capture_ratio_at_entry`, `entry_day_range_percentile`, `exit_efficiency`, `giveback_pct`, and `cooldown_harm`; then rerun threshold optimization.
+
+- 2026-05-05 18:30 Europe/Budapest
+- User asked to add metric-only fields before optimizing trend-start/exit behavior and then asked why there were no ICP signals.
+- ICP diagnosis from local logs:
+  - `ICPUSDT` was not missed: main bot sent BUY on 2026-05-05 12:21 UTC / 14:21 Europe/Budapest at 2.500.
+  - Main bot exited at 12:49 UTC / 14:49 Europe/Budapest with +0.68% after 2 bars due `rsi_divergence_momentum_weakens`.
+  - Later main-bot candidates were blocked by `top_gainer_score_gate`; market-agent candidates were blocked by `symbol_cooldown`.
+  - Classification: exit/cooldown continuation issue, not initial signal absence.
+- Implemented metric-only instrumentation:
+  - `files\replay_backtest.py`: added `capture_ratio_at_entry`, `lead_time_to_final_top_min`, day open/final prices, MFE/MAE tracking, `exit_efficiency`, `giveback_pct`, per-trade cooldown skip counters, and aggregate `cooldown_harm_pct`.
+  - `files\top_gainer_critic.py`: top-gainer rows now emit entry lead/capture, exit efficiency/giveback, first cooldown block price/time, and positive cooldown harm; UTC parser now accepts both `Z` and ISO offsets.
+  - `files\critic_dataset.py`: teacher payload now exports the metric-only fields.
+  - `files\bot.py`: version badge bumped to `menu_build_v9`, `BUILD_APPLIED_AT = 2026-05-05 18:30:26 +02:00`.
+- Verification:
+  - `pyembed\python.exe -m py_compile files\replay_backtest.py files\top_gainer_critic.py files\critic_dataset.py files\bot.py` passed.
+  - Synthetic top-gainer critic check for ICP-style entry/exit/cooldown returned `capture_ratio_at_entry=0.4`, `lead_time_to_final_top_min=459`, `exit_efficiency=0.1545`, `giveback_pct=3.72`, `cooldown_harm_pct=2.9295`.
+  - Earlier 2d replay with new metrics completed successfully; no behavior gates were changed.
+
+- 2026-05-05 21:57 Europe/Budapest
+- User asked to implement a Skill that evaluates crypto bot signal quality post-factum and to assess whether critic/scout components can be simplified or replaced by skills.
+- Implemented repo-local skill `skills\signal-quality-evaluator`:
+  - `SKILL.md` defines the workflow and explicitly says the skill does not generate signals, does not train models, and complements replay/backtest.
+  - `scripts\evaluate_signals.py` reads existing `bot_events.jsonl` / `agent_events.jsonl`, fetches Binance candles, detects post-factum sustained uptrend episodes, matches BUY/SELL events to those episodes, and reports late entries, early exits, late exits, false-positive BUYs, missed trends, trend capture ratios, `exit_efficiency`, and `giveback_pct`.
+  - `references\architecture-fit.md` documents that this skill can replace manual postmortems and some critic diagnostics, but must not replace scout/monitor/market-agent or replay_backtest.
+- ICP smoke test:
+  - Command: `pyembed\python.exe skills\signal-quality-evaluator\scripts\evaluate_signals.py --days 1 --symbol ICPUSDT --tf 15m,1h --source all`.
+  - Output: 3 BUYs, 2 matched trend buys, 2 missed trend episodes, 0 false-positive BUYs, 2 early exits, median capture ratio 0.6045, median exit efficiency 0.6512, median giveback 0.76.
+  - JSON saved to `.runtime\reports\signal_quality_ICPUSDT_1d_20260505.json`.
+- Verification:
+  - `pyembed\python.exe -m py_compile skills\signal-quality-evaluator\scripts\evaluate_signals.py` passed.
+  - Official skill validator could not run because the available Python environments lack/break `PyYAML`; frontmatter was checked manually.
+  - `files\bot.py` version bumped to `menu_build_v10`, `BUILD_APPLIED_AT = 2026-05-05 21:57:24 +02:00`.
+
+- 2026-05-05 22:42 Europe/Budapest
+- User asked to connect automatic launch for the signal-quality evaluator skill.
+- Implemented scheduled launch in `files\rl_headless_worker.py`:
+  - New daily loop `_signal_quality_loop`.
+  - Default schedule: previous local day at `00:15 Europe/Budapest`.
+  - Saves `.runtime\reports\signal_quality_YYYY-MM-DD_final.json` and `.runtime\reports\signal_quality_YYYY-MM-DD_final.txt`.
+  - Sends Telegram summary when `SIGNAL_QUALITY_EVALUATOR_TELEGRAM_REPORTS_ENABLED=True`.
+  - Adds status section `signal_quality_evaluator` to `.runtime\rl_worker_status.json`.
+- Added config flags in `files\config.py`:
+  - `SIGNAL_QUALITY_EVALUATOR_ENABLED=True`
+  - `SIGNAL_QUALITY_EVALUATOR_TELEGRAM_REPORTS_ENABLED=True`
+  - `SIGNAL_QUALITY_EVALUATOR_RUN_HOUR_LOCAL=0`
+  - `SIGNAL_QUALITY_EVALUATOR_RUN_MINUTE_LOCAL=15`
+  - `SIGNAL_QUALITY_EVALUATOR_TIMEFRAMES=("15m", "1h")`
+  - `SIGNAL_QUALITY_EVALUATOR_SOURCE="all"`
+  - `SIGNAL_QUALITY_EVALUATOR_SYMBOLS=()` means full watchlist.
+- Verification:
+  - `pyembed\python.exe -m py_compile files\config.py files\rl_headless_worker.py files\bot.py skills\signal-quality-evaluator\scripts\evaluate_signals.py` passed.
+  - Schedule smoke test returned `(2026-05-05, "2026-05-05::signal_quality_final")` for `2026-05-06 00:15 Europe/Budapest`.
+  - Integration smoke run with `symbols=("ICPUSDT",)` saved test JSON/TXT under `.runtime\reports\_smoke_signal_quality` and returned `buys=3`, `early_exits=2`, `false_positive_buys=0`.
+  - `files\bot.py` version bumped to `menu_build_v11`, `BUILD_APPLIED_AT = 2026-05-05 22:42:36 +02:00`.
+
+- 2026-05-06 10:52 Europe/Budapest
+- User asked where the short Telegram summary was.
+- Findings:
+  - Scheduled signal-quality report did run successfully at `2026-05-05T22:15:01Z` / `2026-05-06 00:15 Europe/Budapest`.
+  - It finished at `2026-05-05T22:17:05Z` and wrote:
+    - `.runtime\reports\signal_quality_2026-05-05_final.json`
+    - `.runtime\reports\signal_quality_2026-05-05_final.txt`
+  - Summary: `buys=56`, `matched_trend_buys=38`, `missed_trends=249`, `false_positive_buys=9`, `late_entries=21`, `early_exits=14`, `late_exits=4`, median capture `0.3123`, median exit efficiency `0.1608`, median giveback `0.757`.
+  - Telegram sending lacked success logging/status fields, so there was no delivery trace in logs even when send was attempted.
+- Implemented observability fix in `files\rl_headless_worker.py`:
+  - `_send_telegram_text` now returns attempted/sent/errors/skipped and logs successful sends.
+  - Signal-quality status now includes `last_telegram_sent_at`, `last_telegram_sent_count`, and `last_telegram_error`.
+  - Manual resend of the 2026-05-05 signal-quality summary succeeded with `attempted=1`, `sent=1`.
+  - `files\bot.py` version bumped to `menu_build_v12`, `BUILD_APPLIED_AT = 2026-05-06 10:52:03 +02:00`.
+
+- 2026-05-06 11:20 Europe/Budapest
+- User reported the `Позиции` button still feels unresponsive and clarified that the root cause is event-loop overload during analysis/monitoring.
+- Implemented control-plane responsiveness changes:
+  - `files\strategy.py`: `_run_analysis` now runs each synchronous `analyze_coin(...)` call through `asyncio.to_thread(...)` and yields periodically. This keeps full watchlist `market_scan()` from blocking the Telegram event loop during CPU indicator/scoring work.
+  - `files\bot.py`: Telegram `Application` now uses `.concurrent_updates(True)` so menu/control updates can be processed while another update is still running analysis.
+  - `files\bot.py`: callback buttons now answer immediately with short callback text, e.g. `positions -> "Открываю позиции..."`.
+  - `files\bot.py`: added `_send_message_retry(...)`; the positions response now uses 3 short send attempts instead of one long blocking send.
+  - `files\data_collector.py`: feature computation, rule-signal detection, dataset logging, and pending-label filling now run through `asyncio.to_thread(...)` so the 15m collector cannot monopolize the Telegram event loop.
+  - `files\bot.py` version bumped to `menu_build_v14`, `BUILD_APPLIED_AT = 2026-05-06 11:23:12 +02:00`.
+- Verification:
+  - `pyembed\python.exe -m py_compile files\bot.py files\strategy.py files\data_collector.py` passed.
+  - Import smoke confirmed `menu_build_v14` and callback ack text.

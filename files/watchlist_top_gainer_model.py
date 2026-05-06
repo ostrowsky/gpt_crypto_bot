@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import threading
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -14,6 +12,7 @@ import numpy as np
 
 import ml_dataset
 import top_gainer_critic
+from ml_dataset_compat import collect_mutated_lines, dataset_lock, write_dataset_lines
 from ml_signal_model import (
     MLPModel,
     LogisticModel,
@@ -133,8 +132,6 @@ def annotate_ml_dataset_from_report(
         watchlist_map[sym] = item
         watchlist_rank_map[sym] = idx
 
-    original_ml_file = ml_dataset.ML_FILE
-    ml_dataset.ML_FILE = dataset_path
     rows_scanned = 0
     rows_in_window = 0
     positive_rows = 0
@@ -165,51 +162,53 @@ def annotate_ml_dataset_from_report(
         }
         return sym, payload
 
-    try:
-        def _preview_mutate(rec: Dict[str, Any]) -> bool:
-            nonlocal rows_scanned, rows_in_window, positive_rows
-            rows_scanned += 1
+    def _preview_mutate(rec: Dict[str, Any]) -> bool:
+        nonlocal rows_scanned, rows_in_window, positive_rows
+        rows_scanned += 1
+        built = _payload_for_row(rec)
+        if built is None:
+            return False
+        sym, payload = built
+        rows_in_window += 1
+        symbols_in_window.add(sym)
+        if payload["watchlist_top_gainer"]:
+            positive_rows += 1
+            positive_symbols_with_rows.add(sym)
+        teacher = rec.get("teacher") or {}
+        return teacher.get(teacher_key) != payload
+
+    _, maybe_changed, maybe_bad_rows = collect_mutated_lines(
+        ml_dataset,
+        _preview_mutate,
+        dataset_path=dataset_path,
+    )
+    rows_annotated = 0
+    if maybe_changed or maybe_bad_rows:
+        def _commit_mutate(rec: Dict[str, Any]) -> bool:
+            nonlocal rows_annotated
             built = _payload_for_row(rec)
             if built is None:
                 return False
-            sym, payload = built
-            rows_in_window += 1
-            symbols_in_window.add(sym)
-            if payload["watchlist_top_gainer"]:
-                positive_rows += 1
-                positive_symbols_with_rows.add(sym)
-            teacher = rec.get("teacher") or {}
-            return teacher.get(teacher_key) != payload
+            _, payload = built
+            teacher = rec.setdefault("teacher", {})
+            if teacher.get(teacher_key) == payload:
+                return False
+            teacher[teacher_key] = payload
+            rows_annotated += 1
+            return True
 
-        _, maybe_changed, maybe_bad_rows = ml_dataset._collect_mutated_lines(_preview_mutate)
-        rows_annotated = 0
-        if maybe_changed or maybe_bad_rows:
-            def _commit_mutate(rec: Dict[str, Any]) -> bool:
-                nonlocal rows_annotated
-                built = _payload_for_row(rec)
-                if built is None:
-                    return False
-                _, payload = built
-                teacher = rec.setdefault("teacher", {})
-                if teacher.get(teacher_key) == payload:
-                    return False
-                teacher[teacher_key] = payload
-                rows_annotated += 1
-                return True
-
-            with ml_dataset._dataset_io_lock():
-                updated, changed, had_bad_rows = ml_dataset._collect_mutated_lines(_commit_mutate)
-                if changed or had_bad_rows:
-                    dataset_path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = dataset_path.with_name(
-                        f"{dataset_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-                    )
-                    tmp.write_text("\n".join(updated) + "\n", encoding="utf-8")
-                    ml_dataset._atomic_replace_with_retry(tmp, dataset_path)
-        else:
-            rows_annotated = 0
-    finally:
-        ml_dataset.ML_FILE = original_ml_file
+        with dataset_lock(ml_dataset):
+            updated, changed, had_bad_rows = collect_mutated_lines(
+                ml_dataset,
+                _commit_mutate,
+                dataset_path=dataset_path,
+            )
+            if changed or had_bad_rows:
+                write_dataset_lines(
+                    ml_dataset,
+                    updated,
+                    dataset_path=dataset_path,
+                )
 
     missing_positive_symbols = sorted(sym for sym in watchlist_map if sym not in positive_symbols_with_rows)
     return {

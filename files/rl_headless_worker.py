@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -21,6 +23,7 @@ import ml_candidate_ranker
 import ml_dataset
 import report_candidate_ranker_shadow
 import report_critic_dataset
+import signal_quality_feedback
 import top_gainer_critic
 import watchlist_top_gainer_goal
 from ml_signal_model import save_json
@@ -36,6 +39,13 @@ CHAT_IDS_FILE = ROOT / ".chat_ids"
 TRAIN_LOCK_FILE = RUNTIME_DIR / "rl_worker_train.lock"
 LATEST_TRAIN_JSON = REPORT_DIR / "rl_train_latest.json"
 LATEST_TRAIN_TXT = REPORT_DIR / "rl_train_latest.txt"
+SIGNAL_QUALITY_SCRIPT = (
+    WORKSPACE_ROOT
+    / "skills"
+    / "signal-quality-evaluator"
+    / "scripts"
+    / "evaluate_signals.py"
+)
 
 MODEL_FILE = ROOT / "ml_candidate_ranker.json"
 TRAIN_REPORT_FILE = ROOT / "ml_candidate_ranker_report.json"
@@ -189,6 +199,30 @@ def build_status_snapshot(
             "last_precision_first_10_pct": state.watchlist_goal_last_precision_first_10_pct,
             "last_mandatory_positive_coverage_pct": state.watchlist_goal_last_positive_coverage_pct,
         },
+        "signal_quality_evaluator": {
+            "enabled": state.signal_quality_enabled,
+            "runs_total": state.signal_quality_runs_total,
+            "runs_ok": state.signal_quality_runs_ok,
+            "runs_failed": state.signal_quality_runs_failed,
+            "last_slot_key": state.signal_quality_last_slot_key,
+            "last_started_at": state.signal_quality_last_started_at,
+            "last_finished_at": state.signal_quality_last_finished_at,
+            "last_error": state.signal_quality_last_error,
+            "last_target_day_local": state.signal_quality_last_target_day_local,
+            "last_report_json": state.signal_quality_last_report_json,
+            "last_report_txt": state.signal_quality_last_report_txt,
+            "last_miss_rate": state.signal_quality_last_miss_rate,
+            "last_false_positive_rate": state.signal_quality_last_false_positive_rate,
+            "last_median_capture_ratio": state.signal_quality_last_median_capture_ratio,
+            "last_median_exit_efficiency": state.signal_quality_last_median_exit_efficiency,
+            "last_median_giveback_pct": state.signal_quality_last_median_giveback_pct,
+            "last_early_exits": state.signal_quality_last_early_exits,
+            "last_missed_trends": state.signal_quality_last_missed_trends,
+            "last_telegram_sent_at": state.signal_quality_last_telegram_sent_at,
+            "last_telegram_sent_count": state.signal_quality_last_telegram_sent_count,
+            "last_telegram_error": state.signal_quality_last_telegram_error,
+        },
+        "signal_quality_feedback": signal_quality_feedback.status_snapshot(),
         "latest_training_report": {
             "json": state.latest_training_report_json,
             "txt": state.latest_training_report_txt,
@@ -369,19 +403,28 @@ def _load_known_chat_ids() -> list[int]:
     return sorted(set(out))
 
 
-async def _send_telegram_text(text: str) -> None:
+async def _send_telegram_text(text: str) -> Dict[str, Any]:
+    log = logging.getLogger("rl_headless_worker.notify")
+    result: Dict[str, Any] = {"attempted": 0, "sent": 0, "errors": [], "skipped": ""}
     token = str(getattr(config, "TELEGRAM_BOT_TOKEN", "") or "").strip()
     if not token:
-        return
+        result["skipped"] = "missing_token"
+        log.warning("Telegram report skipped: missing TELEGRAM_BOT_TOKEN")
+        return result
     if not bool(getattr(config, "RL_TELEGRAM_REPORTS_ENABLED", True)):
-        return
+        result["skipped"] = "rl_telegram_reports_disabled"
+        log.info("Telegram report skipped: RL_TELEGRAM_REPORTS_ENABLED=False")
+        return result
     chat_ids = _load_known_chat_ids()
     if not chat_ids:
-        return
+        result["skipped"] = "no_chat_ids"
+        log.warning("Telegram report skipped: no known chat ids in %s", CHAT_IDS_FILE)
+        return result
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     timeout = aiohttp.ClientTimeout(total=20)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for chat_id in chat_ids:
+            result["attempted"] += 1
             payload = {
                 "chat_id": chat_id,
                 "text": text,
@@ -391,12 +434,13 @@ async def _send_telegram_text(text: str) -> None:
                 async with session.post(url, json=payload) as resp:
                     resp.raise_for_status()
                     await resp.read()
+                result["sent"] += 1
+                log.info("Telegram report sent: chat_id=%s chars=%s", chat_id, len(text))
             except Exception as exc:
-                logging.getLogger("rl_headless_worker.notify").warning(
-                    "Telegram report send failed for %s: %s",
-                    chat_id,
-                    exc,
-                )
+                err = f"{chat_id}: {exc}"
+                result["errors"].append(err)
+                log.warning("Telegram report send failed for %s: %s", chat_id, exc)
+    return result
 
 
 def _train_ranker_once(min_rows: int) -> Dict[str, Any]:
@@ -667,6 +711,127 @@ def _render_watchlist_goal_telegram(result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _metric_median(summary: Dict[str, Any], key: str) -> Optional[float]:
+    value = summary.get(key)
+    if not isinstance(value, dict):
+        return None
+    try:
+        return float(value.get("median"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_signal_quality_module() -> Any:
+    if not SIGNAL_QUALITY_SCRIPT.exists():
+        raise FileNotFoundError(f"Signal quality evaluator script not found: {SIGNAL_QUALITY_SCRIPT}")
+    spec = importlib.util.spec_from_file_location(
+        "signal_quality_evaluator_skill",
+        SIGNAL_QUALITY_SCRIPT,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load signal quality evaluator spec: {SIGNAL_QUALITY_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_signal_quality_report(
+    *,
+    target_day: date,
+    timezone_name: str,
+    timeframes: tuple[str, ...],
+    source: str,
+    top_movers_n: int,
+    symbols: tuple[str, ...] = (),
+) -> Dict[str, Any]:
+    module = _load_signal_quality_module()
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    base = f"signal_quality_{target_day.isoformat()}_final"
+    json_path = REPORT_DIR / f"{base}.json"
+    txt_path = REPORT_DIR / f"{base}.txt"
+    argv = [
+        "--repo-root",
+        str(WORKSPACE_ROOT),
+        "--date",
+        target_day.isoformat(),
+        "--timezone",
+        timezone_name,
+        "--tf",
+        ",".join(timeframes),
+        "--source",
+        source,
+        "--top-movers-n",
+        str(int(top_movers_n)),
+    ]
+    if symbols:
+        argv.extend(["--symbol", ",".join(symbols)])
+    args = module.parse_args(argv)
+    report = module.build_report(args)
+    report["generated_at_utc"] = _utc_now_iso()
+    report["phase"] = "final"
+    report["target_day_local"] = target_day.isoformat()
+    files = {"json": str(json_path), "txt": str(txt_path)}
+    report["files"] = files
+    _write_text(json_path, json.dumps(report, ensure_ascii=False, indent=2))
+    _write_text(txt_path, module._render_text(report))
+    return report
+
+
+def _render_signal_quality_telegram(result: Dict[str, Any]) -> str:
+    report = result or {}
+    summary = report.get("summary") or {}
+    day = report.get("target_day_local") or ""
+    lines = [
+        "Signal quality final",
+        f"day: {day}",
+        (
+            f"buys: {summary.get('buys_total')} | "
+            f"matched trends: {summary.get('matched_trend_buys')} | "
+            f"missed trends: {summary.get('missed_trends')}"
+        ),
+        (
+            f"false positives: {summary.get('false_positive_buys')} "
+            f"({summary.get('false_positive_rate')}) | miss_rate: {summary.get('miss_rate')}"
+        ),
+        (
+            f"late entries: {summary.get('late_entries')} | "
+            f"early exits: {summary.get('early_exits')} | "
+            f"late exits: {summary.get('late_exits')}"
+        ),
+        (
+            f"capture median: {_metric_median(summary, 'capture_ratio_at_entry')} | "
+            f"exit_eff median: {_metric_median(summary, 'exit_efficiency')} | "
+            f"giveback median: {_metric_median(summary, 'giveback_pct')}"
+        ),
+    ]
+    early = report.get("early_exits") or []
+    missed = report.get("missed_trends") or []
+    false_pos = report.get("false_positive_buys") or []
+    if early:
+        lines.append(
+            "early exits: "
+            + ", ".join(
+                f"{item.get('sym')} {item.get('tf')} eff={item.get('exit_efficiency')}"
+                for item in early[:3]
+            )
+        )
+    if missed:
+        lines.append(
+            "missed: "
+            + ", ".join(
+                f"{item.get('sym')} {item.get('tf')} {float(item.get('move_pct') or 0):+.1f}%"
+                for item in missed[:3]
+            )
+        )
+    if false_pos:
+        lines.append(
+            "false positives: "
+            + ", ".join(str(item.get("sym")) for item in false_pos[:5])
+        )
+    return "\n".join(lines)
+
+
 def _save_train_session_report(report: Dict[str, Any]) -> Dict[str, str]:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -740,6 +905,27 @@ class WorkerState:
     watchlist_goal_last_median_lead_time_min: Optional[int] = None
     watchlist_goal_last_precision_first_10_pct: Optional[float] = None
     watchlist_goal_last_positive_coverage_pct: Optional[float] = None
+    signal_quality_enabled: bool = bool(getattr(config, "SIGNAL_QUALITY_EVALUATOR_ENABLED", True))
+    signal_quality_runs_total: int = 0
+    signal_quality_runs_ok: int = 0
+    signal_quality_runs_failed: int = 0
+    signal_quality_last_slot_key: str = ""
+    signal_quality_last_started_at: Optional[str] = None
+    signal_quality_last_finished_at: Optional[str] = None
+    signal_quality_last_error: str = ""
+    signal_quality_last_target_day_local: str = ""
+    signal_quality_last_report_json: str = ""
+    signal_quality_last_report_txt: str = ""
+    signal_quality_last_miss_rate: Optional[float] = None
+    signal_quality_last_false_positive_rate: Optional[float] = None
+    signal_quality_last_median_capture_ratio: Optional[float] = None
+    signal_quality_last_median_exit_efficiency: Optional[float] = None
+    signal_quality_last_median_giveback_pct: Optional[float] = None
+    signal_quality_last_early_exits: Optional[int] = None
+    signal_quality_last_missed_trends: Optional[int] = None
+    signal_quality_last_telegram_sent_at: Optional[str] = None
+    signal_quality_last_telegram_sent_count: int = 0
+    signal_quality_last_telegram_error: str = ""
     latest_training_report_json: str = ""
     latest_training_report_txt: str = ""
     latest_training_latest_json: str = ""
@@ -892,6 +1078,19 @@ def _scheduled_top_gainer_slot(now_local: datetime) -> tuple[str, date, str] | N
     return None
 
 
+def _scheduled_signal_quality_slot(now_local: datetime) -> tuple[date, str] | None:
+    run_hour = int(getattr(config, "SIGNAL_QUALITY_EVALUATOR_RUN_HOUR_LOCAL", 0))
+    run_minute = int(getattr(config, "SIGNAL_QUALITY_EVALUATOR_RUN_MINUTE_LOCAL", 15))
+    window_minutes = max(1, int(getattr(config, "SIGNAL_QUALITY_EVALUATOR_RUN_WINDOW_MINUTES", 45)))
+    current_minute = now_local.hour * 60 + now_local.minute
+    start_minute = run_hour * 60 + run_minute
+    if start_minute <= current_minute < start_minute + window_minutes:
+        target_day = now_local.date() - timedelta(days=1)
+        slot_key = f"{target_day.isoformat()}::signal_quality_final"
+        return target_day, slot_key
+    return None
+
+
 async def _top_gainer_critic_loop(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.top_gainer_critic")
     tz_name = str(getattr(config, "TOP_GAINER_CRITIC_TIMEZONE", "Europe/Budapest"))
@@ -1019,6 +1218,102 @@ async def _top_gainer_critic_loop(state: WorkerState) -> None:
         await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
 
 
+async def _signal_quality_loop(state: WorkerState) -> None:
+    log = logging.getLogger("rl_headless_worker.signal_quality")
+    tz_name = str(
+        getattr(
+            config,
+            "SIGNAL_QUALITY_EVALUATOR_TIMEZONE",
+            getattr(config, "TOP_GAINER_CRITIC_TIMEZONE", "Europe/Budapest"),
+        )
+    )
+    tz = ZoneInfo(tz_name)
+    timeframes = tuple(getattr(config, "SIGNAL_QUALITY_EVALUATOR_TIMEFRAMES", ("15m", "1h")))
+    source = str(getattr(config, "SIGNAL_QUALITY_EVALUATOR_SOURCE", "all"))
+    top_movers_n = int(getattr(config, "SIGNAL_QUALITY_EVALUATOR_TOP_MOVERS_N", 15))
+    symbols = tuple(getattr(config, "SIGNAL_QUALITY_EVALUATOR_SYMBOLS", ()))
+    while True:
+        try:
+            slot = _scheduled_signal_quality_slot(datetime.now(tz))
+            if slot is None:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            target_day, slot_key = slot
+            if not state.signal_quality_enabled:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            if slot_key == state.signal_quality_last_slot_key:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+
+            state.signal_quality_runs_total += 1
+            state.signal_quality_last_started_at = _utc_now_iso()
+            state.signal_quality_last_error = ""
+            result = await asyncio.to_thread(
+                _run_signal_quality_report,
+                target_day=target_day,
+                timezone_name=tz_name,
+                timeframes=timeframes,
+                source=source,
+                top_movers_n=top_movers_n,
+                symbols=symbols,
+            )
+            summary = result.get("summary") or {}
+            files = result.get("files") or {}
+            state.signal_quality_runs_ok += 1
+            state.signal_quality_last_slot_key = slot_key
+            state.signal_quality_last_finished_at = _utc_now_iso()
+            state.signal_quality_last_target_day_local = target_day.isoformat()
+            state.signal_quality_last_report_json = str(files.get("json", ""))
+            state.signal_quality_last_report_txt = str(files.get("txt", ""))
+            state.signal_quality_last_miss_rate = summary.get("miss_rate")
+            state.signal_quality_last_false_positive_rate = summary.get("false_positive_rate")
+            state.signal_quality_last_median_capture_ratio = _metric_median(summary, "capture_ratio_at_entry")
+            state.signal_quality_last_median_exit_efficiency = _metric_median(summary, "exit_efficiency")
+            state.signal_quality_last_median_giveback_pct = _metric_median(summary, "giveback_pct")
+            state.signal_quality_last_early_exits = summary.get("early_exits")
+            state.signal_quality_last_missed_trends = summary.get("missed_trends")
+            feedback = await asyncio.to_thread(
+                signal_quality_feedback.save_feedback,
+                result,
+                report_path=state.signal_quality_last_report_json,
+            )
+            log.info(
+                "Signal quality done: day=%s buys=%s missed=%s fp=%s early_exits=%s feedback=%s",
+                target_day.isoformat(),
+                summary.get("buys_total"),
+                state.signal_quality_last_missed_trends,
+                summary.get("false_positive_buys"),
+                state.signal_quality_last_early_exits,
+                (feedback.get("policy") or {}),
+            )
+            if bool(getattr(config, "SIGNAL_QUALITY_EVALUATOR_TELEGRAM_REPORTS_ENABLED", True)):
+                notify = await _send_telegram_text(_render_signal_quality_telegram(result))
+                state.signal_quality_last_telegram_sent_count = int(notify.get("sent", 0) or 0)
+                if state.signal_quality_last_telegram_sent_count > 0:
+                    state.signal_quality_last_telegram_sent_at = _utc_now_iso()
+                    state.signal_quality_last_telegram_error = ""
+                else:
+                    errors = notify.get("errors") or []
+                    state.signal_quality_last_telegram_error = (
+                        "; ".join(str(item) for item in errors)
+                        or str(notify.get("skipped") or "not_sent")
+                    )
+            else:
+                state.signal_quality_last_telegram_sent_count = 0
+                state.signal_quality_last_telegram_error = "signal_quality_telegram_disabled"
+            await _write_status_now(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.signal_quality_runs_failed += 1
+            state.signal_quality_last_finished_at = _utc_now_iso()
+            state.signal_quality_last_error = str(exc)
+            log.exception("Signal quality evaluator failed: %s", exc)
+            await _write_status_now(state)
+        await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+
+
 async def _write_status_now(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.status")
     try:
@@ -1066,6 +1361,7 @@ async def _amain(args: argparse.Namespace) -> int:
         asyncio.create_task(_training_loop(state), name="training"),
         asyncio.create_task(_status_loop(state), name="status"),
         asyncio.create_task(_top_gainer_critic_loop(state), name="top_gainer_critic"),
+        asyncio.create_task(_signal_quality_loop(state), name="signal_quality_evaluator"),
     ]
     if args.enable_collector:
         tasks.insert(0, asyncio.create_task(_collector_supervisor(state), name="collector"))

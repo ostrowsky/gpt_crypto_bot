@@ -1,0 +1,4 @@
+interface:
+  display_name: "Signal Quality Evaluator"
+  short_description: "Evaluate crypto bot BUY/SELL quality after the fact."
+  default_prompt: "Evaluate recent crypto bot signals and summarize entry timing, exit timing, trend capture, misses, and false positives."

@@ -18,8 +18,10 @@ BOT_EVENTS_FILE = ROOT / "bot_events.jsonl"
 CRITIC_FILE = ROOT / "critic_dataset.jsonl"
 ML_FILE = ROOT / "ml_dataset.jsonl"
 RL_STATUS_FILE = RUNTIME_DIR / "rl_worker_status.json"
+LATEST_TRAIN_REPORT_FILE = REPORT_DIR / "rl_train_latest.json"
 TRAIN_REPORT_FILE = ROOT / "ml_candidate_ranker_report.json"
 SHADOW_REPORT_FILE = ROOT / "ml_candidate_ranker_shadow_report.json"
+LATEST_GOAL_REPORT_FILE = REPORT_DIR / "watchlist_top_gainer_goal_latest.json"
 
 LOCAL_TZ = ZoneInfo("Europe/Budapest")
 
@@ -67,6 +69,15 @@ def _count_rows_in_day(path: Path, start_utc: datetime, end_utc: datetime) -> in
     return count
 
 
+def _latest_dataset_ts(path: Path) -> str:
+    latest = ""
+    for rec in _iter_jsonl(path):
+        ts = str(rec.get("ts_signal") or rec.get("ts") or "")
+        if ts > latest:
+            latest = ts
+    return latest
+
+
 def _load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -76,6 +87,96 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
+def _resolve_latest_training_session(
+    worker_status: Dict[str, Any],
+    *,
+    latest_train_report_file: Path = LATEST_TRAIN_REPORT_FILE,
+) -> Dict[str, Any]:
+    candidate_paths: List[Path] = []
+    if latest_train_report_file.exists():
+        candidate_paths.append(latest_train_report_file)
+    latest_ref = worker_status.get("latest_training_report") or {}
+    if isinstance(latest_ref, dict):
+        for key in ("latest_json", "json"):
+            raw = str(latest_ref.get(key) or "").strip()
+            if raw:
+                candidate_paths.append(Path(raw))
+
+    seen: set[str] = set()
+    for path in candidate_paths:
+        path_key = str(path)
+        if path_key in seen or not path.exists():
+            continue
+        seen.add(path_key)
+        payload = _load_json(path)
+        if payload:
+            train_report = payload.get("train_report") if isinstance(payload.get("train_report"), dict) else {}
+            return {
+                "source_file": path_key,
+                "generated_at_utc": payload.get("generated_at_utc"),
+                "training_run_index": payload.get("training_run_index"),
+                "model_name": payload.get("model_name") or train_report.get("chosen_model"),
+                "rows_total": payload.get("rows_total"),
+                "top1_delta": payload.get("top1_delta"),
+                "train_report": train_report,
+            }
+    return {}
+
+
+def _build_health_checks(
+    *,
+    target_day: date,
+    generated_at_utc: datetime,
+    datasets: Dict[str, Any],
+    latest_training_session: Dict[str, Any],
+    worker_status: Dict[str, Any],
+    latest_goal_report: Dict[str, Any],
+) -> Dict[str, Any]:
+    warnings: List[str] = []
+    training_ts = _parse_utc_ts(str(latest_training_session.get("generated_at_utc") or ""))
+    if training_ts is None:
+        training_ts = _parse_utc_ts(str(((worker_status.get("training") or {}).get("last_finished_at")) or ""))
+    training_age_hours = None
+    if training_ts is None:
+        warnings.append("training_missing")
+    else:
+        training_age_hours = round((generated_at_utc - training_ts).total_seconds() / 3600.0, 2)
+        if training_age_hours > 24.0:
+            warnings.append(f"training_stale_{training_age_hours:.1f}h")
+
+    if int(datasets.get("ml_rows_day") or 0) <= 0:
+        warnings.append("ml_dataset_no_rows_for_day")
+    if int(datasets.get("critic_rows_day") or 0) <= 0:
+        warnings.append("critic_dataset_no_rows_for_day")
+
+    goal_summary = latest_goal_report.get("summary") or {}
+    goal_day = str(latest_goal_report.get("target_day_local") or "")
+    goal_coverage = goal_summary.get("mandatory_positive_coverage_pct")
+    goal_recall = goal_summary.get("recall_at_cutoff_pct")
+    if goal_day == target_day.isoformat():
+        try:
+            if float(goal_coverage or 0.0) < 80.0:
+                warnings.append(f"top_gainer_coverage_low_{float(goal_coverage or 0.0):.1f}pct")
+        except Exception:
+            warnings.append("top_gainer_coverage_unknown")
+        try:
+            if float(goal_recall or 0.0) <= 0.0:
+                warnings.append("top_gainer_recall_zero")
+        except Exception:
+            warnings.append("top_gainer_recall_unknown")
+
+    return {
+        "ok": not warnings,
+        "warnings": warnings,
+        "training_age_hours": training_age_hours,
+        "ml_latest_ts": datasets.get("ml_latest_ts"),
+        "critic_latest_ts": datasets.get("critic_latest_ts"),
+        "latest_goal_day": goal_day,
+        "latest_goal_coverage_pct": goal_coverage,
+        "latest_goal_recall_pct": goal_recall,
+    }
+
+
 def build_report(
     target_day: date,
     *,
@@ -83,10 +184,19 @@ def build_report(
     critic_file: Path = CRITIC_FILE,
     ml_file: Path = ML_FILE,
     rl_status_file: Path = RL_STATUS_FILE,
+    latest_train_report_file: Path = LATEST_TRAIN_REPORT_FILE,
     train_report_file: Path = TRAIN_REPORT_FILE,
     shadow_report_file: Path = SHADOW_REPORT_FILE,
 ) -> Dict[str, Any]:
     start_utc, end_utc = _local_day_bounds(target_day)
+    worker_status = _load_json(rl_status_file)
+    generated_at_utc = datetime.now(timezone.utc)
+    latest_training_session = _resolve_latest_training_session(
+        worker_status,
+        latest_train_report_file=latest_train_report_file,
+    )
+    legacy_train_report = _load_json(train_report_file)
+    effective_train_report = latest_training_session.get("train_report") or legacy_train_report
     bot_rows = list(_iter_jsonl(bot_events_file))
     day_events = []
     for rec in bot_rows:
@@ -123,17 +233,33 @@ def build_report(
     mode_counts = Counter(str(r.get("mode", "")) for r in ranker_shadow)
     symbol_counts = Counter(str(r.get("sym", "")) for r in ranker_shadow)
 
+    datasets = {
+        "critic_rows_total": sum(1 for _ in _iter_jsonl(critic_file)),
+        "critic_rows_day": _count_rows_in_day(critic_file, start_utc, end_utc),
+        "critic_latest_ts": _latest_dataset_ts(critic_file),
+        "ml_rows_total": sum(1 for _ in _iter_jsonl(ml_file)),
+        "ml_rows_day": _count_rows_in_day(ml_file, start_utc, end_utc),
+        "ml_latest_ts": _latest_dataset_ts(ml_file),
+    }
+    latest_goal_report = _load_json(LATEST_GOAL_REPORT_FILE)
+    health = _build_health_checks(
+        target_day=target_day,
+        generated_at_utc=generated_at_utc,
+        datasets=datasets,
+        latest_training_session=latest_training_session,
+        worker_status=worker_status,
+        latest_goal_report=latest_goal_report,
+    )
+
     report = {
         "target_day_local": target_day.isoformat(),
         "generated_at_local": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S %Z"),
-        "datasets": {
-            "critic_rows_total": sum(1 for _ in _iter_jsonl(critic_file)),
-            "critic_rows_day": _count_rows_in_day(critic_file, start_utc, end_utc),
-            "ml_rows_total": sum(1 for _ in _iter_jsonl(ml_file)),
-            "ml_rows_day": _count_rows_in_day(ml_file, start_utc, end_utc),
-        },
-        "worker_status": _load_json(rl_status_file),
-        "train_report": _load_json(train_report_file),
+        "datasets": datasets,
+        "health": health,
+        "worker_status": worker_status,
+        "latest_training_session": latest_training_session,
+        "train_report": effective_train_report,
+        "train_report_legacy": legacy_train_report,
         "shadow_report": _load_json(shadow_report_file),
         "ranker_shadow": {
             "events_total": len(ranker_shadow),
@@ -152,7 +278,15 @@ def build_report(
 def render_text(report: Dict[str, Any]) -> str:
     ds = report["datasets"]
     rs = report["ranker_shadow"]
+    health = report.get("health", {})
     train = report.get("train_report", {})
+    latest = report.get("latest_training_session", {})
+    worker_training = ((report.get("worker_status") or {}).get("training") or {})
+    latest_session_at = latest.get("generated_at_utc") or worker_training.get("last_finished_at") or "n/a"
+    training_run_index = latest.get("training_run_index") or worker_training.get("runs_total") or "n/a"
+    latest_top1_delta = latest.get("top1_delta")
+    latest_top1_delta_text = latest_top1_delta if latest_top1_delta is not None else "n/a"
+    model_name = latest.get("model_name") or train.get("chosen_model", "") or "n/a"
     lines = [
         f"RL daily report for {report['target_day_local']}",
         f"Generated: {report['generated_at_local']}",
@@ -160,9 +294,21 @@ def render_text(report: Dict[str, Any]) -> str:
         "Datasets:",
         f"  critic_dataset: +{ds['critic_rows_day']} rows today, total {ds['critic_rows_total']}",
         f"  ml_dataset: +{ds['ml_rows_day']} rows today, total {ds['ml_rows_total']}",
+        f"  critic_latest_ts: {ds.get('critic_latest_ts') or 'n/a'}",
+        f"  ml_latest_ts: {ds.get('ml_latest_ts') or 'n/a'}",
+        "",
+        "Health:",
+        f"  ok: {bool(health.get('ok'))}",
+        f"  warnings: {', '.join(health.get('warnings') or []) or 'none'}",
+        f"  training_age_hours: {health.get('training_age_hours')}",
+        f"  latest_goal: day={health.get('latest_goal_day') or 'n/a'} "
+        f"coverage={health.get('latest_goal_coverage_pct')} recall={health.get('latest_goal_recall_pct')}",
         "",
         "Training:",
-        f"  chosen_model: {train.get('chosen_model', '') or 'n/a'}",
+        f"  latest_session_at_utc: {latest_session_at}",
+        f"  training_run_index: {training_run_index}",
+        f"  chosen_model: {model_name}",
+        f"  latest_top1_delta: {latest_top1_delta_text}",
         f"  train_rows: {train.get('train_rows', 0)} val_rows: {train.get('val_rows', 0)} test_rows: {train.get('test_rows', 0)}",
         f"  test_ret5_delta: {train.get('improvement_delta', {}).get('ret5_avg_delta', 'n/a')}",
         f"  test_win_rate_delta: {train.get('improvement_delta', {}).get('win_rate_delta', 'n/a')}",
