@@ -142,6 +142,8 @@ def _pct(a: float, b: float) -> float:
 
 def _norm_source(raw: str, default: str) -> str:
     source = str(raw or default or "").strip().lower()
+    if source in {"scout", "shadow", "scout_shadow"}:
+        return "scout"
     if "agent" in source or source == "market_agent":
         return "agent"
     if source == "bot" or not source:
@@ -173,6 +175,7 @@ def _load_events(
     symbols: set[str] | None,
     tfs: set[str],
     source_filter: str,
+    include_shadow_signals: bool,
 ) -> list[Event]:
     paths = [
         (files_root / "bot_events.jsonl", "bot"),
@@ -182,6 +185,8 @@ def _load_events(
     for path, default_source in paths:
         for rec in _iter_jsonl(path):
             kind = str(rec.get("event") or "").strip()
+            if kind == "scout_shadow" and include_shadow_signals:
+                kind = "entry"
             if kind not in {"entry", "exit"}:
                 continue
             sym = str(rec.get("sym") or rec.get("symbol") or "").strip().upper()
@@ -199,6 +204,8 @@ def _load_events(
             if ts_ms < start_ms or ts_ms > end_ms:
                 continue
             source = _norm_source(str(rec.get("source") or ""), default_source)
+            if source == "scout" and not include_shadow_signals:
+                continue
             if source_filter != "all" and source != source_filter:
                 continue
             price_key = "price" if kind == "entry" else "exit_price"
@@ -728,6 +735,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         symbols=symbol_set,
         tfs=tfs,
         source_filter=args.source,
+        include_shadow_signals=bool(args.include_shadow_signals),
     )
     trades = _pair_trades(events)
 
@@ -805,6 +813,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "symbols_count": len(symbols),
             "timeframes": sorted(tfs),
             "requested_symbol_filter": sorted(requested_symbols) if requested_symbols else None,
+            "include_shadow_signals": bool(args.include_shadow_signals),
         },
         "params": {
             "trend_min_pct": args.trend_min_pct,
@@ -839,7 +848,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timezone", default="Europe/Budapest")
     parser.add_argument("--symbol", help="Comma-separated symbols, e.g. ICPUSDT,ACHUSDT.")
     parser.add_argument("--tf", default="15m,1h", help="Comma-separated timeframes: 15m,1h,4h.")
-    parser.add_argument("--source", choices=["all", "bot", "agent"], default="all")
+    parser.add_argument("--source", choices=["all", "bot", "agent", "scout"], default="all")
+    parser.add_argument(
+        "--include-shadow-signals",
+        action="store_true",
+        help="Include scout_shadow events as hypothetical entries for metric-only evaluation.",
+    )
     parser.add_argument("--watchlist", default="")
     parser.add_argument("--max-symbols", type=int, default=0)
     parser.add_argument("--cache-dir", default="")

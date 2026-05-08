@@ -947,6 +947,209 @@ def _near_miss_candidate_snapshot(
     return best
 
 
+def _early_top_mover_scout_shadow_snapshot(
+    *,
+    tf: str,
+    feat: dict,
+    data: np.ndarray,
+    i: int,
+    price: float,
+    ema20: float,
+    slope: float,
+    adx: float,
+    rsi: float,
+    vol_x: float,
+    daily_range: float,
+    forecast_return_pct: float,
+    today_change_pct: float,
+) -> Optional[Dict[str, Any]]:
+    if not getattr(config, "EARLY_TOP_MOVER_SCOUT_SHADOW_ENABLED", False):
+        return None
+    allowed_tf = tuple(str(x) for x in getattr(config, "EARLY_TOP_MOVER_SCOUT_TF", ("15m", "1h")))
+    if allowed_tf and tf not in allowed_tf:
+        return None
+    if i <= 0 or price <= 0 or ema20 <= 0:
+        return None
+    if today_change_pct < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_MIN_TODAY_CHANGE_PCT", 0.0)):
+        return None
+    if forecast_return_pct < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_MIN_FORECAST_RETURN_PCT", 0.0)):
+        return None
+    if vol_x < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_VOL_X_MIN", 0.55)):
+        return None
+    if slope < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_SLOPE_MIN", 0.08)):
+        return None
+    if adx < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_ADX_MIN", 14.0)):
+        return None
+    if rsi < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_RSI_MIN", 50.0)):
+        return None
+    if rsi > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_RSI_MAX", 75.5)):
+        return None
+
+    ema_slow_arr = feat.get("ema_slow")
+    ema_slow = (
+        float(ema_slow_arr[i])
+        if ema_slow_arr is not None and i < len(ema_slow_arr) and np.isfinite(ema_slow_arr[i])
+        else 0.0
+    )
+    ema_sep_pct = ((ema20 - ema_slow) / ema_slow * 100.0) if ema_slow > 0 else 0.0
+    if ema_sep_pct < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_EMA_SEP_MIN_PCT", -0.18)):
+        return None
+
+    price_edge = _time_block_price_edge_pct(price=price, ema20=ema20)
+    if price_edge < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_PRICE_EDGE_MIN_PCT", -0.25)):
+        return None
+    if price_edge > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_PRICE_EDGE_MAX_PCT", 2.80)):
+        return None
+    if price < ema20 * 0.998:
+        return None
+
+    lookback = int(getattr(config, "EARLY_TOP_MOVER_SCOUT_RECENT_HIGH_LOOKBACK", 10))
+    recent_high = float(np.max(data["h"][max(0, i - lookback):i])) if i > 0 else price
+    recent_high_gap_pct = ((recent_high / price) - 1.0) * 100.0 if recent_high > 0 else 0.0
+    if recent_high_gap_pct > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_RECENT_HIGH_GAP_MAX_PCT", 1.10)):
+        return None
+
+    macd_hist_arr = feat.get("macd_hist")
+    macd_hist = (
+        float(macd_hist_arr[i])
+        if macd_hist_arr is not None and i < len(macd_hist_arr) and np.isfinite(macd_hist_arr[i])
+        else 0.0
+    )
+    if macd_hist < price * float(getattr(config, "EARLY_TOP_MOVER_SCOUT_MACD_MIN_REL", -0.00008)):
+        return None
+
+    mode = str(getattr(config, "EARLY_TOP_MOVER_SCOUT_MODE", "trend"))
+    base_score = _entry_signal_score(
+        mode=mode,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+    )
+    candidate_score = base_score
+    candidate_score += _top_mover_score_bonus(today_change_pct)
+    candidate_score += _forecast_return_score_bonus(forecast_return_pct)
+    score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
+    if score_floor > 0.0:
+        deficit = score_floor - candidate_score
+        if deficit > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_SCORE_DEFICIT_MAX", 10.0)):
+            return None
+    else:
+        deficit = 0.0
+
+    return {
+        "mode": mode,
+        "candidate_score": float(candidate_score),
+        "base_score": float(base_score),
+        "score_floor": float(score_floor),
+        "macd_hist": float(macd_hist),
+        "ema_sep_pct": float(ema_sep_pct),
+        "price_edge_pct": float(price_edge),
+        "recent_high_gap_pct": float(recent_high_gap_pct),
+        "profile": str(getattr(config, "EARLY_TOP_MOVER_SCOUT_PROFILE", "precise_v1")),
+        "reason": (
+            "early top-mover scout shadow "
+            f"{str(getattr(config, 'EARLY_TOP_MOVER_SCOUT_PROFILE', 'precise_v1'))}: "
+            f"score {candidate_score:.2f}, floor {score_floor:.2f}, deficit {max(0.0, deficit):.2f}"
+        ),
+    }
+
+
+def _maybe_log_early_top_mover_scout_shadow(
+    *,
+    state: "MonitorState",
+    sym: str,
+    tf: str,
+    feat: dict,
+    data: np.ndarray,
+    i: int,
+    price: float,
+    ema20: float,
+    slope: float,
+    adx: float,
+    rsi: float,
+    vol_x: float,
+    daily_range: float,
+    forecast_return_pct: float,
+    today_change_pct: float,
+) -> Optional[Dict[str, Any]]:
+    scout = _early_top_mover_scout_shadow_snapshot(
+        tf=tf,
+        feat=feat,
+        data=data,
+        i=i,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+        forecast_return_pct=forecast_return_pct,
+        today_change_pct=today_change_pct,
+    )
+    if scout is None:
+        return None
+
+    bar_ts = int(data["t"][i])
+    dedup_bars = max(1, int(getattr(config, "EARLY_TOP_MOVER_SCOUT_DEDUP_BARS", 4)))
+    dedup_until = state.scout_shadow_logged.get(f"{sym}|{tf}", 0)
+    if bar_ts < dedup_until:
+        return None
+    state.scout_shadow_logged[f"{sym}|{tf}"] = bar_ts + dedup_bars * _tf_bar_ms(tf)
+
+    reason = str(scout["reason"])
+    mode = str(scout["mode"])
+    signal_flags = {"early_top_mover_scout": True}
+    _log_critic_candidate(
+        sym=sym,
+        tf=tf,
+        bar_ts=bar_ts,
+        signal_type=mode,
+        feat=feat,
+        data=data,
+        i=i,
+        action="shadow",
+        reason_code="early_top_mover_scout_shadow",
+        reason=reason,
+        stage="early_top_mover_scout",
+        candidate_score=float(scout["candidate_score"]),
+        base_score=float(scout["base_score"]),
+        score_floor=float(scout["score_floor"]),
+        forecast_return_pct=forecast_return_pct,
+        today_change_pct=today_change_pct,
+        ml_proba=None,
+        mtf_soft_penalty=0.0,
+        fresh_priority=True,
+        catchup=False,
+        continuation_profile=True,
+        signal_flags=signal_flags,
+        near_miss=True,
+    )
+    botlog.log_scout_shadow(
+        sym=sym,
+        tf=tf,
+        mode=mode,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        rsi=rsi,
+        adx=adx,
+        vol_x=vol_x,
+        daily_range=daily_range,
+        macd_hist=float(scout["macd_hist"]),
+        candidate_score=float(scout["candidate_score"]),
+        score_floor=float(scout["score_floor"]),
+        reason=reason,
+        scout_profile=str(scout["profile"]),
+    )
+    log.info("EARLY TOP-MOVER SCOUT SHADOW %s [%s]: %s", sym, tf, reason)
+    return scout
+
+
 def _log_critic_candidate(
     *,
     sym: str,
@@ -3401,6 +3604,7 @@ class MonitorState:
     # Логируем не чаще 1 раза в BLOCK_LOG_INTERVAL_BARS баров (по умолчанию 4 = 1ч на 15m).
     block_logged:  Dict[str, int]  = field(default_factory=dict)
     watch_alert_logged: Dict[str, str] = field(default_factory=dict)
+    scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
     time_block_recent: Dict[str, dict] = field(default_factory=dict)
     time_block_streaks: Dict[str, dict] = field(default_factory=dict)
     last_discovery_ts: int = 0
@@ -3839,6 +4043,23 @@ async def _poll_coin(
                         tf,
                         str(near_miss["reason"]),
                     )
+            _maybe_log_early_top_mover_scout_shadow(
+                state=state,
+                sym=sym,
+                tf=tf,
+                feat=feat,
+                data=data,
+                i=i,
+                price=preview_price,
+                ema20=preview_ema20,
+                slope=preview_slope,
+                adx=preview_adx,
+                rsi=preview_rsi,
+                vol_x=preview_vol,
+                daily_range=preview_range,
+                forecast_return_pct=float(getattr(report, "forecast_return_pct", 0.0)),
+                today_change_pct=float(getattr(report, "today_change_pct", 0.0)),
+            )
             if not any_signal:
                 return
         else:
