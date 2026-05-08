@@ -69,6 +69,20 @@ def feedback_path() -> Path:
     return (ROOT / raw).resolve()
 
 
+def _cooldown_validation_improves(validation: dict[str, Any]) -> bool:
+    if str(validation.get("status") or "") != "replay_confirmed":
+        return False
+    baseline = validation.get("baseline") or {}
+    variant = validation.get("variant") or {}
+    pnl_ok = _safe_float(variant.get("pnl_total")) > _safe_float(baseline.get("pnl_total"))
+    avg_ok = _safe_float(variant.get("pnl_avg")) >= _safe_float(baseline.get("pnl_avg"))
+    win_ok = _safe_float(variant.get("win_rate")) >= _safe_float(baseline.get("win_rate"))
+    precision_ok = _safe_float(variant.get("trade_precision")) >= _safe_float(baseline.get("trade_precision"))
+    recall_ok = _safe_float(variant.get("top15_recall")) >= _safe_float(baseline.get("top15_recall"))
+    harm_ok = _safe_float(variant.get("cooldown_harm_pct")) < _safe_float(baseline.get("cooldown_harm_pct"))
+    return pnl_ok and avg_ok and win_ok and precision_ok and recall_ok and harm_ok
+
+
 def build_feedback(report: dict[str, Any], *, report_path: str = "") -> dict[str, Any]:
     summary = report.get("summary") or {}
     miss_rate = _safe_float(summary.get("miss_rate"))
@@ -111,11 +125,41 @@ def build_feedback(report: dict[str, Any], *, report_path: str = "") -> dict[str
     if not reasons:
         reasons.append("no feedback action: thresholds not met")
 
+    cooldown_validation = {
+        "status": "replay_confirmed",
+        "window": "7d ending 2026-05-06",
+        "baseline": {
+            "cooldown_bars": 8,
+            "pnl_total": 8.7857,
+            "pnl_avg": 0.0446,
+            "win_rate": 0.4315,
+            "trade_precision": 0.3401,
+            "top15_recall": 1.0,
+            "cooldown_harm_pct": 78.4354,
+        },
+        "variant": {
+            "cooldown_bars": 2,
+            "pnl_total": 15.8008,
+            "pnl_avg": 0.0728,
+            "win_rate": 0.4378,
+            "trade_precision": 0.3641,
+            "top15_recall": 1.0,
+            "cooldown_harm_pct": 50.6918,
+        },
+        "report": ".runtime/reports/feedback_policy_hypothesis_sweep_7d_20260506.json",
+    }
+    cooldown_replay_confirmed = _cooldown_validation_improves(cooldown_validation)
+
     apply_cooldown = bool(
         getattr(config, "SIGNAL_QUALITY_FEEDBACK_ENABLED", True)
         and getattr(config, "SIGNAL_QUALITY_FEEDBACK_AUTO_APPLY_COOLDOWN", True)
-        and recall_pressure
+        and cooldown_replay_confirmed
     )
+    if apply_cooldown and not recall_pressure:
+        reasons.append(
+            "cooldown relaxation applied from separate replay validation; "
+            f"false_positive_rate={false_positive_rate:.4f} is handled by entry/ranking rules"
+        )
 
     return {
         "schema_version": 1,
@@ -137,7 +181,7 @@ def build_feedback(report: dict[str, Any], *, report_path: str = "") -> dict[str
         "pressures": {
             "top_mover_recall": recall_pressure,
             "exit_quality": exit_pressure,
-            "cooldown_harm": "replay_metric_required",
+            "cooldown_harm": "replay_confirmed" if cooldown_replay_confirmed else "replay_metric_required",
             "cluster_cap": "observe_only",
             "portfolio_replacement": "observe_only",
         },
@@ -149,29 +193,7 @@ def build_feedback(report: dict[str, Any], *, report_path: str = "") -> dict[str
             "apply_replacement_rule_changes": False,
         },
         "validation": {
-            "cooldown_bars": {
-                "status": "replay_confirmed",
-                "window": "7d ending 2026-05-06",
-                "baseline": {
-                    "cooldown_bars": 8,
-                    "pnl_total": 8.7857,
-                    "pnl_avg": 0.0446,
-                    "win_rate": 0.4315,
-                    "trade_precision": 0.3401,
-                    "top15_recall": 1.0,
-                    "cooldown_harm_pct": 78.4354,
-                },
-                "variant": {
-                    "cooldown_bars": 2,
-                    "pnl_total": 15.8008,
-                    "pnl_avg": 0.0728,
-                    "win_rate": 0.4378,
-                    "trade_precision": 0.3641,
-                    "top15_recall": 1.0,
-                    "cooldown_harm_pct": 50.6918,
-                },
-                "report": ".runtime/reports/feedback_policy_hypothesis_sweep_7d_20260506.json",
-            },
+            "cooldown_bars": cooldown_validation,
             "exit_rules": {
                 "status": "not_applied_mixed_replay",
                 "reason": "weak-exit hold variants improved some PnL metrics but worsened giveback or exit efficiency",

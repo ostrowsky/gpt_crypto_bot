@@ -361,6 +361,7 @@ _last_cross_ts:      dict  = {}     # sym в†’ timestamp РїРѕСЃР»Р�
 MAX_OPEN_POSITIONS: int = 10
 UNIFIED_PORTFOLIO_ENABLED: bool = True
 UNIFIED_PORTFOLIO_MAX_POSITIONS: int = 10
+UNIFIED_PORTFOLIO_AGENT_STATUS_MAX_AGE_SEC: int = 300
 MAX_NEW_ENTRIES_PER_CYCLE: int = 1   # limit new entries per polling iteration
 ENTRY_SCORE_PCTL: float = 80.0       # dynamic threshold percentile among candidates
 ALIGNMENT_BUY_ENABLED: bool = False  # alignment is context/exit warning, not a buy trigger

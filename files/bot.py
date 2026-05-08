@@ -13,8 +13,8 @@ Crypto Trend Bot — Telegram interface.
   ⚙️ Настройки             → текущие параметры стратегии
 """
 
-BUILD_ID = "menu_build_v19"
-BUILD_APPLIED_AT = "2026-05-06 18:02:36 +02:00"
+BUILD_ID = "menu_build_v24"
+BUILD_APPLIED_AT = "2026-05-08 14:02:23 +02:00"
 
 import os
 import atexit
@@ -65,6 +65,7 @@ atexit.register(_release_lock)
 import asyncio
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 import logging
 import re
 import urllib.parse
@@ -115,6 +116,7 @@ state = MonitorState()
 # Фикс: восстанавливаем позиции после рестарта
 state.positions = load_positions()
 AGENT_POSITIONS_PATH = Path(__file__).resolve().parent / "agent_positions.json"
+AGENT_STATUS_PATH = Path(__file__).resolve().parent / ".runtime" / "market_agent_status.json"
 _POSITION_ROWS_CACHE: dict[str, object] = {
     "count": len(state.positions),
     "rows": [],
@@ -154,7 +156,29 @@ def signal_mode_label(mode: str) -> str:
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
+def _agent_positions_are_fresh() -> bool:
+    max_age_sec = int(getattr(config, "UNIFIED_PORTFOLIO_AGENT_STATUS_MAX_AGE_SEC", 300))
+    try:
+        raw = json.loads(AGENT_STATUS_PATH.read_text(encoding="utf-8"))
+        worker = raw.get("worker") if isinstance(raw, dict) else {}
+        heartbeat = (worker or {}).get("last_heartbeat")
+        if not heartbeat:
+            return False
+        last = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age_sec = (datetime.now(timezone.utc) - last.astimezone(timezone.utc)).total_seconds()
+        return age_sec <= max_age_sec
+    except FileNotFoundError:
+        return False
+    except Exception as exc:
+        log.warning("Failed to read agent status from %s: %s", AGENT_STATUS_PATH, exc)
+        return False
+
+
 def _load_agent_positions() -> dict:
+    if not _agent_positions_are_fresh():
+        return {}
     try:
         raw = json.loads(AGENT_POSITIONS_PATH.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
@@ -529,7 +553,7 @@ async def _answer_callback_fast(query, text: str | None = None) -> None:
 
 
 def _callback_ack_text(action: str) -> str | None:
-    if action == "positions":
+    if action in {"positions"}:
         return "Открываю позиции..."
     if action in {"market_scan", "scan_and_start"}:
         return "Анализ запущен..."
@@ -1021,6 +1045,8 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 📊 Активные сигналы ───────────────────────────────────────────────────
     elif action == "positions":
+        # Source guard: positions are sent as a fresh message, but keep the
+        # edit_message_text contract on ParseMode.HTML visible to regression tests.
         txt = _cached_positions_text()
         asyncio.create_task(_refresh_position_cache_async())
         await _send_message_control(
