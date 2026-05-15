@@ -13,8 +13,8 @@ Crypto Trend Bot — Telegram interface.
   ⚙️ Настройки             → текущие параметры стратегии
 """
 
-BUILD_ID = "menu_build_v25"
-BUILD_APPLIED_AT = "2026-05-08 19:14:56 +02:00"
+BUILD_ID = "menu_build_v28"
+BUILD_APPLIED_AT = "2026-05-15 17:47:26 +02:00"
 
 import os
 import atexit

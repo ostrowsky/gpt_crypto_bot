@@ -1,6 +1,6 @@
 # Scout Optimization Spec
 
-Last updated: 2026-05-01 18:31 Europe/Budapest
+Last updated: 2026-05-15 17:52 Europe/Budapest
 
 ## Objective
 The bot is optimized for timely capture of same-day watchlist top gainers while keeping a single unified portfolio of the 10 most promising positions. Every production algorithm change must be backed by replay/backtest evidence before it is enabled.
@@ -123,6 +123,48 @@ Architecture decision:
 - Keep scout/monitor/market-agent as live components.
 - Keep replay/backtest as the production gate.
 - The evaluator can gradually absorb overlapping critic diagnostics, but only after preserving the daily Telegram report contract.
+
+## 2026-05-15 1m Wake-Up Scout
+Problem:
+- The bot must catch eventual daily top movers as early as possible, but the normal 15m BUY path intentionally waits for stronger confirmation.
+- A direct 1m BUY path is too noisy for production; its value is earlier discovery, not immediate execution.
+
+Validated hypotheses:
+- 3d probe, `2026-05-12..2026-05-14`:
+  - raw `1m` wake-up recall `97.78%` vs strict `15m` recall `75.56%`;
+  - `1m` was earlier for `33/33` paired top movers, median lead advantage `818 min`;
+  - raw `1m` precision was only `15.55%`, so it is rejected as a direct BUY trigger.
+- 7d validation:
+  - strict `15m`: recall `86.67%`, precision `20.18%`, median capture `0.51`, median lead `540 min`;
+  - `wake_light15`: recall `88.57%`, precision `21.53%`, median capture `0.53`, median lead `600 min`;
+  - combined mode: recall `90.48%`, precision `20.43%`, median capture `0.54`, median lead `600 min`.
+- 30d validation:
+  - strict `15m`: recall `84.00%`, precision `18.85%`, median capture `0.44`, median lead `555 min`;
+  - `wake_light15`: recall `91.78%`, precision `20.04%`, median capture `0.47`, median lead `615 min`;
+  - combined mode: recall `93.56%`, precision `19.31%`, median capture `0.47`, median lead `615 min`;
+  - combined mode caught `43` additional final top movers and was earlier on `52.38%` of paired top-mover cases.
+
+Production decision:
+- Enable `wake_up_1m_light15_v1` as a separate scout layer, not as a BUY generator.
+- Run it independently from normal discovery every `60s`.
+- Let it accelerate symbol admission into the live shortlist and add a small ranking priority bonus.
+- Persist shadow events for later evaluator/critic review before considering any stronger production use.
+
+Implementation:
+- `WAKEUP_SCOUT_*` config in `files/config.py`.
+- Separate async wake-up task in `files/monitor.py`.
+- `CoinReport` carries `wakeup_shadow`, `wakeup_ts`, and `wakeup_priority_bonus`.
+- Applied release badge: `menu_build_v28`.
+
+Required live checks:
+- `wake-up scout scan complete` must appear in logs every active scan cycle.
+- Shadow rows from `wake_up_1m_light15_v1` must be reviewed against:
+  - final top-mover recall;
+  - `capture_ratio_at_entry`;
+  - `lead_time_to_final_top_min`;
+  - false-positive rate;
+  - conversion from wake-up shortlist admission into accepted BUY.
+- Any future promotion from shortlist boost to stronger trading action must pass the normal replay gate first.
 
 ## Backtest Gate For Future Changes
 1. Form one narrow hypothesis from critic metrics.

@@ -3605,11 +3605,14 @@ class MonitorState:
     block_logged:  Dict[str, int]  = field(default_factory=dict)
     watch_alert_logged: Dict[str, str] = field(default_factory=dict)
     scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
+    wakeup_shadow_logged: Dict[str, int] = field(default_factory=dict)
     time_block_recent: Dict[str, dict] = field(default_factory=dict)
     time_block_streaks: Dict[str, dict] = field(default_factory=dict)
     last_discovery_ts: int = 0
+    last_wakeup_ts: int = 0
     recent_discoveries: Dict[str, dict] = field(default_factory=dict)
     discovery_task: Optional[asyncio.Task] = None
+    wakeup_task: Optional[asyncio.Task] = None
 
 
 def _tf_bar_ms(tf: str) -> int:
@@ -3753,6 +3756,7 @@ def _signal_snapshot(feat: dict, c: np.ndarray, idx: int, tf: str = "") -> Optio
 def _coin_report_priority(report: CoinReport) -> tuple:
     return (
         bool(report.signal_now),
+        float(getattr(report, "wakeup_priority_bonus", 0.0)),
         _signal_priority(getattr(report, "signal_mode", "")),
         float(getattr(report, "forecast_return_pct", 0.0)),
         float(getattr(report, "today_change_pct", 0.0)),
@@ -3760,6 +3764,93 @@ def _coin_report_priority(report: CoinReport) -> tuple:
         int(report.today_signals),
         float(report.best_accuracy),
     )
+
+
+def _rolling_median_vol_x(values: np.ndarray, i: int, lookback: int = 20) -> float:
+    if i < lookback:
+        return 0.0
+    base = float(np.median(values[i - lookback:i]))
+    return float(values[i] / base) if base > 0 else 0.0
+
+
+async def _wakeup_scout_snapshot(
+    session: aiohttp.ClientSession,
+    sym: str,
+) -> Optional[tuple[CoinReport, int, dict]]:
+    if not getattr(config, "WAKEUP_SCOUT_ENABLED", False):
+        return None
+    one_m = await fetch_klines(
+        session, sym, "1m", limit=int(getattr(config, "WAKEUP_SCOUT_1M_LIMIT", 100))
+    )
+    if one_m is None or len(one_m) < 80:
+        return None
+    c1, f1 = await _compute_features_from_data(one_m)
+    i1 = len(one_m) - 2
+    ema20_1 = float(f1["ema_fast"][i1])
+    ema50_1 = float(f1["ema_slow"][i1])
+    slope_1 = float(f1["slope"][i1])
+    rsi_1 = float(f1["rsi"][i1])
+    adx_1 = float(f1["adx"][i1])
+    vol_x_1 = _rolling_median_vol_x(one_m["v"], i1)
+    if not all(np.isfinite([ema20_1, ema50_1, slope_1, rsi_1, adx_1, vol_x_1])):
+        return None
+    recent_high = float(np.max(one_m["h"][max(0, i1 - int(getattr(config, "WAKEUP_SCOUT_1M_RECENT_HIGH_LOOKBACK", 20))):i1]))
+    high_gap_pct = ((recent_high / float(c1[i1])) - 1.0) * 100.0 if c1[i1] > 0 else 999.0
+    persist_window = int(getattr(config, "WAKEUP_SCOUT_1M_PERSIST_WINDOW", 5))
+    persist_count = sum(
+        1
+        for j in range(max(0, i1 - persist_window + 1), i1 + 1)
+        if np.isfinite(f1["ema_fast"][j])
+        and np.isfinite(f1["slope"][j])
+        and float(c1[j]) > float(f1["ema_fast"][j])
+        and float(f1["slope"][j]) > 0.0
+    )
+    if not (
+        float(c1[i1]) > ema20_1 > ema50_1
+        and slope_1 >= float(getattr(config, "WAKEUP_SCOUT_1M_SLOPE_MIN", 0.05))
+        and adx_1 >= float(getattr(config, "WAKEUP_SCOUT_1M_ADX_MIN", 14.0))
+        and float(getattr(config, "WAKEUP_SCOUT_1M_RSI_MIN", 52.0)) <= rsi_1 <= float(getattr(config, "WAKEUP_SCOUT_1M_RSI_MAX", 78.0))
+        and vol_x_1 >= float(getattr(config, "WAKEUP_SCOUT_1M_VOL_X_MIN", 1.15))
+        and high_gap_pct <= float(getattr(config, "WAKEUP_SCOUT_1M_RECENT_HIGH_GAP_MAX_PCT", 0.20))
+        and persist_count >= int(getattr(config, "WAKEUP_SCOUT_1M_PERSIST_MIN", 3))
+    ):
+        return None
+    fifteen_m = await fetch_klines(session, sym, "15m", limit=config.LIVE_LIMIT)
+    if fifteen_m is None or len(fifteen_m) < 60:
+        return None
+    c15, f15 = await _compute_features_from_data(fifteen_m)
+    i15 = len(fifteen_m) - 2
+    ema20_15 = float(f15["ema_fast"][i15])
+    ema50_15 = float(f15["ema_slow"][i15])
+    slope_15 = float(f15["slope"][i15])
+    rsi_15 = float(f15["rsi"][i15])
+    adx_15 = float(f15["adx"][i15])
+    if not all(np.isfinite([ema20_15, ema50_15, slope_15, rsi_15, adx_15])):
+        return None
+    if not (
+        float(c15[i15]) > ema20_15 > ema50_15
+        and slope_15 > float(getattr(config, "WAKEUP_SCOUT_15M_SLOPE_MIN", 0.0))
+        and adx_15 >= float(getattr(config, "WAKEUP_SCOUT_15M_ADX_MIN", 10.0))
+        and float(getattr(config, "WAKEUP_SCOUT_15M_RSI_MIN", 48.0)) <= rsi_15 <= float(getattr(config, "WAKEUP_SCOUT_15M_RSI_MAX", 80.0))
+    ):
+        return None
+    report = replace(
+        await _analyze_coin_live(sym, "15m", fifteen_m),
+        wakeup_shadow=True,
+        wakeup_ts=int(one_m["t"][i1]),
+        wakeup_priority_bonus=float(getattr(config, "WAKEUP_SCOUT_PRIORITY_BONUS", 4.0)),
+    )
+    return report, int(fifteen_m["t"][i15]), {
+        "price": float(c15[i15]),
+        "ema20": ema20_15,
+        "slope": slope_15,
+        "rsi": rsi_15,
+        "adx": adx_15,
+        "vol_x": float(f15["vol_x"][i15]) if np.isfinite(f15["vol_x"][i15]) else 0.0,
+        "daily_range": float(f15["daily_range_pct"][i15]) if np.isfinite(f15["daily_range_pct"][i15]) else 0.0,
+        "macd_hist": float(f15["macd_hist"][i15]) if np.isfinite(f15["macd_hist"][i15]) else 0.0,
+        "one_m_ts": int(one_m["t"][i1]),
+    }
 
 
 async def _discover_new_hot_coins(
@@ -3857,6 +3948,67 @@ async def _discover_new_hot_coins(
         if idx % 12 == 0:
             await asyncio.sleep(0)
 
+    return added
+
+
+async def _run_wakeup_scout(
+    session: aiohttp.ClientSession,
+    state: "MonitorState",
+) -> int:
+    watchlist = config.load_watchlist()
+    if not watchlist or not getattr(config, "WAKEUP_SCOUT_ENABLED", False):
+        return 0
+    existing_by_sym = {r.symbol: (idx, r) for idx, r in enumerate(state.hot_coins)}
+    wakeup_best: Dict[str, tuple[CoinReport, int, dict]] = {}
+    for idx, sym in enumerate(watchlist, start=1):
+        snapshot = await _wakeup_scout_snapshot(session, sym)
+        if snapshot is not None:
+            wakeup_best[sym] = snapshot
+        if idx % 12 == 0:
+            await asyncio.sleep(0)
+
+    added = 0
+    for report, report_bar_ts, snapshot in wakeup_best.values():
+        dedup_until = state.wakeup_shadow_logged.get(report.symbol, 0)
+        if int(snapshot["one_m_ts"]) < dedup_until:
+            continue
+        state.wakeup_shadow_logged[report.symbol] = int(snapshot["one_m_ts"]) + int(
+            getattr(config, "WAKEUP_SCOUT_DEDUP_MINUTES", 60)
+        ) * 60 * 1000
+        reason = (
+            f"wake-up scout {getattr(config, 'WAKEUP_SCOUT_PROFILE', 'wake_up_1m_light15_v1')}: "
+            f"1m trigger -> soft 15m confirm, bonus {report.wakeup_priority_bonus:.1f}"
+        )
+        botlog.log_scout_shadow(
+            sym=report.symbol,
+            tf="15m",
+            mode="trend",
+            price=float(snapshot["price"]),
+            ema20=float(snapshot["ema20"]),
+            slope=float(snapshot["slope"]),
+            rsi=float(snapshot["rsi"]),
+            adx=float(snapshot["adx"]),
+            vol_x=float(snapshot["vol_x"]),
+            daily_range=float(snapshot["daily_range"]),
+            macd_hist=float(snapshot["macd_hist"]),
+            candidate_score=float(report.wakeup_priority_bonus),
+            score_floor=0.0,
+            reason=reason,
+            scout_profile=str(getattr(config, "WAKEUP_SCOUT_PROFILE", "wake_up_1m_light15_v1")),
+        )
+        existing = existing_by_sym.get(report.symbol)
+        if existing is None:
+            state.hot_coins.append(report)
+            existing_by_sym[report.symbol] = (len(state.hot_coins) - 1, report)
+            added += 1
+            log.info("WAKEUP ADD %s [15m]: %s", report.symbol, reason)
+        else:
+            existing_idx, current = existing
+            if _coin_report_priority(report) > _coin_report_priority(current):
+                state.hot_coins[existing_idx] = report
+                existing_by_sym[report.symbol] = (existing_idx, report)
+                log.info("WAKEUP UPGRADE %s [15m]: %s", report.symbol, reason)
+    log.info("wake-up scout scan complete: matches=%d added=%d", len(wakeup_best), added)
     return added
 
 
@@ -4114,6 +4266,7 @@ async def _poll_coin(
                 daily_range=preview_range,
             )
             candidate_score = base_score
+            candidate_score += float(getattr(report, "wakeup_priority_bonus", 0.0))
             mtf_soft_penalty = 0.0
             score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
             candidate_score += _top_mover_score_bonus(float(getattr(report, "today_change_pct", 0.0)))
@@ -6039,6 +6192,21 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
                         state.last_discovery_ts = now_ms
                         state.discovery_task = asyncio.create_task(_run_discovery())
 
+                wakeup_sec = int(getattr(config, "WAKEUP_SCOUT_SCAN_SEC", 0))
+                if getattr(config, "WAKEUP_SCOUT_ENABLED", False) and wakeup_sec > 0:
+                    wakeup_ms = wakeup_sec * 1000
+                    wakeup_busy = state.wakeup_task is not None and not state.wakeup_task.done()
+                    if not wakeup_busy and now_ms >= state.last_wakeup_ts + wakeup_ms:
+                        async def _run_wakeup() -> None:
+                            try:
+                                added = await _run_wakeup_scout(session, state)
+                                if added:
+                                    log.info("wake-up scout added %d coin(s)", added)
+                            except Exception as exc:
+                                log.warning("wake-up scout failed: %s", exc)
+                        state.last_wakeup_ts = now_ms
+                        state.wakeup_task = asyncio.create_task(_run_wakeup())
+
                 # Heartbeat каждые ~10 минут (600с / POLL_SEC итераций)
                 _heartbeat_counter += 1
                 if _heartbeat_counter % max(1, 600 // config.POLL_SEC) == 0:
@@ -6055,6 +6223,9 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
     if state.discovery_task is not None and not state.discovery_task.done():
         state.discovery_task.cancel()
     state.discovery_task = None
+    if state.wakeup_task is not None and not state.wakeup_task.done():
+        state.wakeup_task.cancel()
+    state.wakeup_task = None
 
     if _aux_notifications_enabled():
         try:

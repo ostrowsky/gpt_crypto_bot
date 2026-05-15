@@ -16,14 +16,14 @@ Intraday analysis logic.
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta, time as dt_time
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
 
 import aiohttp
 import numpy as np
 
 import config
+from runtime_executors import run_cpu
 from indicators import compute_features, _ema
 import botlog
 
@@ -112,62 +112,15 @@ def _get_effective_range_max(feat: dict, i: int, regime: "MarketRegime") -> floa
 
 @dataclass
 class HorizonAccuracy:
-    """
-    Метрики качества сигналов для горизонта T+h.
-
-    Win% (pct) — старая метрика, оставлена для совместимости.
-    Expectancy-метрики — новые, решают проблему "60% точность, убыточная стратегия":
-
-      expected_return  — средний доход по всем сделкам (%)
-                         E[R] = avg(return_i)
-                         Если E[R] < 0 — стратегия убыточна даже при win% > 50%.
-
-      median_return    — медианный доход (устойчив к выбросам)
-
-      downside_q10     — 10% квантиль доходности (worst-case типичный исход)
-                         Если downside < -ATR*2 — стоп недостаточно защищает.
-
-      ev_proxy         — E[R] / |downside_q10| — отношение ожидания к хвостовому риску.
-                         > 0.5 = хорошо, > 1.0 = отлично, < 0 = убыточно.
-    """
     horizon: int
     total:   int
     correct: int
-
-    # Expectancy поля (None если total == 0)
-    expected_return:  Optional[float] = None   # среднее по всем T+h возвратам (%)
-    median_return:    Optional[float] = None   # медиана возвратов (%)
-    downside_q10:     Optional[float] = None   # 10-й процентиль (самые плохие 10%)
-    upside_q90:       Optional[float] = None   # 90-й процентиль (самые хорошие 10%)
-    ev_proxy:         Optional[float] = None   # expected_return / abs(downside_q10)
 
     @property
     def pct(self) -> float:
         return 100.0 * self.correct / self.total if self.total else 0.0
 
-    @property
-    def is_positive_ev(self) -> bool:
-        """True если стратегия имеет положительное математическое ожидание."""
-        if self.expected_return is not None:
-            return self.expected_return > 0
-        return self.pct > 50.0  # fallback к win% если нет данных
-
     def __str__(self) -> str:
-        base = f"T+{self.horizon}: {self.pct:.0f}% ({self.correct}/{self.total})"
-        if self.expected_return is not None:
-            ev_str = f" EV={self.expected_return:+.2f}%"
-            if self.downside_q10 is not None:
-                ev_str += f" q10={self.downside_q10:+.2f}%"
-            return base + ev_str
-        return base
-
-    def short_str(self) -> str:
-        """Компактная строка для Telegram-сообщений."""
-        if self.total == 0:
-            return f"T+{self.horizon}: —"
-        if self.expected_return is not None:
-            ev_icon = "✅" if self.expected_return > 0 else "❌"
-            return f"T+{self.horizon}: {self.pct:.0f}% {ev_icon} EV{self.expected_return:+.2f}%"
         return f"T+{self.horizon}: {self.pct:.0f}% ({self.correct}/{self.total})"
 
 
@@ -207,36 +160,26 @@ class CoinReport:
 
     # П7: тип активного сигнала: "trend"/"strong_trend"/"retest"/"breakout"
     signal_mode:  str  = ""
-    forecast_return_pct: float = 0.0
-    today_change_pct: float = 0.0
+    wakeup_shadow: bool = False
+    wakeup_ts: int = 0
+    wakeup_priority_bonus: float = 0.0
 
     def summary(self) -> str:
         scan  = " 🔍" if self.from_scan else ""
 
-        # Заголовок с метриками сегодня — теперь показывает EV если доступен
-        acc_parts_list = []
-        for h in config.FORWARD_BARS:
-            if h not in self.today_accuracy:
-                continue
-            fa = self.today_accuracy[h]
-            if fa.total == 0:
-                continue
-            # Показываем EV если есть, иначе только win%
-            if fa.expected_return is not None:
-                ev_icon = "▲" if fa.expected_return > 0 else "▼"
-                acc_parts_list.append(
-                    f"T\\+{h}: {fa.pct:.0f}% {ev_icon}{fa.expected_return:+.2f}%"
-                )
-            else:
-                acc_parts_list.append(f"T\\+{h}: {fa.pct:.0f}%")
-        acc_parts = "  ".join(acc_parts_list)
+        # Заголовок с точностью сегодня
+        acc_parts = "  ".join(
+            str(self.today_accuracy[h])
+            for h in config.FORWARD_BARS
+            if h in self.today_accuracy
+        )
 
         if self.today_confirmed:
             conf_icon = "✅"
-            conf_note = f"Подтверждено: {acc_parts}"
+            conf_note = f"Подтверждено сегодня: {acc_parts}"
         else:
             conf_icon = "⚠️"
-            conf_note = f"Мало данных ({self.today_signals} сигн.) — {acc_parts or 'нет оценки'}"
+            conf_note = f"Мало данных сегодня ({self.today_signals} сигн.) — {acc_parts or 'нет оценки'}"
 
         # П7: тип активного сигнала
         _mode_label = {
@@ -273,18 +216,6 @@ class CoinReport:
             f"   {conf_note}\n"
             f"{now_line}"
         )
-
-
-def _signal_priority(mode: str) -> int:
-    return {
-        "breakout": 5,
-        "retest": 4,
-        "impulse_speed": 4,
-        "strong_trend": 3,
-        "trend": 2,
-        "impulse": 2,
-        "alignment": 1,
-    }.get(mode, 0)
 
 
 # ── Binance fetch ──────────────────────────────────────────────────────────────
@@ -351,148 +282,16 @@ async def fetch_top_symbols(session: aiohttp.ClientSession) -> List[str]:
 
 # ── Signal detection ───────────────────────────────────────────────────────────
 
-def _price_edge_pct(price: float, ema20: float) -> float:
-    if ema20 <= 0:
-        return 0.0
-    return max(0.0, ((price / ema20) - 1.0) * 100.0)
-
-
-def _early_1h_continuation_entry_ok(
-    feat: Dict,
-    i: int,
-    c: np.ndarray,
-    *,
-    tf: str = "",
-    mode: str = "trend",
-) -> bool:
-    if tf != "1h" or not getattr(config, "EARLY_1H_CONTINUATION_ENTRY_ENABLED", False):
-        return False
-    allowed_modes = tuple(
-        getattr(config, "EARLY_1H_CONTINUATION_ENTRY_MODES", ("trend", "strong_trend", "impulse_speed"))
-    )
-    if mode not in allowed_modes:
-        return False
-
-    price = float(c[i])
-    ef = float(feat["ema_fast"][i])
-    es = float(feat["ema_slow"][i])
-    e200 = float(feat["ema200"][i])
-    slp = float(feat["slope"][i])
-    adx = float(feat["adx"][i])
-    adx_sma = float(feat["adx_sma"][i]) if np.isfinite(feat["adx_sma"][i]) else np.nan
-    rsi = float(feat["rsi"][i])
-    vx = float(feat["vol_x"][i])
-    dr_pct = float(feat["daily_range_pct"][i]) if np.isfinite(feat["daily_range_pct"][i]) else 0.0
-    macd_h = float(feat["macd_hist"][i]) if np.isfinite(feat["macd_hist"][i]) else np.nan
-    macd_prev = float(feat["macd_hist"][i - 1]) if i > 0 and np.isfinite(feat["macd_hist"][i - 1]) else macd_h
-
-    if not all(np.isfinite([price, ef, es, e200, slp, adx, rsi, vx, macd_h])):
-        return False
-    if not (price > ef > es > e200):
-        return False
-    if slp < float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_SLOPE_MIN", 0.08)):
-        return False
-    if adx < float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_ADX_MIN", 24.0)):
-        return False
-    if np.isfinite(adx_sma):
-        tol = float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_ADX_SMA_TOLERANCE", 3.0))
-        if adx + tol < adx_sma:
-            return False
-    rsi_min = float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_RSI_MIN", 60.0))
-    rsi_max = float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_RSI_MAX", 78.0))
-    if not (rsi_min <= rsi <= rsi_max):
-        return False
-    if vx < float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_VOL_X_MIN", 1.20)):
-        return False
-    if dr_pct > float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_RANGE_MAX", 6.5)):
-        return False
-    if _price_edge_pct(price, ef) > float(getattr(config, "EARLY_1H_CONTINUATION_ENTRY_PRICE_EDGE_MAX_PCT", 1.60)):
-        return False
-    macd_min_abs = price * float(getattr(config, "TREND_MACD_REL_MIN", 0.00005))
-    if macd_h < macd_min_abs:
-        return False
-    if np.isfinite(macd_prev) and macd_h < macd_prev:
-        return False
-    return True
-
-
-def _early_15m_continuation_entry_ok(
-    feat: Dict,
-    i: int,
-    c: np.ndarray,
-    *,
-    tf: str = "",
-    mode: str = "trend",
-) -> bool:
-    if tf != "15m" or not getattr(config, "EARLY_15M_CONTINUATION_ENTRY_ENABLED", False):
-        return False
-    allowed_modes = tuple(
-        getattr(config, "EARLY_15M_CONTINUATION_ENTRY_MODES", ("trend",))
-    )
-    if mode not in allowed_modes:
-        return False
-
-    price = float(c[i])
-    ef = float(feat["ema_fast"][i])
-    es = float(feat["ema_slow"][i])
-    e200 = float(feat["ema200"][i])
-    slp = float(feat["slope"][i])
-    adx = float(feat["adx"][i])
-    rsi = float(feat["rsi"][i])
-    vx = float(feat["vol_x"][i])
-    dr_pct = float(feat["daily_range_pct"][i]) if np.isfinite(feat["daily_range_pct"][i]) else 0.0
-    macd_h = float(feat["macd_hist"][i]) if np.isfinite(feat["macd_hist"][i]) else np.nan
-    macd_prev = float(feat["macd_hist"][i - 1]) if i > 0 and np.isfinite(feat["macd_hist"][i - 1]) else macd_h
-
-    if not all(np.isfinite([price, ef, es, e200, slp, adx, rsi, vx, macd_h])):
-        return False
-    if not (price > ef > es > e200):
-        return False
-    if slp < float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_SLOPE_MIN", 0.10)):
-        return False
-    if adx < float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_ADX_MIN", 20.0)):
-        return False
-    rsi_min = float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_RSI_MIN", 60.0))
-    rsi_max = float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_RSI_MAX", 76.0))
-    if not (rsi_min <= rsi <= rsi_max):
-        return False
-    if vx < float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_VOL_X_MIN", 1.05)):
-        return False
-    if dr_pct > float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_RANGE_MAX", 8.0)):
-        return False
-    if _price_edge_pct(price, ef) > float(getattr(config, "EARLY_15M_CONTINUATION_ENTRY_PRICE_EDGE_MAX_PCT", 1.60)):
-        return False
-    macd_min_abs = price * float(getattr(config, "TREND_MACD_REL_MIN", 0.00005))
-    if macd_h < macd_min_abs:
-        return False
-    if np.isfinite(macd_prev) and macd_h < macd_prev:
-        return False
-    return True
-
-
-def get_effective_entry_mode(
-    feat: Dict,
-    i: int,
-    c: np.ndarray,
-    *,
-    tf: str = "",
-) -> tuple[str, bool]:
-    mode = get_entry_mode(feat, i)
-    early_15m_continuation = _early_15m_continuation_entry_ok(feat, i, c, tf=tf, mode=mode)
-    if early_15m_continuation and tf == "15m" and mode == "trend":
-        return "alignment", True
-    return mode, False
-
-
 def check_entry_conditions(
     feat: Dict, i: int, c: np.ndarray,
-    regime: "MarketRegime" = None,
     tf: str = "",
+    regime: "MarketRegime" = None,
 ) -> Tuple[bool, str]:
     """
     Проверяет все условия входа.
     v2: адаптивные пороги через MarketRegime + slope acceleration + squeeze bypass.
     """
+    _ = tf
     if regime is None:
         regime = _get_coin_regime(feat, i)
 
@@ -523,8 +322,7 @@ def check_entry_conditions(
     )
     if has_accel:
         slope_min = slope_min * 0.7  # slope acceleration снижает порог на 30%
-    early_1h_override = _early_1h_continuation_entry_ok(feat, i, c, tf=tf, mode="trend")
-    if slp < slope_min and not early_1h_override:
+    if slp < slope_min:
         return False, f"наклон EMA20 {slp:+.2f}% < {slope_min:.2f}%"
 
     # ADX: режимный порог, снижается при squeeze breakout
@@ -541,7 +339,7 @@ def check_entry_conditions(
     adx_sma = feat["adx_sma"][i]
     if np.isfinite(adx_sma) and adx <= adx_sma:
         bypass_threshold = getattr(config, "ADX_SMA_BYPASS", 35.0)
-        if adx < bypass_threshold and not squeeze_active and not early_1h_override:
+        if adx < bypass_threshold and not squeeze_active:
             return False, f"ADX {adx:.1f} ≤ SMA(ADX,10) {adx_sma:.1f} — тренд слабый"
 
     # Volume: режимный порог, снижается при squeeze
@@ -565,14 +363,8 @@ def check_entry_conditions(
         return False, f"RSI {rsi:.1f} вне зоны [{config.RSI_BUY_LO}-{rsi_hi:.0f}]{mode}{sq_note}"
 
     macd_h = feat["macd_hist"][i]
-    macd_prev = feat["macd_hist"][i - 1] if i > 0 else np.nan
     if np.isfinite(macd_h) and macd_h < 0:
         return False, f"MACD гистограмма отрицательная ({macd_h:.6g})"
-    macd_min_abs = float(c[i]) * getattr(config, "TREND_MACD_REL_MIN", 0.00005)
-    if np.isfinite(macd_h) and macd_h < macd_min_abs:
-        return False, f"MACD гистограмма слишком слабая ({macd_h:.6g} < {macd_min_abs:.6g})"
-    if np.isfinite(macd_h) and np.isfinite(macd_prev) and macd_h < macd_prev:
-        return False, f"MACD гистограмма ослабевает ({macd_h:.6g} < {macd_prev:.6g})"
 
     # Range max: динамический + режим
     _range_max = _get_effective_range_max(feat, i, regime)
@@ -587,99 +379,65 @@ def check_entry_conditions(
 
 
 def check_setup_conditions(
-    feat: Dict, i: int, c: np.ndarray,
-    regime: "MarketRegime" = None,
+    feat: Dict, i: int, c: np.ndarray
 ) -> Tuple[bool, str, int]:
     """
-    Мягкая проверка "почти готового сигнала".
-    Используется для UI и раннего мониторинга, когда до полноценного BUY
-    не хватает 1-2 подтверждений. Возвращает (ok, reason, missing_count).
+    Мягкие условия "зарождающегося тренда".
+    Срабатывает когда структура бычья но не хватает 1 жёсткого фильтра BUY.
+    НЕ используется для форвард-теста — только для UI-секции 🟡.
+    Возвращает (ok, reason, missing_count) — П8: missing_count для сортировки.
     """
-    if regime is None:
-        regime = _get_coin_regime(feat, i)
-
-    ef = feat["ema_fast"][i]
-    es = feat["ema_slow"][i]
+    ef  = feat["ema_fast"][i]
+    es  = feat["ema_slow"][i]
     rsi = feat["rsi"][i]
     slp = feat["slope"][i]
-    vx = feat["vol_x"][i]
-    macd_h = feat["macd_hist"][i]
-    dr_pct = feat["daily_range_pct"][i]
-    adx = feat["adx"][i]
+    vx  = feat["vol_x"][i]
+    macd_h  = feat["macd_hist"][i]
+    dr_pct  = feat["daily_range_pct"][i]
+    adx     = feat["adx"][i]
 
     if not all(np.isfinite([ef, rsi, slp])):
-        return False, "недостаточно данных", 99
+        return False, "нет данных", 99
 
     price = float(c[i])
-    if not regime.allow_new_buy:
-        return False, f"режим {regime.name} — setup BUY запрещён", 99
 
-    accel_arr = feat.get("slope_accel")
-    has_accel = (
-        accel_arr is not None and i < len(accel_arr) and
-        np.isfinite(accel_arr[i]) and
-        accel_arr[i] >= getattr(config, "SLOPE_ACCEL_MIN", 0.05)
-    )
-    slope_min = regime.slope_min * (0.7 if has_accel else 1.0)
-
-    sq_arr = feat.get("squeeze_breakout")
-    squeeze_active = (
-        sq_arr is not None and i < len(sq_arr) and sq_arr[i] == 1.0
-    )
-    adx_min = regime.adx_min
-    if squeeze_active:
-        adx_min = max(adx_min * 0.7, 15.0)
-    vol_min = regime.vol_mult * (0.85 if squeeze_active else 1.0)
-
-    strong_trend = (
-        np.isfinite(adx) and adx >= config.STRONG_ADX_MIN and
-        np.isfinite(vx) and vx >= config.STRONG_VOL_MIN
-    )
-    rsi_hi = config.RSI_BUY_HI_STRONG if strong_trend else regime.rsi_hi
-    if squeeze_active:
-        rsi_hi = min(rsi_hi + 3, 85.0)
-    range_max = _get_effective_range_max(feat, i, regime)
-
+    # Базовые условия — обязательны даже для SETUP
     if not (price > ef):
         return False, f"цена {price:.6g} ниже EMA20 {ef:.6g}", 99
     if slp <= 0:
         return False, f"EMA20 не растёт (slope {slp:+.2f}%)", 99
-    if np.isfinite(rsi) and rsi < config.RSI_BUY_LO:
-        return False, f"RSI {rsi:.1f} < {config.RSI_BUY_LO:.0f}", 99
+    if np.isfinite(rsi) and rsi < 50:
+        return False, f"RSI {rsi:.1f} < 50", 99
     if np.isfinite(macd_h) and macd_h < 0:
         return False, f"MACD отрицательный ({macd_h:.6g})", 99
-    if np.isfinite(dr_pct) and dr_pct > range_max:
-        return False, f"рост от дна +{dr_pct:.1f}% уже поздний (> {range_max:.1f}%)", 99
+    _range_max = getattr(config, "_effective_range_max", config.DAILY_RANGE_MAX)
+    if np.isfinite(dr_pct) and dr_pct > _range_max:
+        return False, f"перегрета +{dr_pct:.1f}% от дна (> {_range_max}%)", 99
     if np.isfinite(adx) and adx < 15:
-        return False, f"ADX {adx:.1f} < 15 — рынок слишком слабый", 99
+        return False, f"ADX {adx:.1f} < 15 — нет тренда", 99
     if np.isfinite(vx) and vx < 0.8:
-        return False, f"объём {vx:.2f}× — нет участия покупателей", 99
+        return False, f"объём {vx:.2f}× — слишком слабый", 99
 
+    # П8: считаем сколько условий не хватает до BUY
     missing = []
     if np.isfinite(es) and ef <= es:
-        missing.append(f"EMA20 {ef:.4g} <= EMA50 {es:.4g}")
-    if slp < slope_min:
-        missing.append(f"slope {slp:+.2f}% < {slope_min:.2f}%")
-    if np.isfinite(vx) and vx < vol_min:
-        missing.append(f"vol× {vx:.2f} < {vol_min:.2f}")
-    if np.isfinite(adx) and adx < adx_min:
-        missing.append(f"ADX {adx:.1f} < {adx_min:.1f}")
-    if np.isfinite(rsi) and not (config.RSI_BUY_LO <= rsi <= rsi_hi):
-        missing.append(f"RSI {rsi:.1f} вне [{config.RSI_BUY_LO}-{rsi_hi:.0f}]")
+        missing.append(f"EMA20 {ef:.4g} ≤ EMA50 {es:.4g}")
+    if slp < config.EMA_SLOPE_MIN:
+        missing.append(f"slope {slp:+.2f}% < {config.EMA_SLOPE_MIN}%")
+    if np.isfinite(vx) and vx < config.VOL_MULT:
+        missing.append(f"vol× {vx:.2f} < {config.VOL_MULT}")
+    if np.isfinite(adx) and adx < config.ADX_MIN:
+        missing.append(f"ADX {adx:.1f} < {config.ADX_MIN}")
+    _strong = (
+        np.isfinite(adx) and adx >= config.STRONG_ADX_MIN and
+        np.isfinite(vx) and vx >= config.STRONG_VOL_MIN
+    )
+    _rsi_hi = config.RSI_BUY_HI_STRONG if _strong else config.RSI_BUY_HI
+    if np.isfinite(rsi) and not (config.RSI_BUY_LO <= rsi <= _rsi_hi):
+        missing.append(f"RSI {rsi:.1f} вне [{config.RSI_BUY_LO}-{_rsi_hi}]")
 
-    reason = "Почти готово: " + ", ".join(missing) if missing else "готовый BUY"
+    reason = "не хватает: " + ", ".join(missing) if missing else "почти BUY"
     return True, reason, len(missing)
-
-
-def _negative_slope_confirmed(feat: Dict, i: int, bars: int) -> bool:
-    if bars <= 1:
-        return bool(np.isfinite(feat["slope"][i]) and feat["slope"][i] < 0)
-    if i < bars - 1:
-        return False
-    for j in range(i - bars + 1, i + 1):
-        if not np.isfinite(feat["slope"][j]) or feat["slope"][j] >= 0:
-            return False
-    return True
 
 
 def check_exit_conditions(
@@ -687,103 +445,67 @@ def check_exit_conditions(
     i: int,
     c: np.ndarray,
     *,
-    mode: str = "trend",
-    bars_elapsed: int = 0,
-    tf: str = "15m",
+    mode: str | None = None,
+    bars_elapsed: int | None = None,
+    tf: str | None = None,
 ) -> Optional[str]:
     """
-    Правила выхода из позиции.
-    WEAK-причины не закрывают сделку напрямую на уровне ATR, а маркируют
-    раннее ослабление импульса для ужесточения сопровождения.
+    Проверяет условия выхода из позиции.
+    v2: добавлены RSI дивергенция, volume exhaustion, EMA fan collapse.
+
+    Логика ужесточения трейлинг-стопа при обнаружении слабости:
+    Эти сигналы не вызывают немедленный выход, но помечают слабость
+    через возвращение строки с prefix "⚠️ WEAK:" — мониторинг может
+    ужесточить ATR_TRAIL_K до ATR_TRAIL_K * RSI_DIV_TRAIL_MULT.
     """
     close = float(c[i])
-    ef = feat["ema_fast"][i]
-    rsi = feat["rsi"][i]
-    adx = feat["adx"][i]
-    slp = feat["slope"][i]
+    ef    = feat["ema_fast"][i]
+    rsi   = feat["rsi"][i]
+    adx   = feat["adx"][i]
+    slp   = feat["slope"][i]
 
-    mode_aware = bool(getattr(config, "MODE_AWARE_EXITS_ENABLED", True))
-    patient_modes = set(getattr(config, "EXIT_PATIENT_MODES", ("trend", "strong_trend", "alignment")))
-    semi_patient_modes = set(getattr(config, "EXIT_SEMI_PATIENT_MODES", ("impulse_speed",)))
-    aggressive_modes = set(getattr(config, "EXIT_AGGRESSIVE_MODES", ("breakout", "retest")))
+    # ── Жёсткие условия выхода ────────────────────────────────────────────────
 
-    below_ema20 = bool(np.isfinite(ef) and close < ef)
-    two_closes_below = False
+    # П6: 2 закрытия подряд ниже EMA20 → ранний разворот
     if i >= 1 and np.isfinite(ef):
-        prev_ef = feat["ema_fast"][i - 1]
+        prev_ef    = feat["ema_fast"][i - 1]
         prev_close = float(c[i - 1])
-        two_closes_below = bool(np.isfinite(prev_ef) and prev_close < prev_ef and close < ef)
-
-    j = i - config.ADX_GROW_BARS
-    adx_weak = False
-    if j >= 0 and np.isfinite(adx) and np.isfinite(feat["adx"][j]):
-        if adx < feat["adx"][j] * config.ADX_DROP_RATIO:
-            adx_weak = True
-
-    adx_exit_allowed = True
-    if mode_aware and mode in patient_modes:
-        adx_exit_allowed = bars_elapsed >= int(getattr(config, "MIN_BARS_BEFORE_ADX_EXIT", 5))
-    elif mode_aware and mode in semi_patient_modes:
-        adx_exit_allowed = bars_elapsed >= int(
-            getattr(config, "SEMI_PATIENT_MIN_BARS_BEFORE_ADX_EXIT", 4)
-        )
-    adx_weak_effective = adx_weak and adx_exit_allowed
-
-    slope_confirm_bars = 1
-    if mode_aware and mode in patient_modes:
-        slope_confirm_bars = int(getattr(config, "PATIENT_SLOPE_CONFIRM_BARS", 2))
-    elif mode_aware and mode in semi_patient_modes:
-        slope_confirm_bars = int(getattr(config, "SEMI_PATIENT_SLOPE_CONFIRM_BARS", 2))
-    negative_slope = _negative_slope_confirmed(feat, i, slope_confirm_bars)
-
-    if two_closes_below:
-        if not mode_aware or mode in aggressive_modes or negative_slope or adx_weak_effective:
+        if np.isfinite(prev_ef) and prev_close < prev_ef and close < ef:
             return f"2 закрытия подряд ниже EMA20 ({ef:.6g}) — ранний разворот"
 
-    if below_ema20:
-        if not mode_aware:
-            if (np.isfinite(slp) and slp < 0) or adx_weak:
-                return f"цена ниже EMA20 ({ef:.6g}) + подтверждённая слабость"
-        elif mode in patient_modes or mode in semi_patient_modes:
-            if negative_slope or adx_weak_effective:
-                return f"цена ниже EMA20 ({ef:.6g}) + подтверждённая слабость"
-        else:
-            if negative_slope or adx_weak_effective:
-                return f"цена ниже EMA20 ({ef:.6g}) + подтверждённая слабость"
+    # Одиночное закрытие ниже EMA20
+    if np.isfinite(ef) and close < ef:
+        return f"Цена ниже EMA20 ({ef:.6g})"
 
     if np.isfinite(rsi) and rsi > config.RSI_OVERBOUGHT:
         return f"RSI перекуплен ({rsi:.1f})"
+    if np.isfinite(slp) and slp < 0:
+        return f"EMA20 разворачивается вниз (slope {slp:+.2f}%)"
+    j = i - config.ADX_GROW_BARS
+    if j >= 0 and np.isfinite(adx) and np.isfinite(feat["adx"][j]):
+        if adx < feat["adx"][j] * config.ADX_DROP_RATIO:
+            return f"ADX ослабевает ({adx:.1f} ← {feat['adx'][j]:.1f})"
 
-    if not mode_aware:
-        if np.isfinite(slp) and slp < 0:
-            return f"EMA20 разворачивается вниз (slope {slp:+.2f}%)"
-        if adx_weak:
-            return f"ADX ослабевает ({adx:.1f} vs {feat['adx'][j]:.1f})"
-    elif mode in patient_modes or mode in semi_patient_modes:
-        if negative_slope:
-            return f"EMA20 разворачивается вниз (slope {slp:+.2f}%)"
-        if adx_weak_effective:
-            return f"ADX ослабевает ({adx:.1f} vs {feat['adx'][j]:.1f})"
-    else:
-        if negative_slope:
-            return f"EMA20 разворачивается вниз (slope {slp:+.2f}%)"
-        if adx_weak_effective:
-            return f"ADX ослабевает ({adx:.1f} vs {feat['adx'][j]:.1f})"
+    # ── Ранние сигналы слабости (не выход, но ужесточение стопа) ─────────────
+    # Возвращаем строку с префиксом "⚠️ WEAK:" — монитор реагирует на это.
 
+    # v2.A: RSI дивергенция — цена выше, RSI нет
     rsi_div_arr = feat.get("rsi_divergence")
     if rsi_div_arr is not None and i < len(rsi_div_arr) and rsi_div_arr[i] == 1.0:
-        return "⚠️ WEAK: RSI дивергенция — momentum ослабевает (стоп ужесточён)"
+        return f"⚠️ WEAK: RSI дивергенция — momentum ослабевает (стоп ужесточён)"
 
+    # v2.B: Volume exhaustion — объём убывает при росте цены
     vol_ex_arr = feat.get("vol_exhaustion")
     if vol_ex_arr is not None and i < len(vol_ex_arr) and vol_ex_arr[i] == 1.0:
-        return "⚠️ WEAK: объёмное истощение — покупатели заканчиваются"
+        return f"⚠️ WEAK: объёмное истощение — покупатели заканчиваются"
 
+    # v2.C: EMA Fan Collapse — веер EMA сужается
     fan_arr = feat.get("ema_fan_spread")
     fan_threshold = getattr(config, "EMA_FAN_DECAY_THRESHOLD", 0.30)
     if fan_arr is not None and i < len(fan_arr) and np.isfinite(fan_arr[i]):
         if float(fan_arr[i]) >= fan_threshold:
             decay_pct = float(fan_arr[i]) * 100
-            return f"⚠️ WEAK: EMA-веер сжался на {decay_pct:.0f}% — тренд теряет ширину"
+            return f"⚠️ WEAK: EMA-веер сузился на {decay_pct:.0f}% — тренд слабеет"
 
     return None
 
@@ -796,17 +518,12 @@ def get_entry_mode(feat: Dict, i: int) -> str:
       'strong_trend' → ATR_TRAIL_K_STRONG (шире, держим дольше)
       'trend'        → ATR_TRAIL_K (стандартный)
 
-    Критерии strong_trend (все три обязательны):
-      1. ADX ≥ STRONG_ADX_MIN (28) + Vol× ≥ STRONG_VOL_MIN (2.0)
-      2. EMA20 > EMA50 — ценовая структура бычья, не флэт
-         (SNX-баг: ADX=29.9 на флэте где EMA20 ≈ EMA50)
-      3. EMA50 наклонена вверх — не горизонтальный канал
-
-    Если только ADX+Vol без п.2-3 → режим 'trend' (стандартный стоп).
+    Улучшение: считаем также скорость роста цены за 3 бара.
+    Если за 3 бара цена выросла ≥ 1.5% — это импульс даже при низком ADX
+    (ADX лагует 10+ баров, не успевает подтвердить быстрое движение).
     """
     adx = feat["adx"][i]
     vx  = feat["vol_x"][i]
-    ri  = float(feat["rsi"][i]) if np.isfinite(feat["rsi"][i]) else 50.0
 
     # Скорость за 3 бара из feat["close"]
     price_speed = 0.0
@@ -817,50 +534,35 @@ def get_entry_mode(feat: Dict, i: int) -> str:
         if c0 > 0:
             price_speed = (ci - c0) / c0 * 100.0
 
-    # ADX + vol ≥ порогов → кандидат в сильный тренд
+    # ADX + vol ≥ порогов → настоящий сильный тренд
     if (np.isfinite(adx) and adx >= config.STRONG_ADX_MIN
             and np.isfinite(vx) and vx >= config.STRONG_VOL_MIN):
-
-        ef = feat["ema_fast"][i]   # EMA20
-        es = feat["ema_slow"][i]   # EMA50
-
-        # П.2: EMA20 должна быть выше EMA50 — структура бычья
-        # STRONG_EMA_SEP_MIN: минимальный разрыв EMA20/EMA50 в % от цены.
-        # При флэте (SNX): EMA20=0.3156, EMA50=0.3130 → разрыв 0.08% — почти ноль.
-        # При реальном тренде (AR): EMA20=1.70, EMA50=1.65 → разрыв 3%.
-        ema_sep_min = getattr(config, "STRONG_EMA_SEP_MIN", 0.3)  # 0.3% от цены
-        ema_sep_ok = False
-        if np.isfinite(ef) and np.isfinite(es) and es > 0:
-            ema_sep_pct = (ef - es) / es * 100.0
-            ema_sep_ok = ema_sep_pct >= ema_sep_min
-
-        close_edge_pct = 0.0
-        if np.isfinite(ef) and ef > 0 and np.isfinite(ci):
-            close_edge_pct = (ci / ef - 1.0) * 100.0
-
-        # П.3: EMA50 наклонена вверх — не горизонтальный канал
-        # Используем те же 3 бара что и slope для price_speed
-        ema50_rising = False
-        if i >= 3 and np.isfinite(feat["ema_slow"][i]) and np.isfinite(feat["ema_slow"][i - 3]):
-            es_prev = float(feat["ema_slow"][i - 3])
-            if es_prev > 0:
-                ema50_slope = (float(feat["ema_slow"][i]) - es_prev) / es_prev * 100.0
-                ema50_min_slope = getattr(config, "STRONG_EMA50_SLOPE_MIN", 0.05)
-                ema50_rising = ema50_slope >= ema50_min_slope
-
-        strong_rsi_min = getattr(config, "STRONG_RSI_MIN", 55.0)
-        strong_close_max = getattr(config, "STRONG_CLOSE_EMA20_MAX_PCT", 1.8)
-        if ema_sep_ok and ema50_rising and ri >= strong_rsi_min and close_edge_pct <= strong_close_max:
-            return "strong_trend"
-        # ADX высокий, но структура не подтверждает → обычный тренд
-        return "trend"
-
+        return "strong_trend"
     # Быстрое ценовое движение при слабом ADX (ADX лагует ~10 баров после импульса).
     # Стоп такой же широкий как у strong_trend, но метка честная — не «сильный тренд».
     if price_speed >= 1.5:
         return "impulse_speed"
     return "trend"
 
+
+def _early_15m_continuation_entry_ok(feat: Dict, i: int, c: np.ndarray, tf: str = "") -> bool:
+    if tf != "15m":
+        return False
+    if i <= 0:
+        return False
+    entry_now, _ = check_entry_conditions(feat, i, c)
+    if not entry_now:
+        return False
+    entry_prev, _ = check_entry_conditions(feat, i - 1, c)
+    return entry_prev
+
+
+def get_effective_entry_mode(
+    feat: Dict, i: int, c: np.ndarray, tf: str = ""
+) -> tuple[str, bool]:
+    mode = get_entry_mode(feat, i)
+    early_15m_continuation = _early_15m_continuation_entry_ok(feat, i, c, tf=tf)
+    return mode, early_15m_continuation
 
 
 
@@ -877,41 +579,15 @@ async def is_bull_day(session: aiohttp.ClientSession) -> tuple:
         data = await fetch_klines(session, "BTCUSDT", "1h", limit=60)
         if data is None or len(data) < 55:
             return False, 0.0, 0.0
-
         c_btc = data["c"].astype(float)
         ema50 = _ema(c_btc, 50)
-        confirm_bars = max(1, int(getattr(config, "BULL_DAY_CONFIRM_BARS", 2)))
-        if len(c_btc) < 50 + confirm_bars + 5:
-            return False, 0.0, 0.0
-
-        i = len(c_btc) - 2
-        slope_ref = i - 5
-        if slope_ref >= 0 and ema50[slope_ref] > 0:
-            slope = (ema50[i] - ema50[slope_ref]) / ema50[slope_ref] * 100
+        if ema50[-6] > 0:
+            slope = (ema50[-1] - ema50[-6]) / ema50[-6] * 100
         else:
             slope = 0.0
-
-        start = i - confirm_bars + 1
-        closes = c_btc[start:i + 1]
-        ema_slice = ema50[start:i + 1]
-        if len(closes) < confirm_bars or not np.all(np.isfinite(ema_slice)):
-            return False, 0.0, 0.0
-
-        enter_band = 1.0 + getattr(config, "BULL_DAY_ENTER_PCT", 0.20) / 100.0
-        exit_band = 1.0 - getattr(config, "BULL_DAY_EXIT_PCT", 0.20) / 100.0
-        enter_confirmed = bool(np.all(closes > ema_slice * enter_band) and slope > 0)
-        exit_confirmed = bool(np.all(closes < ema_slice * exit_band))
-
-        prev_state = bool(getattr(config, "_bull_day_active", False))
-        is_bull = prev_state
-        if prev_state:
-            if exit_confirmed:
-                is_bull = False
-        elif enter_confirmed:
-            is_bull = True
-
-        btc_price = float(c_btc[i])
-        btc_ema50 = float(ema50[i])
+        btc_price = float(c_btc[-1])
+        btc_ema50 = float(ema50[-1])
+        is_bull   = btc_price > btc_ema50 and slope > 0
         return is_bull, btc_price, btc_ema50
     except Exception:
         return False, 0.0, 0.0
@@ -1003,8 +679,6 @@ def check_retest_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
         return False, "недостаточно баров"
 
     c_arr    = feat.get("close")
-    e200_arr = feat.get("ema200")
-    e200_arr = feat.get("ema200")
     lo       = feat.get("low")
     ema_fast = feat["ema_fast"]
     slope    = feat["slope"]
@@ -1045,27 +719,9 @@ def check_retest_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
     if float(c_arr[i]) <= float(c_arr[i - 1]):
         return False, "нет отскока (close не выше предыдущего бара)"
 
-    # 3а. Минимальный отскок от EMA20 — "цена на линии" не считается ретестом.
-    # LTC-баг (12.03.2026): close=54.97, EMA20=54.9694 → зазор 0.001%, сигнал не имел смысла.
-    # При реальном отскоке цена уходит хотя бы на RETEST_MIN_BOUNCE_PCT выше EMA20.
-    bounce_min = getattr(config, "RETEST_MIN_BOUNCE_PCT", 0.05)
-    _bounce_pct = (float(c_arr[i]) / float(ema_fast[i]) - 1.0) * 100.0
-    if _bounce_pct < bounce_min:
-        return False, f"отскок {_bounce_pct:.3f}% < {bounce_min}% (цена слишком близко к EMA20)"
-
-    # 4. Slope EMA20 > 0 — но фактически нужен минимальный рост.
-    # LTC 12.03.2026: slope=+0.08% — EMA20 почти горизонтальна.
-    # Ретест на горизонтальной EMA — не тренд, это флэт с отскоком.
-    retest_slope_min = getattr(config, "RETEST_SLOPE_MIN", 0.1)
-    if not np.isfinite(float(slope[i])) or float(slope[i]) < retest_slope_min:
-        return False, f"slope EMA20 {float(slope[i]):.2f}% < {retest_slope_min}% (EMA≈горизонталь)"
-
-    # 4b. MACD hist >= 0 — momentum не должен быть отрицательным при ретесте.
-    # LTC 12.03.2026: MACD hist=-0.02 — покупатели ещё не вернулись после отката.
-    mh_arr = feat.get("macd_hist")
-    if mh_arr is not None and np.isfinite(float(mh_arr[i])):
-        if float(mh_arr[i]) < 0:
-            return False, f"MACD hist {float(mh_arr[i]):.6g} < 0 (импульс ещё не вернулся)"
+    # 4. Slope EMA20 > 0
+    if not np.isfinite(float(slope[i])) or float(slope[i]) <= 0:
+        return False, f"slope EMA20 {float(slope[i]):.2f}% ≤ 0"
 
     # 5. RSI не перегрет
     if not np.isfinite(float(rsi[i])) or float(rsi[i]) >= rsi_mx:
@@ -1093,12 +749,8 @@ def check_breakout_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
       3. vol_x ≥ BREAKOUT_VOL_MIN (сильный объём подтверждает пробой)
       4. MACD_hist > 0 и вырос vs предыдущий бар (импульс)
       5. daily_range < BREAKOUT_RANGE_MAX (движение только началось, не поздно)
-      6. close > EMA20 (минимальная бычья структура)
-    Примечание: RSI-проверка намеренно убрана. После прорыва из флэта
-    +2-3% за 1 бар RSI=80-85 это НОРМА (не перегрев). RSI-условие
-    блокировало именно те входы что нужно ловить (ZRO 15.03.2026).
-    Остальные 6 условий (флэт, vol_x, daily_range, MACD, пробой, EMA20)
-    достаточно защищают. Бэктест 11/11 подтвердил безопасность.
+      6. RSI < 75
+      7. close > EMA20 (минимальная бычья структура)
     """
     flat_bars = getattr(config, "BREAKOUT_FLAT_BARS",    8)
     flat_pct  = getattr(config, "BREAKOUT_FLAT_MAX_PCT", 2.0)
@@ -1112,12 +764,10 @@ def check_breakout_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
     hi         = feat.get("high")
     lo         = feat.get("low")
     ema_fast   = feat["ema_fast"]
-    slope      = feat["slope"]
     vol_x      = feat["vol_x"]
     rsi        = feat["rsi"]
     macd_hist  = feat["macd_hist"]
     daily_rng  = feat["daily_range_pct"]
-    adx        = feat["adx"]
 
     if c_arr is None or hi is None or lo is None:
         return False, "нет ценовых рядов в feat"
@@ -1152,25 +802,15 @@ def check_breakout_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
     if np.isfinite(dr) and dr > rng_mx:
         return False, f"daily_range {dr:.1f}% > {rng_mx}% (поздно входить)"
 
-    # 6. Структура (RSI не проверяем: после спайка RSI=80-85 — это норма)
+    # 6. RSI
+    ri = float(rsi[i])
+    if not np.isfinite(ri) or ri >= 75:
+        return False, f"RSI {ri:.1f} ≥ 75"
+
+    # 7. Структура
     ef = float(ema_fast[i])
     if not np.isfinite(ef) or ci <= ef:
         return False, f"close {ci:.6g} ≤ EMA20 {ef:.6g}"
-
-    slope_min = getattr(config, "BREAKOUT_SLOPE_MIN", 0.08)
-    slp = float(slope[i])
-    if not np.isfinite(slp) or slp < slope_min:
-        return False, f"slope {slp:+.2f}% < {slope_min:.2f}%"
-
-    rsi_max = getattr(config, "BREAKOUT_RSI_MAX", 84.0)
-    ri = float(rsi[i])
-    if np.isfinite(ri) and ri > rsi_max:
-        return False, f"RSI {ri:.1f} > {rsi_max:.0f} (слишком поздний breakout)"
-
-    adx_min = getattr(config, "BREAKOUT_ADX_MIN", 18.0)
-    ax = float(adx[i])
-    if not np.isfinite(ax) or ax < adx_min:
-        return False, f"ADX {ax:.1f} < {adx_min:.1f} (пробой без трендовой опоры)"
 
     return True, ""
 
@@ -1274,6 +914,7 @@ def check_impulse_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
 # ── ALIGNMENT: плавный бычий тренд, ADX не требуется ─────────────────────────
 
 def check_alignment_conditions(feat: Dict, i: int, tf: str = "") -> Tuple[bool, str]:
+    _ = tf
     """
     ALIGNMENT — устойчивый бычий тренд без требования к ADX и скорости.
 
@@ -1306,7 +947,6 @@ def check_alignment_conditions(feat: Dict, i: int, tf: str = "") -> Tuple[bool, 
     mh_arr   = feat["macd_hist"]
     dr_arr   = feat["daily_range_pct"]
     c_arr    = feat.get("close")
-    e200_arr = feat.get("ema200")
 
     if c_arr is None:
         return False, "нет ценового ряда"
@@ -1326,58 +966,13 @@ def check_alignment_conditions(feat: Dict, i: int, tf: str = "") -> Tuple[bool, 
     if not (ci > efv > esv):
         return False, f"цена/EMA структура нарушена"
 
-    # 1b. EMA20/EMA50 разрыв — защита от флэта где EMA20 ≈ EMA50.
-    # MANA 12.03.2026: EMA20=0.0928, EMA50=0.0927 → разрыв 0.11% → сигнал на боковике.
-    # Порог 0.3% — мягче чем для strong_trend (0.9%), т.к. alignment ловит медленные тренды.
-    bull_active = bool(getattr(config, "_bull_day_active", False))
-    if not bull_active and getattr(config, "ALIGNMENT_NONBULL_REQUIRE_ABOVE_EMA200", False):
-        if e200_arr is not None and i < len(e200_arr) and np.isfinite(e200_arr[i]):
-            e200v = float(e200_arr[i])
-            if ci <= e200v:
-                return False, f"close {ci:.6g} <= EMA200 {e200v:.6g} (non-bull alignment)"
-
-    # Не слишком поздно входить
-    range_max = getattr(config, "ALIGNMENT_RANGE_MAX", 9.0)
-    if np.isfinite(dr) and dr > range_max:
-        return False, f"daily_range {dr:.1f}% > {range_max}% (поздно)"
-
-    if not bull_active:
-        nonbull_vol_min = float(getattr(config, "ALIGNMENT_NONBULL_VOL_MIN", getattr(config, "ALIGNMENT_VOL_MIN", 0.8)))
-        if vx < nonbull_vol_min:
-            return False, f"vol× {vx:.2f} < {nonbull_vol_min:.2f} (non-bull alignment)"
-
-        nonbull_rsi_lo = float(getattr(config, "ALIGNMENT_NONBULL_RSI_LO", getattr(config, "ALIGNMENT_RSI_LO", 45.0)))
-        nonbull_rsi_hi = float(getattr(config, "ALIGNMENT_NONBULL_RSI_HI", getattr(config, "ALIGNMENT_RSI_HI", 82.0)))
-        if not (nonbull_rsi_lo <= ri <= nonbull_rsi_hi):
-            return False, f"RSI {ri:.1f} вне [{nonbull_rsi_lo:.0f}–{nonbull_rsi_hi:.0f}] (non-bull alignment)"
-
-    price_edge_max = float(
-        getattr(
-            config,
-            "ALIGNMENT_1H_PRICE_EDGE_MAX_PCT" if tf == "1h" else "ALIGNMENT_PRICE_EDGE_MAX_PCT",
-            getattr(config, "ALIGNMENT_PRICE_EDGE_MAX_PCT", 2.0),
-        )
-    )
-    price_edge_pct = _price_edge_pct(ci, efv)
-    if np.isfinite(price_edge_pct) and price_edge_pct > price_edge_max:
-        return False, (
-            f"price_edge {price_edge_pct:.2f}% > {price_edge_max:.2f}% "
-            f"(late alignment / stretched from EMA20)"
-        )
-
-    ema_sep_min = getattr(config, "ALIGNMENT_EMA_SEP_MIN", 0.3)
-    if esv > 0:
-        ema_sep_pct = (efv - esv) / esv * 100.0
-        if ema_sep_pct < ema_sep_min:
-            return False, f"EMA sep {ema_sep_pct:.2f}% < {ema_sep_min}% (EMA20≈EMA50, флэт)"
-
     # 2. EMA20 растёт (мягкий порог)
     slope_min = getattr(config, "ALIGNMENT_SLOPE_MIN", 0.05)
     if slp < slope_min:
         return False, f"slope {slp:+.2f}% < {slope_min}%"
 
     # 3. MACD hist > 0 последние N баров подряд
-    macd_bars = getattr(config, "ALIGNMENT_MACD_BARS", 5)
+    macd_bars = getattr(config, "ALIGNMENT_MACD_BARS", 3)
     for k in range(macd_bars):
         ki = i - k
         if ki < 0:
@@ -1385,32 +980,6 @@ def check_alignment_conditions(feat: Dict, i: int, tf: str = "") -> Tuple[bool, 
         mh = float(mh_arr[ki])
         if not np.isfinite(mh) or mh <= 0:
             return False, f"MACD hist ≤ 0 на баре -{k} (нужно {macd_bars} подряд)"
-
-    # 3b. MACD hist минимальный относительный порог — защита от «иссякшего» импульса.
-    # SEI 13.03.2026: MACD hist=0.0000 — формально > 0, но momentum полностью иссяк.
-    # Порог: hist должен быть ≥ 0.02% от цены (не абсолютный, масштабируется с ценой).
-    # Для SEI цена~0.067: 0.0002 * 0.0 = нуль → провал. Для BTC цена~70000: 0.0002 * 70000 = 14.
-    mh_now    = float(mh_arr[i])
-    macd_rel_min = getattr(config, "ALIGNMENT_MACD_REL_MIN", 0.0002)  # 0.02% от цены
-    macd_min_abs = ci * macd_rel_min
-    if mh_now < macd_min_abs:
-        return False, f"MACD hist {mh_now:.6f} < {macd_min_abs:.6f} (иссяк, < {macd_rel_min*100:.3f}% цены)"
-
-    # 3c. Late-alignment guard: если ход за день уже приличный, а текущий MACD
-    # заметно просел от недавнего локального пика, это чаще похоже на поздний
-    # добор после уже состоявшегося импульса, а не на перспективный старт.
-    late_range_min = float(getattr(config, "ALIGNMENT_LATE_RANGE_MIN", 6.5))
-    peak_ratio_min = float(getattr(config, "ALIGNMENT_MACD_PEAK_RATIO_MIN", 0.0))
-    peak_lookback = int(getattr(config, "ALIGNMENT_MACD_PEAK_LOOKBACK", 8))
-    if peak_ratio_min > 0 and np.isfinite(dr) and dr >= late_range_min:
-        start = max(0, i - max(1, peak_lookback) + 1)
-        recent_vals = [float(x) for x in mh_arr[start : i + 1] if np.isfinite(float(x))]
-        recent_peak = max(recent_vals) if recent_vals else 0.0
-        if recent_peak > 0 and mh_now < recent_peak * peak_ratio_min:
-            return False, (
-                f"MACD hist {mh_now:.6f} < {peak_ratio_min:.2f}× recent peak "
-                f"{recent_peak:.6f} (late alignment fades)"
-            )
 
     # 4. RSI в рабочей зоне
     rsi_lo = getattr(config, "ALIGNMENT_RSI_LO", 45.0)
@@ -1423,19 +992,10 @@ def check_alignment_conditions(feat: Dict, i: int, tf: str = "") -> Tuple[bool, 
     if not np.isfinite(vx) or vx < vol_min:
         return False, f"vol× {vx:.2f} < {vol_min}"
 
-    # 5а. Минимальный ADX — защита от чистого флэта.
-    # ICP-баг (12.03.2026): ADX=13.2 — явный флэт без направленности.
-    # Alignment намеренно не требует ADX ≥ 20 (ловим медленные тренды где ADX лагует),
-    # но 13 — это шум. Нижний порог 15 отсекает явный флэт, не трогая слабые тренды.
-    adx_min_aln = getattr(config, "ALIGNMENT_ADX_MIN", 15)
-    if not bull_active:
-        adx_min_aln = max(
-            adx_min_aln,
-            int(getattr(config, "ALIGNMENT_NONBULL_ADX_MIN", adx_min_aln)),
-        )
-    adx_v = feat["adx"][i]
-    if not np.isfinite(float(adx_v)) or float(adx_v) < adx_min_aln:
-        return False, f"ADX {float(adx_v):.1f} < {adx_min_aln} (флэт, нет направленности)"
+    # 6. Не слишком поздно входить
+    range_max = getattr(config, "ALIGNMENT_RANGE_MAX", 9.0)
+    if np.isfinite(dr) and dr > range_max:
+        return False, f"daily_range {dr:.1f}% > {range_max}% (поздно)"
 
     return True, f"EMA↑ slope={slp:+.2f}% MACD×{macd_bars}б RSI={ri:.0f} vol×{vx:.1f}"
 
@@ -1578,103 +1138,27 @@ def check_ema_cross_conditions(feat: Dict, i: int) -> Tuple[bool, str]:
 
     pct_above = (ci / ef - 1) * 100 if ef > 0 else 0.0
     above50   = "✓" if ci > es else "–"
-    cross_age = 0
-    confirm_bars = int(getattr(config, "CROSS_CONFIRM_BARS", 2))
-    for k in range(0, confirm_bars + 1):
-        bar = i - k
-        if bar < 1:
-            break
-        if not (np.isfinite(float(c_arr[bar])) and np.isfinite(float(ef_arr[bar]))):
-            continue
-        if float(c_arr[bar]) < float(ef_arr[bar]):
-            continue
-        below_before = True
-        lookback = int(getattr(config, "CROSS_LOOKBACK", 3))
-        for m in range(1, lookback + 1):
-            prev = bar - m
-            if prev < 0:
-                below_before = False
-                break
-            if not (np.isfinite(float(c_arr[prev])) and np.isfinite(float(ef_arr[prev])) and float(c_arr[prev]) < float(ef_arr[prev])):
-                below_before = False
-                break
-        if below_before:
-            cross_age = k
-            break
-
-    age_note = f" age:{cross_age}b" if cross_age > 0 else ""
 
     return (
         True,
         f"пробой EMA20 +{pct_above:.2f}% EMA50:{above50} "
-        f"vol×{vx:.1f} RSI={ri:.0f} DR={dr:.1f}%{age_note}"
+        f"vol×{vx:.1f} RSI={ri:.0f} DR={dr:.1f}%"
     )
 
 
 def _forward_accuracy(
     signals: List[int], c: np.ndarray
 ) -> Dict[int, HorizonAccuracy]:
-    """
-    Вычисляет метрики качества сигналов для каждого горизонта.
-
-    Помимо win% считает expectancy-метрики:
-      - expected_return: среднее изменение цены T+h (%)
-      - median_return:   медиана
-      - downside_q10:    10-й процентиль (worst case)
-      - upside_q90:      90-й процентиль (best case)
-      - ev_proxy:        expected_return / |downside_q10|
-
-    Пример:
-      Win% = 65%, expected_return = +0.08% → стратегия "точная, но бесполезная"
-                                              (комиссия 0.1% уже убыточна)
-      Win% = 58%, expected_return = +0.45% → стратегия торгуемая
-    """
     result: Dict[int, HorizonAccuracy] = {}
     for h in config.FORWARD_BARS:
         correct = total = 0
-        returns: List[float] = []
-
         for idx in signals:
             if idx + h >= len(c):
                 continue  # форвард-бар ещё не закрылся
             total += 1
-            entry_price = float(c[idx])
-            exit_price  = float(c[idx + h])
-            if entry_price <= 0:
-                continue
-            ret = (exit_price / entry_price - 1.0) * 100.0
-            returns.append(ret)
-            if ret > 0:
+            if float(c[idx + h]) > float(c[idx]):
                 correct += 1
-
-        # Expectancy-метрики (только если есть достаточно данных)
-        if len(returns) >= 2:
-            arr = np.array(returns)
-            expected_return = float(np.mean(arr))
-            median_return   = float(np.median(arr))
-            downside_q10    = float(np.percentile(arr, 10))
-            upside_q90      = float(np.percentile(arr, 90))
-            # EV proxy: ожидание относительно хвостового риска
-            # Избегаем деление на ноль: если downside >= 0, риска нет, ev_proxy = inf → 99
-            if downside_q10 < 0:
-                ev_proxy = expected_return / abs(downside_q10)
-            elif expected_return > 0:
-                ev_proxy = 99.0   # нет downside, есть upside
-            else:
-                ev_proxy = 0.0
-        else:
-            expected_return = median_return = downside_q10 = upside_q90 = ev_proxy = None
-
-        result[h] = HorizonAccuracy(
-            horizon=h,
-            total=total,
-            correct=correct,
-            expected_return=expected_return,
-            median_return=median_return,
-            downside_q10=downside_q10,
-            upside_q90=upside_q90,
-            ev_proxy=ev_proxy,
-        )
+        result[h] = HorizonAccuracy(horizon=h, total=total, correct=correct)
     return result
 
 
@@ -1694,14 +1178,6 @@ def _today_start_ms() -> int:
     return int(window_start.timestamp() * 1000)
 
 
-def _local_today_start_ms() -> int:
-    tz_name = str(getattr(config, "LOCAL_TIMEZONE", "Europe/Budapest"))
-    tz = ZoneInfo(tz_name)
-    now_local = datetime.now(timezone.utc).astimezone(tz)
-    start_local = datetime.combine(now_local.date(), dt_time.min, tzinfo=tz)
-    return int(start_local.astimezone(timezone.utc).timestamp() * 1000)
-
-
 def _find_today_start(timestamps: np.ndarray) -> int:
     """Индекс первого бара начиная с 00:00 UTC сегодня."""
     today_ms = _today_start_ms()
@@ -1709,14 +1185,6 @@ def _find_today_start(timestamps: np.ndarray) -> int:
         if int(t) >= today_ms:
             return i
     return len(timestamps) - 1  # fallback: последний бар
-
-
-def _find_local_today_start(timestamps: np.ndarray) -> int:
-    today_ms = _local_today_start_ms()
-    for i, t in enumerate(timestamps):
-        if int(t) >= today_ms:
-            return i
-    return len(timestamps) - 1
 
 
 # ── Main analysis ──────────────────────────────────────────────────────────────
@@ -1740,7 +1208,6 @@ def analyze_coin(
 
     # ── Найти начало сегодняшнего дня ─────────────────────────────────────────
     today_start = _find_today_start(data["t"])
-    local_today_start = _find_local_today_start(data["t"])
     # Убедиться что прогрев индикаторов уже завершён к началу дня
     today_start = max(today_start, warmup)
 
@@ -1762,15 +1229,15 @@ def analyze_coin(
     if eval_end >= today_start:
         today_eval_signals = [
             i for i in range(today_start, eval_end + 1)
-            if check_entry_conditions(feat, i, c, tf=tf)[0]
-            or check_alignment_conditions(feat, i, tf=tf)[0]
+            if check_entry_conditions(feat, i, c)[0]
+            or check_alignment_conditions(feat, i)[0]
         ]
 
     # Все сигналы сегодня (включая последние, ещё не оценимые)
     today_all_signals: List[int] = [
         i for i in range(today_start, i_now + 1)  # включаем последнюю закрытую свечу
-        if check_entry_conditions(feat, i, c, tf=tf)[0]
-        or check_alignment_conditions(feat, i, tf=tf)[0]
+        if check_entry_conditions(feat, i, c)[0]
+        or check_alignment_conditions(feat, i)[0]
     ]
 
     # ── Форвард-тест на сегодняшних данных ───────────────────────────────────
@@ -1778,57 +1245,34 @@ def analyze_coin(
 
     if len(today_eval_signals) >= config.TODAY_MIN_SIGNALS:
         today_acc = _forward_accuracy(today_eval_signals, c)
-        acc_pct   = {h: fa.pct for h, fa in today_acc.items() if fa.total > 0}
-
+        acc_pct   = {h: fa.pct for h, fa in today_acc.items()
+                     if fa.total > 0}
         if acc_pct:
             best_h   = max(acc_pct, key=acc_pct.get)
             best_acc = acc_pct[best_h]
-
+            # Требуем:
+            # 1. Лучший горизонт ≥ MIN_ACCURACY (60%)
+            # 2. T+3 ≥ TODAY_T3_MIN (60%) — вход краткосрочно работает
+            # 3. T+10 ≥ TODAY_T10_MIN (40%) — стратегия не убыточна на длинном горизонте
             t3  = today_acc.get(3)
             t10 = today_acc.get(10)
-
-            # ── Win% фильтры (как раньше) ─────────────────────────────────────
+            t3_ok  = t3.pct  >= config.TODAY_T3_MIN  if t3  and t3.total  > 0 else False
             # T+10: если оценок < 2 — не блокируем (рано утром ещё нет данных)
+            # если оценок ≥ 2 — требуем ≥ TODAY_T10_MIN (защита от DYDX-проблемы)
             if t10 and t10.total >= 2:
                 t10_ok = t10.pct >= config.TODAY_T10_MIN
             else:
-                t10_ok = True
-
-            # ── Expectancy фильтр (новый) ─────────────────────────────────────
-            # Стратегия должна иметь положительное ожидание хотя бы на одном горизонте.
-            # Это отсекает "точные но бесполезные" сигналы (EV < 0 несмотря на win%>50%).
-            # EV_MIN_PCT: мин. ожидаемый доход в %. По умолчанию 0.0 (просто > 0).
-            # Увеличить до 0.05% когда будет достаточно данных для калибровки.
-            ev_min  = getattr(config, "EV_MIN_PCT", 0.0)
-            ev_bars = getattr(config, "EV_MIN_SAMPLES", 3)   # мин. баров для EV-проверки
-
-            ev_ok_any = False
-            ev_detail: List[str] = []
-            for h, fa in today_acc.items():
-                if fa.total >= ev_bars and fa.expected_return is not None:
-                    if fa.expected_return > ev_min:
-                        ev_ok_any = True
-                    ev_detail.append(f"T+{h} EV={fa.expected_return:+.2f}%")
-
-            # Если данных для EV ещё мало — не блокируем (как t10 утром)
-            if not ev_detail:
-                ev_ok = True   # нет данных — не блокируем
-            else:
-                ev_ok = ev_ok_any
-
-            confirmed = best_acc >= config.MIN_ACCURACY and t10_ok and ev_ok
-
-            # Формируем диагностическое сообщение
-            ev_note = f"  [{', '.join(ev_detail)}]" if ev_detail else ""
-            note = (
-                f"Сегодня {len(today_eval_signals)} сигн., подтверждено{ev_note}"
-                if confirmed else
-                f"Сегодня {len(today_eval_signals)} сигн., не подтверждено{ev_note}"
-            )
+                t10_ok = True  # слишком мало данных чтобы судить
+            confirmed = best_acc >= config.MIN_ACCURACY and t10_ok
         else:
             best_h = best_acc = 0
             confirmed = False
-            note = f"Сегодня {len(today_eval_signals)} сигн., нет оценок"
+
+        note = (
+            f"Сегодня {len(today_eval_signals)} сигн., точность подтверждена"
+            if confirmed else
+            f"Сегодня {len(today_eval_signals)} сигн., точность недостаточна"
+        )
     else:
         today_acc = empty_acc
         best_h    = 0
@@ -1848,10 +1292,10 @@ def analyze_coin(
     signal_mode    = ""
 
     if i_now >= warmup:
-        buy_ok, buy_reason = check_entry_conditions(feat, i_now, c, tf=tf)
+        buy_ok, buy_reason = check_entry_conditions(feat, i_now, c)
         if buy_ok:
             signal_now  = True
-            signal_mode, _ = get_effective_entry_mode(feat, i_now, c, tf=tf)
+            signal_mode = get_entry_mode(feat, i_now)  # "trend" или "strong_trend"
         else:
             # П7: проверяем RETEST
             retest_ok, _ = check_retest_conditions(feat, i_now)
@@ -1875,8 +1319,8 @@ def analyze_coin(
                         no_signal_reason = ""
                     else:
                         # ALIGNMENT: плавный тренд, ADX не требуется совсем
-                        aln_ok, aln_reason = check_alignment_conditions(feat, i_now, tf=tf)
-                        if aln_ok:
+                        aln_ok, aln_reason = check_alignment_conditions(feat, i_now)
+                        if aln_ok and bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False)):
                             signal_now       = True
                             signal_mode      = "alignment"
                             no_signal_reason = ""
@@ -1887,18 +1331,6 @@ def analyze_coin(
     setup_now, setup_reason, setup_missing = (False, "", 99)
     if not signal_now and i_now >= warmup:
         setup_now, setup_reason, setup_missing = check_setup_conditions(feat, i_now, c)
-
-    forecast_candidates = [
-        float(fa.expected_return)
-        for fa in today_acc.values()
-        if fa.total > 0 and fa.expected_return is not None
-    ]
-    forecast_return_pct = max(forecast_candidates) if forecast_candidates else 0.0
-
-    local_open_idx = min(max(local_today_start, 0), i_now)
-    local_open_price = float(c[local_open_idx]) if len(c) and local_open_idx < len(c) else 0.0
-    current_close = float(c[i_now]) if len(c) and i_now < len(c) else 0.0
-    today_change_pct = (current_close / local_open_price - 1.0) * 100.0 if local_open_price > 0 else 0.0
 
     def _safe(arr, idx):
         v = arr[idx] if idx < len(arr) else np.nan
@@ -1926,8 +1358,6 @@ def analyze_coin(
         setup_reason=setup_reason,
         setup_missing_count=setup_missing,
         signal_mode=signal_mode,
-        forecast_return_pct=forecast_return_pct,
-        today_change_pct=today_change_pct,
     )
 
 
@@ -1945,11 +1375,13 @@ async def _run_analysis(
             for sym in symbols
             for tf in config.TIMEFRAMES
         ]
-        for sym, tf, task in tasks:
+        for idx, (sym, tf, task) in enumerate(tasks):
             data = await task
             if data is None:
                 continue
-            all_reports.append(analyze_coin(sym, tf, data, from_scan=from_scan))
+            all_reports.append(await run_cpu(analyze_coin, sym, tf, data, from_scan))
+            if idx % 12 == 0:
+                await asyncio.sleep(0)
 
     # Лучший таймфрейм на монету.
     # Приоритет (по убыванию важности):
@@ -1957,13 +1389,7 @@ async def _run_analysis(
     #   2. signal_now      — активный сигнал прямо сейчас (важно для ⚡ секции)
     #   3. best_accuracy   — наибольшая точность среди оставшихся
     def _report_key(r: "CoinReport"):
-        return (
-            r.today_confirmed,
-            r.signal_now,
-            _signal_priority(r.signal_mode),
-            r.today_signals,
-            r.best_accuracy,
-        )
+        return (r.today_confirmed, r.signal_now, r.today_signals, r.best_accuracy)
 
     best: Dict[str, CoinReport] = {}
     for r in all_reports:
