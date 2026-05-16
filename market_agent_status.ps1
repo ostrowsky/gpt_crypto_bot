@@ -1,3 +1,6 @@
+param(
+    [switch]$FailIfNotRunning
+)
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -54,7 +57,7 @@ if ($runtime -and $runtime.worker -and $runtime.worker.last_heartbeat) {
 
 $running = [bool]$proc -or $heartbeatFresh
 
-[pscustomobject]@{
+$statusObj = [pscustomobject]@{
     Running   = $running
     PythonPid = if ($pythonPid -gt 0) { $pythonPid } else { 0 }
     WrapperPid = if ($wrapperPid -gt 0) { $wrapperPid } else { 0 }
@@ -62,4 +65,10 @@ $running = [bool]$proc -or $heartbeatFresh
     Stdout    = if ($state) { $state.stdout } else { $null }
     Stderr    = if ($state) { $state.stderr } else { $null }
     StatusFile = $statusFile
-} | Format-List
+}
+
+$statusObj | Format-List
+
+if ($FailIfNotRunning -and -not $statusObj.Running) {
+    exit 1
+}

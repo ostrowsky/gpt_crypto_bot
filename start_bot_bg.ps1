@@ -16,6 +16,7 @@ $pidFile = Join-Path $runtimeDir "bot_bg.json"
 $runnerFile = Join-Path $runtimeDir "bot_bg_runner.cmd"
 $launcherLog = Join-Path $runtimeDir "start_bot_bg.log"
 $envFile = Join-Path $workdir ".env"
+$lockFile = Join-Path $workdir "bot.lock"
 
 if (-not (Test-Path $runtimeDir)) {
     New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
@@ -75,6 +76,28 @@ function Read-TailText {
     }
 }
 
+function Test-IsBotPid {
+    param([int]$TargetPid)
+    if (-not $TargetPid -or $TargetPid -le 0) {
+        return $false
+    }
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $TargetPid"
+        if (-not $proc) {
+            return $false
+        }
+        if ($proc.ExecutablePath -and ($proc.ExecutablePath -ne $python)) {
+            return $false
+        }
+        if ($proc.CommandLine -and ($proc.CommandLine -notmatch [regex]::Escape($botScript))) {
+            return $false
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Get-TokenFromEnvFile {
     param([string]$Path)
     if (-not (Test-Path $Path)) {
@@ -112,6 +135,35 @@ function Stop-StaleWrapper {
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
+function Read-LockPid {
+    if (-not (Test-Path $lockFile)) {
+        return 0
+    }
+    try {
+        return [int](Get-Content $lockFile -Raw).Trim()
+    } catch {
+        return 0
+    }
+}
+
+function Stop-LockPid {
+    param([int]$TargetPid)
+    if (-not $TargetPid -or $TargetPid -le 0) {
+        return
+    }
+    if (-not (Test-IsBotPid -TargetPid $TargetPid)) {
+        Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+        return
+    }
+    try {
+        $proc = Get-Process -Id $TargetPid -ErrorAction Stop
+        Stop-Process -Id $TargetPid -Force -ErrorAction SilentlyContinue
+    } catch {
+        # ignore
+    }
+    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+}
+
 if (-not $Token) {
     $Token = Get-TokenFromEnvFile -Path $envFile
 }
@@ -131,6 +183,18 @@ if ($existing.Count -gt 0) {
     $existing | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
+$lockPid = Read-LockPid
+if ($lockPid -gt 0) {
+    if (-not $ForceRestart) {
+        [pscustomobject]@{
+            PythonPid = $lockPid
+            Note = "bot.lock exists"
+        } | Format-List
+        exit 0
+    }
+    Stop-LockPid -TargetPid $lockPid
+}
+
 Stop-StaleWrapper
 Start-Sleep -Seconds 1
 
@@ -139,6 +203,7 @@ Remove-Item $stderr -Force -ErrorAction SilentlyContinue
 Remove-Item $launcherLog -Force -ErrorAction SilentlyContinue
 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 Remove-Item $runnerFile -Force -ErrorAction SilentlyContinue
+Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 
 $env:TELEGRAM_BOT_TOKEN = $Token
 $env:PYTHONNOUSERSITE = "1"
@@ -150,7 +215,6 @@ $runnerLines = @(
     "@echo off",
     "set PYTHONUTF8=",
     "set PYTHONNOUSERSITE=1",
-    "set TELEGRAM_BOT_TOKEN=$Token",
     "cd /d $workdir",
     """$python"" ""$botScript"" 1>>""$stdout"" 2>>""$stderr"""
 )

@@ -1,3 +1,6 @@
+param(
+    [switch]$FailIfNotRunning
+)
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -86,7 +89,7 @@ if (Test-Path $wrapperHeartbeatFile) {
     }
 }
 
-[pscustomobject]@{
+$statusObj = [pscustomobject]@{
     Running = [bool]($worker -or $freshHeartbeat -or $freshWrapperHeartbeat)
     PythonPid = if ($worker) { $worker.Id } else { $null }
     Started = if ($worker) { $worker.StartTime } else { $null }
@@ -94,7 +97,9 @@ if (Test-Path $wrapperHeartbeatFile) {
     Stdout = $stdout
     Stderr = $stderr
     StatusFile = $statusFile
-} | Format-List
+}
+
+$statusObj | Format-List
 
 if ($status) {
     Write-Host ""
@@ -106,4 +111,8 @@ if (Test-Path $stderr) {
     Write-Host ""
     Write-Host "stderr tail:"
     Get-Content $stderr -Tail 20
+}
+
+if ($FailIfNotRunning -and -not $statusObj.Running) {
+    exit 1
 }

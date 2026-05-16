@@ -209,7 +209,6 @@ def _load_telegram_token() -> str:
 
 
 def _handle_run_trade_bot(job: dict[str, Any]) -> JobResult:
-    token = _load_telegram_token()
     pid_file = ROOT / ".runtime" / "bot_bg.json"
     launcher_log = ROOT / ".runtime" / "start_bot_bg.log"
     cmd = [
@@ -219,8 +218,6 @@ def _handle_run_trade_bot(job: dict[str, Any]) -> JobResult:
         "Bypass",
         "-File",
         str(ROOT / "start_bot_bg.ps1"),
-        "-Token",
-        token,
     ]
     result = _run_sync(cmd, cwd=ROOT, timeout=120)
 
