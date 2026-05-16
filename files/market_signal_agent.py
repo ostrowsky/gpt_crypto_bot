@@ -147,6 +147,7 @@ POSITIONS_FILE = Path("agent_positions.json")
 CHAT_IDS_FILE = Path(".chat_ids")
 STATE_FILE = Path(".runtime") / "market_agent_state.json"
 STATUS_FILE = Path(".runtime") / "market_agent_status.json"
+_SOFT_BLOCK_WATCH_ALERT_DAY: Dict[str, str] = {}
 
 
 def _unified_portfolio_limit() -> int:
@@ -590,6 +591,12 @@ def _next_local_day_start_utc_ms(ts_ms: int) -> int:
     return int(next_local.astimezone(timezone.utc).timestamp() * 1000)
 
 
+def _local_day_key(ts_ms: int) -> str:
+    if ts_ms <= 0:
+        return ""
+    return datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
+
+
 def _today_change_pct_from_data(data, c: np.ndarray, i: int) -> float:
     if i < 0 or i >= len(c):
         return 0.0
@@ -765,6 +772,9 @@ def _four_h_leader_watch_reason(
     min_vol = float(getattr(config, "AGENT_4H_LEADER_MIN_VOL_X", 0.65))
     if vol_x < min_vol:
         return f"vol_x {vol_x:.2f} < {min_vol:.2f}"
+    strength_reason = _four_h_leader_strength_reason(today_change_pct=today_change_pct, vol_x=vol_x)
+    if strength_reason:
+        return strength_reason
     min_macd = float(getattr(config, "AGENT_4H_LEADER_MIN_MACD_HIST", 0.0))
     if macd_hist <= min_macd:
         return f"MACD hist {macd_hist:.6g} <= {min_macd:.6g}"
@@ -784,6 +794,21 @@ def _four_h_leader_watch_reason(
     controlled_pullback = price_edge <= pullback_max
     if not (fresh_close or controlled_pullback):
         return "no fresh 15m/1h reclaim or controlled pullback"
+    return ""
+
+
+def _four_h_leader_strength_reason(*, today_change_pct: float, vol_x: float) -> str:
+    if not bool(getattr(config, "AGENT_4H_LEADER_STRENGTH_GATE_ENABLED", True)):
+        return ""
+    min_today = float(getattr(config, "AGENT_4H_LEADER_STRENGTH_MIN_TODAY_CHANGE_PCT", 10.0))
+    min_vol = float(getattr(config, "AGENT_4H_LEADER_STRENGTH_MIN_VOL_X", 3.0))
+    missing: list[str] = []
+    if today_change_pct < min_today:
+        missing.append(f"today {today_change_pct:.2f}% < {min_today:.2f}%")
+    if vol_x < min_vol:
+        missing.append(f"vol_x {vol_x:.2f} < {min_vol:.2f}")
+    if missing:
+        return "4h leader strength gate: " + ", ".join(missing)
     return ""
 
 
@@ -832,11 +857,19 @@ def _candidate_block_reason(
             return f"RSI {rsi:.1f} < {min_rsi:.1f}"
         if rsi > max_rsi:
             return f"RSI {rsi:.1f} > {max_rsi:.1f}"
+        strength_reason = _four_h_leader_strength_reason(today_change_pct=today_change_pct, vol_x=vol_x)
+        if strength_reason:
+            return strength_reason
         return ""
     if daily_range > float(getattr(config, "AGENT_MAX_DAILY_RANGE_PCT", 14.0)):
         return f"daily range {daily_range:.2f}% > {float(getattr(config, 'AGENT_MAX_DAILY_RANGE_PCT', 14.0)):.2f}%"
-    if adx < float(getattr(config, "AGENT_MIN_ADX", 18.0)):
-        return f"ADX {adx:.1f} < {float(getattr(config, 'AGENT_MIN_ADX', 18.0)):.1f}"
+    min_adx = float(
+        getattr(config, "AGENT_TREND_MIN_ADX", 35.0)
+        if mode == "trend"
+        else getattr(config, "AGENT_MIN_ADX", 18.0)
+    )
+    if adx < min_adx:
+        return f"ADX {adx:.1f} < {min_adx:.1f}"
     if vol_x < float(getattr(config, "AGENT_MIN_VOL_X", 1.0)):
         return f"vol_x {vol_x:.2f} < {float(getattr(config, 'AGENT_MIN_VOL_X', 1.0)):.2f}"
     if rsi > float(getattr(config, "AGENT_MAX_RSI", 72.5)):
@@ -849,6 +882,77 @@ def _candidate_block_reason(
         if float(getattr(report, "best_accuracy", 0.0)) < min_accuracy:
             return f"best accuracy {float(getattr(report, 'best_accuracy', 0.0)):.1f} < {min_accuracy:.1f}"
     return ""
+
+
+def _agent_soft_block_watch_rule(
+    *,
+    reason: str,
+    rsi: float,
+    adx: float,
+    vol_x: float,
+    daily_range: float,
+) -> str:
+    if not getattr(config, "AGENT_SOFT_BLOCK_WATCH_ALERTS_ENABLED", False):
+        return ""
+    if (
+        reason.startswith("RSI ")
+        and rsi <= float(getattr(config, "AGENT_SOFT_BLOCK_RSI_MAX", 75.0))
+        and vol_x >= float(getattr(config, "AGENT_SOFT_BLOCK_RSI_MIN_VOL_X", 3.0))
+    ):
+        return "rsi_high_volume"
+    if (
+        reason == "agent mode disabled: impulse"
+        and adx >= float(getattr(config, "AGENT_SOFT_BLOCK_IMPULSE_MIN_ADX", 15.0))
+        and rsi <= float(getattr(config, "AGENT_SOFT_BLOCK_IMPULSE_MAX_RSI", 75.0))
+        and vol_x >= float(getattr(config, "AGENT_SOFT_BLOCK_IMPULSE_MIN_VOL_X", 2.0))
+    ):
+        return "impulse_mode_watch"
+    if reason.startswith("daily range ") and daily_range <= float(
+        getattr(config, "AGENT_SOFT_BLOCK_DAILY_RANGE_MAX_PCT", 20.0)
+    ):
+        return "daily_range_watch"
+    return ""
+
+
+async def _maybe_send_soft_block_watch_alert(
+    session: aiohttp.ClientSession,
+    *,
+    symbol: str,
+    tf: str,
+    mode: str,
+    price: float,
+    reason: str,
+    rsi: float,
+    adx: float,
+    vol_x: float,
+    daily_range: float,
+    bar_ts: int,
+) -> None:
+    rule = _agent_soft_block_watch_rule(
+        reason=reason,
+        rsi=rsi,
+        adx=adx,
+        vol_x=vol_x,
+        daily_range=daily_range,
+    )
+    if not rule:
+        return
+    key = f"{symbol}|{tf}|{rule}"
+    day_key = _local_day_key(bar_ts)
+    if _SOFT_BLOCK_WATCH_ALERT_DAY.get(key) == day_key:
+        return
+    _SOFT_BLOCK_WATCH_ALERT_DAY[key] = day_key
+    await _send_telegram(
+        session,
+        "WATCH ONLY - agent soft-block candidate\n\n"
+        f"{symbol}  [{tf}]  {mode}\n"
+        f"Price: {price:.6g}\n"
+        f"RSI: {rsi:.1f}  ADX: {adx:.1f}  Vol x: {vol_x:.2f}\n"
+        f"Daily range: {daily_range:.2f}%\n"
+        f"Blocked: {reason}\n"
+        f"Rule: {rule}\n"
+        "No position opened.",
+    )
 
 
 def _determine_signal_mode(
@@ -1120,6 +1224,22 @@ async def _entry_candidate(
             vol_x=vol_x,
             daily_range=daily_range,
         )
+        try:
+            await _maybe_send_soft_block_watch_alert(
+                session,
+                symbol=symbol,
+                tf=tf,
+                mode=mode,
+                price=price,
+                reason=block_reason,
+                rsi=rsi,
+                adx=adx,
+                vol_x=vol_x,
+                daily_range=daily_range,
+                bar_ts=int(data["t"][i]),
+            )
+        except Exception as exc:
+            log.warning("agent soft-block watch alert failed for %s [%s]: %s", symbol, tf, exc)
         return None
 
     trail_k, max_hold_bars = _entry_params(mode, tf)
