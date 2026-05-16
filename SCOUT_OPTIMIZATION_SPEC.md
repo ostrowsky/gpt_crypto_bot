@@ -198,6 +198,39 @@ Governance rule:
 - evaluator/scout findings may now become ranked hypotheses automatically;
 - they still cannot mutate production behavior until a dedicated replay/backtest gate confirms the change.
 
+## 2026-05-16 Trend-Start Research Mode
+
+Problem confirmed on `ATOMUSDT`:
+- live scout/shadow layers noticed the developing move before the external reference bot;
+- the production BUY path still rejected it because the same-day top-gainer score was not yet mature enough.
+
+Rejected implementation:
+- a direct `impulse_speed` bypass conditioned on early structural strength;
+- 30d replay rejected both broad and strict variants because they increased trade count materially and turned a positive baseline PnL negative.
+
+Approved next step:
+- research `trend_start` as a separate replay-only mode with its own contract and metrics;
+- do not weaken `TOP_GAINER_SCORE_GATE_MIN_SCORE`;
+- do not promote `trend_start` to live until it improves early capture without damaging 30d PnL/precision.
+
+Detailed mode contract: `docs/specs/trend-start-mode.md`.
+
+Implementation note:
+- while building the replay-only mode, `files/replay_backtest.py` exposed a metric bug:
+  `intraday_change_pct` was silently falling back to `0.0` for structured numpy arrays;
+- this has been fixed before evaluating new profiles, so post-fix replay results supersede earlier
+  top-gainer-gate conclusions that depended on the broken intraday metric.
+
+First profile result:
+- 7d: `302 -> 295` trades, PnL `-74.16% -> -90.82%`, capture stayed `100%`;
+- 30d: `1618 -> 1592` trades, PnL `-259.00% -> -294.97%`, capture stayed `100%`;
+- average capture ratio improved only marginally on 30d (`0.2268 -> 0.2319`).
+
+Decision:
+- reject the first `trend_start` profile;
+- keep the mode replay-only;
+- next profiles must be narrower and explicitly additive versus the corrected baseline.
+
 ## Near-Term Plan
 1. Day 1: Done for requested metric-only fields: `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `exit_efficiency`, `giveback_pct`, and `cooldown_harm_pct`.
 2. Day 1-2: Build a daily trend-start audit table that lists first structural alert, first BUY, first block, and final top15 status per symbol/day.

@@ -438,7 +438,7 @@ def _mtf_relaxed_1h_candidate_ok(
         getattr(
             config,
             "MTF_1H_CONTINUATION_RELAX_MODES",
-            ("alignment", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("alignment", "trend_start", "trend", "strong_trend", "impulse_speed", "impulse"),
         )
     ):
         return False
@@ -591,6 +591,72 @@ def _entry_candidate(feat: dict, i: int, c: np.ndarray, tf: str) -> Optional[Tup
     return None
 
 
+def _trend_start_replay_candidate(
+    feat: dict,
+    data: np.ndarray,
+    i: int,
+    c: np.ndarray,
+    tf: str,
+) -> Optional[Tuple[str, float, int, bool]]:
+    if tf != "15m" or i <= 1:
+        return None
+
+    ema20_arr = feat.get("ema20", feat.get("ema_fast"))
+    ema_slow_arr = feat.get("ema_slow")
+    slope_arr = feat.get("ema20_slope", feat.get("slope"))
+    macd_hist_arr = feat.get("macd_hist")
+    if any(arr is None for arr in (ema20_arr, ema_slow_arr, slope_arr, macd_hist_arr)):
+        return None
+    if not all(np.isfinite(arr[i]) for arr in (ema20_arr, ema_slow_arr, slope_arr, macd_hist_arr)):
+        return None
+
+    price = float(c[i])
+    ema20 = float(ema20_arr[i])
+    ema_slow = float(ema_slow_arr[i])
+    slope = float(slope_arr[i])
+    slope_prev = float(slope_arr[i - 1]) if np.isfinite(slope_arr[i - 1]) else slope
+    macd_hist = float(macd_hist_arr[i])
+    adx = float(feat["adx"][i]) if np.isfinite(feat["adx"][i]) else 0.0
+    rsi = float(feat["rsi"][i]) if np.isfinite(feat["rsi"][i]) else 50.0
+    vol_x = float(feat["vol_x"][i]) if np.isfinite(feat["vol_x"][i]) else 0.0
+    intraday_change_pct = _intraday_change_pct_from_data(data, i)
+    if price <= 0 or ema20 <= 0 or ema_slow <= 0:
+        return None
+
+    price_edge = ((price / ema20) - 1.0) * 100.0
+    ema_sep_pct = ((ema20 / ema_slow) - 1.0) * 100.0
+    recent_high = float(np.max(data["h"][max(0, i - 10):i])) if i > 0 else price
+    recent_high_gap_pct = ((recent_high / price) - 1.0) * 100.0 if recent_high > 0 else 0.0
+
+    if intraday_change_pct < 0.35:
+        return None
+    if slope < 0.12 or slope < slope_prev:
+        return None
+    if adx < 14.0 or adx > 28.0:
+        return None
+    if rsi < 52.0 or rsi > 70.0:
+        return None
+    if vol_x < 1.10:
+        return None
+    if ema_sep_pct < -0.18:
+        return None
+    if price_edge < -0.10 or price_edge > 1.80:
+        return None
+    if recent_high_gap_pct > 1.10:
+        return None
+    if price < ema20 * 0.998:
+        return None
+    if macd_hist < price * -0.00008:
+        return None
+
+    return (
+        "trend_start",
+        float(getattr(config, "ATR_TRAIL_K", 2.0)),
+        int(getattr(config, "MAX_HOLD_BARS_15M", 48)),
+        False,
+    )
+
+
 def _is_fresh_priority_mode(mode: str) -> bool:
     priority_modes = tuple(
         getattr(config, "FRESH_SIGNAL_PRIORITY_MODES", ("breakout", "retest", "impulse_speed", "impulse"))
@@ -646,7 +712,7 @@ def _time_block_1h_continuation_profile(
         getattr(
             config,
             "TIME_BLOCK_BYPASS_1H_CONTINUATION_MODES",
-            ("alignment", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("alignment", "trend_start", "trend", "strong_trend", "impulse_speed", "impulse"),
         )
     )
     if mode not in allowed_modes:
@@ -708,7 +774,7 @@ def _time_block_1h_prebypass_allowed(
         getattr(
             config,
             "TIME_BLOCK_BYPASS_1H_PREBYPASS_MODES",
-            ("alignment", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("alignment", "trend_start", "trend", "strong_trend", "impulse_speed", "impulse"),
         )
     )
     if mode not in allowed_modes or not continuation_profile:
@@ -787,7 +853,11 @@ def _late_impulse_speed_rotation_reason(
 
 def _intraday_change_pct_from_data(data: dict, i: int) -> float:
     try:
-        t_arr = data.get("t")
+        if isinstance(data, dict):
+            t_arr = data.get("t")
+        else:
+            names = getattr(getattr(data, "dtype", None), "names", ()) or ()
+            t_arr = data["t"] if "t" in names else None
         try:
             c_arr = data["c"]
         except Exception:
@@ -827,7 +897,7 @@ def _top_gainer_objective_gate_reason(
         for x in getattr(
             config,
             "TOP_GAINER_OBJECTIVE_GATE_MODES",
-            ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse"),
+            ("breakout", "retest", "trend_start", "trend", "strong_trend", "impulse_speed", "impulse"),
         )
     )
     if allowed_modes and mode not in allowed_modes:
@@ -836,7 +906,7 @@ def _top_gainer_objective_gate_reason(
     min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_MIN_INTRADAY_CHANGE_PCT", 0.35))
     if mode == "retest":
         min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_RETEST_MIN_INTRADAY_CHANGE_PCT", 0.75))
-    elif mode in ("trend", "strong_trend", "impulse_speed", "impulse"):
+    elif mode in ("trend_start", "trend", "strong_trend", "impulse_speed", "impulse"):
         min_change = float(getattr(config, "TOP_GAINER_OBJECTIVE_MOMENTUM_MIN_INTRADAY_CHANGE_PCT", 1.0))
 
     strong_score = candidate_score >= float(getattr(config, "TOP_GAINER_OBJECTIVE_STRONG_SCORE_BYPASS", 115.0))
@@ -879,7 +949,7 @@ def _continuation_profit_lock_active(
         getattr(
             config,
             "CONTINUATION_PROFIT_LOCK_MODES",
-            ("trend", "alignment", "strong_trend", "impulse_speed", "impulse"),
+            ("trend_start", "trend", "alignment", "strong_trend", "impulse_speed", "impulse"),
         )
     )
     if mode not in allowed_modes:
@@ -915,7 +985,7 @@ def _continuation_micro_exit_signal(
         getattr(
             config,
             "CONTINUATION_MICRO_EXIT_MODES",
-            ("trend", "alignment", "strong_trend", "impulse_speed", "impulse"),
+            ("trend_start", "trend", "alignment", "strong_trend", "impulse_speed", "impulse"),
         )
     )
     if mode not in allowed_modes:
@@ -1021,7 +1091,7 @@ def _trend_hold_weak_exit_active(
         return False
     if trade.tf not in tuple(getattr(config, "TREND_HOLD_WEAK_EXIT_TF", ("15m",))):
         return False
-    if trade.mode not in tuple(getattr(config, "TREND_HOLD_WEAK_EXIT_MODES", ("impulse_speed", "trend", "alignment"))):
+    if trade.mode not in tuple(getattr(config, "TREND_HOLD_WEAK_EXIT_MODES", ("impulse_speed", "trend_start", "trend", "alignment"))):
         return False
     if int(trade.bars_held) < int(getattr(config, "TREND_HOLD_WEAK_EXIT_MIN_BARS", 5)):
         return False
@@ -1058,7 +1128,7 @@ def _trend_hold_weak_exit_active(
 
 def _cooldown_bars_after_exit(mode: str, reason: Optional[str]) -> int:
     base = int(getattr(config, "COOLDOWN_BARS", 8))
-    if _is_weak_exit_reason(reason) and mode in ("trend", "alignment"):
+    if _is_weak_exit_reason(reason) and mode in ("trend_start", "trend", "alignment"):
         return max(base, int(getattr(config, "WEAK_REENTRY_COOLDOWN_BARS", base)))
     return base
 
@@ -1341,7 +1411,7 @@ def _top_gainer_replay_score(
     score += max(0.0, min(14.0, (adx - 18.0) * 0.7))
     score += max(-8.0, min(12.0, ranker_final_score * 6.0))
     score += max(0.0, min(18.0, ranker_top_gainer_prob * 45.0))
-    if mode in ("impulse_speed", "strong_trend", "trend", "impulse"):
+    if mode in ("trend_start", "impulse_speed", "strong_trend", "trend", "impulse"):
         score += 5.0
     elif mode in ("breakout", "retest"):
         score += 1.5
@@ -1361,7 +1431,7 @@ def _signal_cluster_bucket_replay(tf: str, mode: str) -> str:
         return "15m_short_bounce"
     if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES", ("impulse_speed",)):
         return "15m_impulse"
-    if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MODES", ("trend", "strong_trend", "impulse")):
+    if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MODES", ("trend_start", "trend", "strong_trend", "impulse")):
         return "15m_momentum"
     if tf == "15m" and mode in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MODES", ("alignment",)):
         return "15m_alignment"
@@ -1453,6 +1523,8 @@ async def _build_candidates_for_symbol(
     cache_15m: Dict[str, Tuple[np.ndarray, dict]],
     cache_4h: Dict[str, Tuple[np.ndarray, dict]],
     market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
+    *,
+    include_trend_start: bool = False,
 ) -> List[ReplayCandidate]:
     candidates: List[ReplayCandidate] = []
     c = data["c"].astype(float)
@@ -1469,7 +1541,8 @@ async def _build_candidates_for_symbol(
             config._bull_day_active = is_bull_day
             config._btc_vs_ema50 = btc_vs_ema50
 
-            picked = _entry_candidate(feat, i, c, tf)
+            picked = _trend_start_replay_candidate(feat, data, i, c, tf) if include_trend_start else None
+            picked = picked or _entry_candidate(feat, i, c, tf)
             if picked is None:
                 continue
             mode, trail_k, max_hold, early_15m_continuation = picked
@@ -2180,7 +2253,16 @@ async def simulate_portfolio(
                 continue
             data, feat = pack
             timestamps.update(int(x) for x in data["t"][max(25, 5):])
-            built = await _build_candidates_for_symbol(sym, tf, data, feat, cache_15m, cache_4h, market_ctx)
+            built = await _build_candidates_for_symbol(
+                sym,
+                tf,
+                data,
+                feat,
+                cache_15m,
+                cache_4h,
+                market_ctx,
+                include_trend_start=variant == "trend_start",
+            )
             stats.candidates_total += len(built)
             for candidate in built:
                 candidates_by_ts.setdefault(candidate.ts_ms, []).append(candidate)
@@ -2228,7 +2310,7 @@ async def simulate_portfolio(
         if not ts_candidates:
             continue
 
-        use_top_gainer_score = variant in {"score", "score_replace", "score_replace_cluster"}
+        use_top_gainer_score = variant in {"score", "score_replace", "score_replace_cluster", "trend_start"}
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
             key=lambda item: (
@@ -2726,7 +2808,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replace-min-delta", type=float, default=getattr(config, "PORTFOLIO_REPLACE_MIN_DELTA", 8.0))
     parser.add_argument(
         "--variant",
-        choices=["baseline", "score", "score_replace", "score_replace_cluster"],
+        choices=["baseline", "score", "score_replace", "score_replace_cluster", "trend_start"],
         default="score_replace",
     )
     parser.add_argument("--top-gainer-score-min", type=float, default=18.0)
