@@ -4724,7 +4724,20 @@ async def _poll_coin(
                     bot_action="blocked",
                     reason=chase_guard_reason,
                 )
-                botlog.log_blocked(sym, tf, float(c[i]), chase_guard_reason, signal_type="top_gainer_chase_guard")
+                botlog.log_blocked(
+                    sym,
+                    tf,
+                    float(c[i]),
+                    chase_guard_reason,
+                    signal_type="top_gainer_chase_guard",
+                    candidate_score=round(candidate_score, 4),
+                    score_floor=round(score_floor, 4),
+                    base_score=round(base_score, 4),
+                    ml_proba=None if ml_proba is None else round(float(ml_proba), 6),
+                    ranker_proba=ranker_proba,
+                    today_change_pct=round(float(getattr(report, "today_change_pct", 0.0)), 4),
+                    forecast_return_pct=round(float(getattr(report, "forecast_return_pct", 0.0)), 4),
+                )
                 return
             intraday_change_pct_now = _intraday_change_pct_from_data(data, i)
             objective_gate_reason = _top_gainer_objective_gate_reason(
@@ -4775,7 +4788,20 @@ async def _poll_coin(
                     bot_action="blocked",
                     reason=objective_gate_reason,
                 )
-                botlog.log_blocked(sym, tf, float(c[i]), objective_gate_reason, signal_type="top_gainer_objective_gate")
+                botlog.log_blocked(
+                    sym,
+                    tf,
+                    float(c[i]),
+                    objective_gate_reason,
+                    signal_type="top_gainer_objective_gate",
+                    candidate_score=round(candidate_score, 4),
+                    score_floor=round(score_floor, 4),
+                    base_score=round(base_score, 4),
+                    ml_proba=None if ml_proba is None else round(float(ml_proba), 6),
+                    ranker_proba=ranker_proba,
+                    today_change_pct=round(float(getattr(report, "today_change_pct", 0.0)), 4),
+                    forecast_return_pct=round(float(getattr(report, "forecast_return_pct", 0.0)), 4),
+                )
                 return
             top_gainer_score_gate_reason = _top_gainer_score_gate_reason(
                 tf=tf,
@@ -4825,7 +4851,20 @@ async def _poll_coin(
                     bot_action="blocked",
                     reason=top_gainer_score_gate_reason,
                 )
-                botlog.log_blocked(sym, tf, float(c[i]), top_gainer_score_gate_reason, signal_type="top_gainer_score_gate")
+                botlog.log_blocked(
+                    sym,
+                    tf,
+                    float(c[i]),
+                    top_gainer_score_gate_reason,
+                    signal_type="top_gainer_score_gate",
+                    candidate_score=round(candidate_score, 4),
+                    score_floor=round(score_floor, 4),
+                    base_score=round(base_score, 4),
+                    ml_proba=None if ml_proba is None else round(float(ml_proba), 6),
+                    ranker_proba=ranker_proba,
+                    today_change_pct=round(float(getattr(report, "today_change_pct", 0.0)), 4),
+                    forecast_return_pct=round(float(getattr(report, "forecast_return_pct", 0.0)), 4),
+                )
                 try:
                     await _maybe_send_top_gainer_watch_alert(
                         send=send,
@@ -5111,7 +5150,20 @@ async def _poll_coin(
                     bot_action="blocked",
                     reason=ranker_veto_reason,
                 )
-                botlog.log_blocked(sym, tf, float(c[i]), ranker_veto_reason, signal_type="ranker_veto")
+                botlog.log_blocked(
+                    sym,
+                    tf,
+                    float(c[i]),
+                    ranker_veto_reason,
+                    signal_type="ranker_veto",
+                    candidate_score=round(candidate_score, 4),
+                    score_floor=round(score_floor, 4),
+                    base_score=round(base_score, 4),
+                    ml_proba=None if ml_proba is None else round(float(ml_proba), 6),
+                    ranker_proba=ranker_proba,
+                    ranker_final_score=None if ranker_info is None else ranker_info.get("final_score"),
+                    ranker_ev=None if ranker_info is None else ranker_info.get("ev"),
+                )
                 return
             ranker_hard_veto_reason = _ranker_hard_veto_reason(
                 tf=tf,
@@ -5169,7 +5221,20 @@ async def _poll_coin(
                         bot_action="blocked",
                         reason=ranker_hard_veto_reason,
                     )
-                    botlog.log_blocked(sym, tf, float(c[i]), ranker_hard_veto_reason, signal_type="ranker_hard_veto")
+                    botlog.log_blocked(
+                        sym,
+                        tf,
+                        float(c[i]),
+                        ranker_hard_veto_reason,
+                        signal_type="ranker_hard_veto",
+                        candidate_score=round(candidate_score, 4),
+                        score_floor=round(score_floor, 4),
+                        base_score=round(base_score, 4),
+                        ml_proba=None if ml_proba is None else round(float(ml_proba), 6),
+                        ranker_proba=ranker_proba,
+                        ranker_final_score=None if ranker_info is None else ranker_info.get("final_score"),
+                        ranker_ev=None if ranker_info is None else ranker_info.get("ev"),
+                    )
                     return
 
             fresh_priority = _is_fresh_priority_candidate(preview_mode, catchup_snapshot)

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from blocking import blocked_gate, compact_block_context, normalize_blocked_reason
 
 import numpy as _np
 
@@ -128,12 +129,16 @@ def log_blocked(
     adx: Optional[float] = None,
     vol_x: Optional[float] = None,
     daily_range: Optional[float] = None,
+    **context: Any,
 ) -> None:
+    reason_code = normalize_blocked_reason(signal_type, reason)
     rec: Dict[str, Any] = {
         "event": "blocked",
         "sym": sym,
         "tf": tf,
         "signal_type": signal_type,
+        "reason_code": reason_code,
+        "gate": blocked_gate(signal_type, reason_code),
         "price": price,
         "reason": reason,
     }
@@ -145,4 +150,5 @@ def log_blocked(
         rec["vol_x"] = round(vol_x, 2)
     if daily_range is not None:
         rec["daily_range"] = round(daily_range, 2)
+    rec.update(compact_block_context(**context))
     _write(rec)

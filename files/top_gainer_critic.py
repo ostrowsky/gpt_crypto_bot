@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 import critic_dataset
+from blocking import normalize_blocked_reason
 
 
 ROOT = Path(__file__).resolve().parent
@@ -131,41 +132,12 @@ def _event_source(rec: dict[str, Any]) -> str:
 
 
 def _blocked_reason_code(rec: dict[str, Any]) -> str:
+    explicit = str(rec.get("reason_code") or "").strip()
+    if explicit:
+        return explicit
     signal_type = str(rec.get("signal_type") or "").strip().lower()
     reason = str(rec.get("reason") or "").strip().lower()
-    text = f"{signal_type} {reason}"
-
-    if "portfolio" in text or "портфель" in text or "рїрѕсђс‚с„" in text:
-        return "portfolio_full"
-    if "open_cluster_cap" in text or ("cluster" in text and "cap" in text):
-        return "open_cluster_cap"
-    if "symbol_cooldown" in text or "cooldown" in text:
-        return "symbol_cooldown"
-    if "top_gainer_score" in text:
-        return "top_gainer_score_gate"
-    if "top_gainer_objective" in text or "objective gate" in text:
-        return "top_gainer_objective_gate"
-    if "mtf" in text or "deep correction" in text:
-        return "mtf_correction"
-    if "best_accuracy" in text or "best accuracy" in text or "accuracy <" in text:
-        return "accuracy_gate"
-    if "mode disabled" in text or "agent mode disabled" in text:
-        return "agent_mode_disabled"
-    if "replacement_filter" in text or "replacement filter" in text:
-        return "agent_replacement_filter"
-    if "chase_guard" in text or "chase guard" in text:
-        return "chase_guard"
-    if "agent_leader_filter" in text:
-        return "agent_leader_filter"
-    if "adx" in text:
-        return "adx_gate"
-    if "volume" in text or "vol_x" in text:
-        return "volume_gate"
-    if signal_type:
-        return signal_type
-    if reason:
-        return "blocked_rule"
-    return "blocked_unknown"
+    return normalize_blocked_reason(signal_type, reason)
 
 
 def _counter_payload(counter: Counter) -> dict[str, int]:
@@ -528,6 +500,9 @@ def summarize_top_gainer(
         "last_block_time": last_block.get("_ts_local") if last_block else None,
         "first_block_reason_code": _blocked_reason_code(first_block) if first_block else None,
         "first_block_price": first_block_price,
+        "latest_block_reason_code": _blocked_reason_code(last_block) if last_block else None,
+        "latest_block_reason": last_block.get("reason") if last_block else None,
+        "latest_block_gate": last_block.get("gate") if last_block else None,
         "missed_reason_code": missed_reason_code,
         "opportunity_no_entry_pct": None if first_entry else round(perf.day_change_pct, 3),
         "opportunity_from_first_block_pct": None if opportunity_from_first_block is None else round(opportunity_from_first_block, 3),
@@ -729,6 +704,19 @@ def build_report(
         "watchlist_top_gainers": watchlist_top_summary,
         "missed_reason_symbols": missed_reason_symbols,
         "blocked_reason_harm": _blocked_reason_harm(watchlist_top_summary),
+        "why_no_signal_examples": [
+            {
+                "symbol": item.get("symbol"),
+                "missed_reason_code": item.get("missed_reason_code"),
+                "blocked_reason_counts": item.get("blocked_reason_counts"),
+                "first_block_time": item.get("first_block_time"),
+                "last_block_time": item.get("last_block_time"),
+                "latest_block_reason_code": item.get("latest_block_reason_code"),
+                "latest_block_reason": item.get("latest_block_reason"),
+                "latest_block_gate": item.get("latest_block_gate"),
+            }
+            for item in blocked_winners[:10]
+        ],
         "bot_false_positive_symbols": false_positive_symbols[:top_n],
     }
     return report
@@ -761,6 +749,17 @@ def render_text(report: dict[str, Any]) -> str:
                 f"{item['reason_code']}: missed={item['missed_symbols_count']} "
                 f"events={item['blocked_events']} "
                 f"opportunity={float(item['missed_opportunity_pct']):+.2f}%"
+            )
+        lines.append("")
+    if report.get("why_no_signal_examples"):
+        lines.append("Why-no-signal examples:")
+        for item in report["why_no_signal_examples"][:5]:
+            lines.append(
+                f"  {item['symbol']}: dominant={item.get('missed_reason_code')} "
+                f"latest={item.get('latest_block_reason_code')} "
+                f"gate={item.get('latest_block_gate')} "
+                f"last={item.get('last_block_time')} "
+                f"reason={item.get('latest_block_reason')}"
             )
         lines.append("")
     lines.append("Watchlist top gainers and bot reaction:")

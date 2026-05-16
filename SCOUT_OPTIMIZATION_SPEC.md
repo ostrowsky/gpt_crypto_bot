@@ -5,6 +5,11 @@ Last updated: 2026-05-16 13:29 Europe/Budapest
 ## Objective
 The bot is optimized for timely capture of same-day watchlist top gainers while keeping a single unified portfolio of the 10 most promising positions. Every production algorithm change must be backed by replay/backtest evidence before it is enabled.
 
+## Delivery Discipline
+- Non-trivial work is spec-first by default. Before implementation, create or update a feature spec under `docs/specs/` and register it in `docs/FEATURE_SPEC_INDEX.md`.
+- The canonical process contract lives in `docs/specs/spec-first-workflow.md`.
+- Observability-only and shadow-only work may ship before replay only when it does not alter BUY/SELL behavior and has an explicit verification plan.
+
 ## Primary Metrics
 - `watchlist_top_bought`: count of watchlist top-N gainers that received a BUY.
 - `early_captures`: bought top gainers with capture ratio >= 0.35.

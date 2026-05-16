@@ -620,6 +620,7 @@ def _summarize(evaluated: list[dict[str, Any]], missed: list[TrendEpisode]) -> d
 
 def _render_text(report: dict[str, Any]) -> str:
     s = report["summary"]
+    coverage = report.get("coverage") or {}
     lines = [
         "Signal quality evaluator",
         f"window: {report['window']['start']} .. {report['window']['end']}",
@@ -640,6 +641,14 @@ def _render_text(report: dict[str, Any]) -> str:
             f"top-mover trends caught/missed: {s['top_mover_caught_trends']}/{s['top_mover_missed_trends']}"
         ),
     ]
+    lines.append(
+        "coverage: "
+        f"{coverage.get('status', 'unknown')} "
+        f"events={coverage.get('events_loaded')} trades={coverage.get('paired_trades')} "
+        f"candles={coverage.get('candle_series_loaded')}/{coverage.get('candle_series_requested')}"
+    )
+    if coverage.get("reasons"):
+        lines.append("coverage reasons: " + "; ".join(str(x) for x in coverage["reasons"]))
     if report.get("top_movers", {}).get("partial_universe"):
         lines.append("note: top-mover ranks are partial because the run used a symbol/max-symbols filter")
     if report["late_entries"]:
@@ -826,6 +835,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "false_positive_max_fav_pct": args.false_positive_max_fav_pct,
         },
         "top_movers": top_mover_meta,
+        "coverage": _build_coverage(
+            files_root=files_root,
+            events=events,
+            trades=trades,
+            symbols=symbols,
+            tfs=tfs,
+            candles_by_key=candles_by_key,
+        ),
         "summary": _summarize(evaluated, missed),
         "late_entries": late_entry_rows[:50],
         "early_exits": early_exit_rows[:50],
@@ -834,6 +851,50 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "trades": evaluated if args.include_trades else [],
     }
     return report
+
+
+def _build_coverage(
+    *,
+    files_root: Path,
+    events: list[Event],
+    trades: list[Trade],
+    symbols: list[str],
+    tfs: set[str],
+    candles_by_key: dict[tuple[str, str], list[dict[str, float]]],
+) -> dict[str, Any]:
+    requested_series = len(symbols) * len(tfs)
+    loaded_series = len(candles_by_key)
+    event_files = {
+        "bot_events_exists": (files_root / "bot_events.jsonl").exists(),
+        "agent_events_exists": (files_root / "agent_events.jsonl").exists(),
+    }
+    reasons: list[str] = []
+    if not any(event_files.values()):
+        reasons.append("event files missing")
+    if not events:
+        reasons.append("no entry/exit events in requested window")
+    if events and not trades:
+        reasons.append("events loaded but no pairable trades")
+    if requested_series and loaded_series == 0:
+        reasons.append("no candle series loaded")
+    elif requested_series and loaded_series < requested_series:
+        reasons.append(f"partial candle coverage {loaded_series}/{requested_series}")
+
+    if not reasons:
+        status = "ok"
+    elif events and loaded_series > 0:
+        status = "partial"
+    else:
+        status = "insufficient"
+    return {
+        "status": status,
+        "reasons": reasons,
+        "event_files": event_files,
+        "events_loaded": len(events),
+        "paired_trades": len(trades),
+        "candle_series_requested": requested_series,
+        "candle_series_loaded": loaded_series,
+    }
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

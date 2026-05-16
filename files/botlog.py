@@ -38,6 +38,7 @@ class _SafeEncoder(json.JSONEncoder):
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from blocking import blocked_gate, compact_block_context, normalize_blocked_reason
 
 LOG_FILE = Path("bot_events.jsonl")
 _pylog   = logging.getLogger("botlog")
@@ -153,18 +154,21 @@ def log_forward(sym: str, tf: str, mode: str, horizon: int,
 def log_blocked(sym: str, tf: str, price: float, reason: str,
                 rsi: Optional[float] = None, adx: Optional[float] = None,
                 vol_x: Optional[float] = None, daily_range: Optional[float] = None,
-                signal_type: str = "buy") -> None:
+                signal_type: str = "buy", **context: Any) -> None:
     """
     Сигнал был (все основные условия выполнены), но что-то заблокировало вход.
     Логируем только когда блокировка случилась в мониторинге (не в анализе) —
     иначе будет слишком много записей.
     signal_type: "buy"/"retest"/"breakout" — какой тип сигнала проверялся
     """
+    reason_code = normalize_blocked_reason(signal_type, reason)
     rec: Dict[str, Any] = {
         "event":       "blocked",
         "sym":         sym,
         "tf":          tf,
         "signal_type": signal_type,
+        "reason_code": reason_code,
+        "gate":        blocked_gate(signal_type, reason_code),
         "price":       price,
         "reason":      reason,
     }
@@ -172,6 +176,7 @@ def log_blocked(sym: str, tf: str, price: float, reason: str,
     if adx        is not None: rec["adx"]        = round(adx, 1)
     if vol_x      is not None: rec["vol_x"]      = round(vol_x, 2)
     if daily_range is not None: rec["daily_range"] = round(daily_range, 2)
+    rec.update(compact_block_context(**context))
     _write(rec)
 
 
