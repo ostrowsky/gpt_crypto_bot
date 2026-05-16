@@ -13,8 +13,8 @@ Crypto Trend Bot — Telegram interface.
   ⚙️ Настройки             → текущие параметры стратегии
 """
 
-BUILD_ID = "menu_build_v28"
-BUILD_APPLIED_AT = "2026-05-15 17:47:26 +02:00"
+BUILD_ID = "menu_build_v30"
+BUILD_APPLIED_AT = "2026-05-16 13:29:11 +02:00"
 
 import os
 import atexit
@@ -1530,17 +1530,18 @@ async def _auto_reanalyze(app: Application) -> None:
             else:
                 mon_note = ""
 
-            msg = (
-                f"🔄 *Авто-реанализ* _{now_str}_\n"
-                f"Пересчитано {n} монет.\n"
-                f"Подтверждено: *{len(in_play)}*"
-                f"{mon_note}"
-            )
-            for cid in list(_known_chat_ids):
-                try:
-                    await _send(cid, msg, app)
-                except Exception:
-                    pass
+            if getattr(config, "AUTO_REANALYZE_TELEGRAM_REPORTS_ENABLED", False):
+                msg = (
+                    f"🔄 *Авто-реанализ* _{now_str}_\n"
+                    f"Пересчитано {n} монет.\n"
+                    f"Подтверждено: *{len(in_play)}*"
+                    f"{mon_note}"
+                )
+                for cid in list(_known_chat_ids):
+                    try:
+                        await _send(cid, msg, app)
+                    except Exception:
+                        pass
         except Exception as e:
             log.exception("Auto-reanalyze error: %s", e)
 

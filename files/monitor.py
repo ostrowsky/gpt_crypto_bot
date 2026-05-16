@@ -1458,6 +1458,63 @@ def _recent_positive_macd_peak(feat: dict, i: int, lookback: int) -> Optional[fl
     return peak
 
 
+def _peak_risk_components(pos: "Position", feat: dict, i: int, close_now: float) -> tuple[float, float, bool]:
+    if close_now <= 0 or pos.entry_price <= 0:
+        return 0.0, 0.0, False
+    pnl_pct = pos.pnl_pct(close_now)
+    if pnl_pct <= 0:
+        return 0.0, 0.0, False
+    rsi_arr = feat.get("rsi")
+    ema_arr = feat.get("ema_fast")
+    macd_arr = feat.get("macd_hist")
+    rsi = float(rsi_arr[i]) if rsi_arr is not None and i < len(rsi_arr) and np.isfinite(rsi_arr[i]) else 0.0
+    ema20 = float(ema_arr[i]) if ema_arr is not None and i < len(ema_arr) and np.isfinite(ema_arr[i]) else 0.0
+    price_edge_pct = ((close_now / ema20) - 1.0) * 100.0 if ema20 > 0 else 0.0
+    macd_decelerating = bool(
+        macd_arr is not None
+        and i >= 1
+        and i < len(macd_arr)
+        and np.isfinite(macd_arr[i])
+        and np.isfinite(macd_arr[i - 1])
+        and float(macd_arr[i]) > 0
+        and float(macd_arr[i]) < float(macd_arr[i - 1])
+    )
+    rsi_score = max(0.0, min(25.0, (rsi - float(getattr(config, "PEAK_RISK_RSI_FLOOR", 75.0))) * 2.0))
+    edge_score = max(0.0, min(25.0, price_edge_pct - float(getattr(config, "PEAK_RISK_EDGE_FLOOR_PCT", 5.0))))
+    macd_score = 25.0 if macd_decelerating else 0.0
+    profit_score = 25.0 if pnl_pct >= 5.0 else max(0.0, min(25.0, (pnl_pct - 1.0) / 4.0 * 25.0))
+    return rsi_score + edge_score + macd_score + profit_score, price_edge_pct, macd_decelerating
+
+
+def _log_peak_risk_shadow_if_needed(pos: "Position", sym: str, tf: str, feat: dict, i: int, close_now: float) -> None:
+    if not bool(getattr(config, "PEAK_RISK_SHADOW_ENABLED", True)):
+        return
+    score, price_edge_pct, macd_decelerating = _peak_risk_components(pos, feat, i, close_now)
+    threshold = float(getattr(config, "PEAK_RISK_SHADOW_THRESHOLD", 50.0))
+    if score < threshold:
+        return
+    bucket = int(score // 20 * 20)
+    last_bucket = int(getattr(pos, "_peak_risk_last_bucket", -1))
+    if bucket <= last_bucket:
+        return
+    pos._peak_risk_last_bucket = bucket
+    rsi_arr = feat.get("rsi")
+    rsi = float(rsi_arr[i]) if rsi_arr is not None and i < len(rsi_arr) and np.isfinite(rsi_arr[i]) else 0.0
+    botlog.log_peak_risk_shadow(
+        sym=sym,
+        tf=tf,
+        mode=getattr(pos, "signal_mode", "trend"),
+        price=close_now,
+        entry_price=pos.entry_price,
+        pnl_pct=pos.pnl_pct(close_now),
+        score=score,
+        score_bucket=bucket,
+        rsi=rsi,
+        price_edge_pct=price_edge_pct,
+        macd_decelerating=macd_decelerating,
+    )
+
+
 def _impulse_speed_entry_guard(
     *,
     tf: str,
@@ -4059,6 +4116,7 @@ async def _poll_coin(
             pos.today_change_pct = new_today_change
             if metrics_changed:
                 save_positions(state.positions)
+        _log_peak_risk_shadow_if_needed(pos, sym, tf, feat, i, float(c[i]))
 
 
 
