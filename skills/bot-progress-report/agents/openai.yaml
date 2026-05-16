@@ -1,0 +1,3 @@
+display_name: "Bot Progress Report"
+short_description: "Track learning, scout, ML, and RL progress against the bot objective."
+default_prompt: "Use $bot-progress-report to summarize the bot's recent progress toward its objective."

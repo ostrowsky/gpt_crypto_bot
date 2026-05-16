@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trading App Review"
+  short_description: "Compare trading systems and expose gaps."
+  default_prompt: "Use $trading-app-review to compare this trading application with my bot and propose a roadmap."
