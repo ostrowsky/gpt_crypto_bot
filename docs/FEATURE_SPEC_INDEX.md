@@ -19,6 +19,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Early trend-start mode | replay-only research, first profile rejected | `docs/specs/trend-start-mode.md` | `capture_rate`, `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `trade_precision`, `PnL` | next narrower replay profile |
 | Agent entry quality gates | shipped | `docs/specs/agent-entry-quality.md` | `trade_precision`, `false_positive_buys`, `blocked_winners` | replay before any relaxation |
 | Local control-plane reliability | shipped | `docs/specs/local-control-plane-reliability.md` | process health, duplicate-launch avoidance | keep operational-only |
+| Local context MCP | local tooling | `docs/specs/local-context-mcp.md` | context-read latency, report compactness | keep outside trading path |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
