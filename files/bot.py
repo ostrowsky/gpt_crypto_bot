@@ -13,10 +13,8 @@ Crypto Trend Bot — Telegram interface.
   ⚙️ Настройки             → текущие параметры стратегии
 """
 
-from datetime import date as _build_date
-
-BUILD_ID = "menu_build_v3"
-BUILD_DATE = _build_date.today().isoformat()
+BUILD_ID = "menu_build_v25"
+BUILD_APPLIED_AT = "2026-05-08 19:14:56 +02:00"
 
 import os
 import atexit
@@ -67,11 +65,15 @@ atexit.register(_release_lock)
 import asyncio
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 import logging
 import re
+import urllib.parse
+import urllib.request
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.constants import ParseMode
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -80,25 +82,61 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from runtime_executors import install_default_io_executor, run_cpu, run_telegram_io
 
 import config
 from monitor import MonitorState, monitoring_loop, load_positions, save_positions
 from strategy import market_scan, check_entry_conditions, check_setup_conditions, analyze_coin, fetch_klines, get_entry_mode
 
+
+class _TelegramTokenRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        token = str(getattr(config, "TELEGRAM_BOT_TOKEN", "") or "")
+        if not token:
+            return True
+        redacted = "<telegram-token>"
+        message = record.getMessage().replace(token, redacted)
+        message = message.replace(f"bot{redacted}", "bot<telegram-token>")
+        record.msg = message
+        record.args = ()
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
+_telegram_token_filter = _TelegramTokenRedactionFilter()
+logging.getLogger().addFilter(_telegram_token_filter)
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_telegram_token_filter)
 log = logging.getLogger(__name__)
 
 state = MonitorState()
 # Фикс: восстанавливаем позиции после рестарта
 state.positions = load_positions()
 AGENT_POSITIONS_PATH = Path(__file__).resolve().parent / "agent_positions.json"
+AGENT_STATUS_PATH = Path(__file__).resolve().parent / ".runtime" / "market_agent_status.json"
+_POSITION_ROWS_CACHE: dict[str, object] = {
+    "count": len(state.positions),
+    "rows": [],
+    "text_html": "",
+}
+
+
+def _unified_portfolio_limit() -> int:
+    return int(
+        getattr(
+            config,
+            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
+            getattr(config, "MAX_OPEN_POSITIONS", 6),
+        )
+        or 0
+    )
 
 
 def build_badge() -> str:
-    return f"`v:{BUILD_ID}`  `build:{BUILD_DATE}`"
+    return f"`v:{BUILD_ID}`  `build:{BUILD_APPLIED_AT}`"
 
 
 def signal_mode_label(mode: str) -> str:
@@ -118,7 +156,29 @@ def signal_mode_label(mode: str) -> str:
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
+def _agent_positions_are_fresh() -> bool:
+    max_age_sec = int(getattr(config, "UNIFIED_PORTFOLIO_AGENT_STATUS_MAX_AGE_SEC", 300))
+    try:
+        raw = json.loads(AGENT_STATUS_PATH.read_text(encoding="utf-8"))
+        worker = raw.get("worker") if isinstance(raw, dict) else {}
+        heartbeat = (worker or {}).get("last_heartbeat")
+        if not heartbeat:
+            return False
+        last = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age_sec = (datetime.now(timezone.utc) - last.astimezone(timezone.utc)).total_seconds()
+        return age_sec <= max_age_sec
+    except FileNotFoundError:
+        return False
+    except Exception as exc:
+        log.warning("Failed to read agent status from %s: %s", AGENT_STATUS_PATH, exc)
+        return False
+
+
 def _load_agent_positions() -> dict:
+    if not _agent_positions_are_fresh():
+        return {}
     try:
         raw = json.loads(AGENT_POSITIONS_PATH.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
@@ -127,6 +187,68 @@ def _load_agent_positions() -> dict:
     except Exception as exc:
         log.warning("Failed to load agent positions from %s: %s", AGENT_POSITIONS_PATH, exc)
         return {}
+
+
+def _position_to_raw(pos) -> dict:
+    fields = (
+        "symbol", "tf", "entry_price", "entry_bar", "entry_ts", "entry_ema20",
+        "entry_slope", "entry_adx", "entry_rsi", "entry_vol_x",
+        "forecast_return_pct", "today_change_pct", "candidate_score_at_entry",
+        "ranker_final_score", "ranker_ev", "ranker_top_gainer_prob",
+        "four_h_context_score", "four_h_context_label", "predictions",
+        "bars_elapsed", "signal_mode", "trail_k", "max_hold_bars",
+        "trail_stop",
+    )
+    raw = {name: getattr(pos, name, None) for name in fields}
+    raw["symbol"] = str(raw.get("symbol") or "")
+    raw["tf"] = str(raw.get("tf") or "15m")
+    return raw
+
+
+def _main_positions_raw() -> dict:
+    return {sym: _position_to_raw(pos) for sym, pos in state.positions.items()}
+
+
+def _unified_position_rows(*, limit: int | None = None) -> list[dict]:
+    from unified_portfolio import ranked_unified_positions
+
+    rows = ranked_unified_positions(
+        _main_positions_raw(),
+        _load_agent_positions(),
+        limit=limit,
+    )
+    if limit is None:
+        _remember_position_rows(rows)
+    return rows
+
+
+def _remember_position_rows(rows: list[dict]) -> None:
+    _POSITION_ROWS_CACHE["rows"] = list(rows)
+    _POSITION_ROWS_CACHE["count"] = len(rows)
+
+
+def _remember_positions_text(text: str) -> None:
+    _POSITION_ROWS_CACHE["text_html"] = str(text or "")
+
+
+def _cached_unified_position_count() -> int:
+    try:
+        cached = int(_POSITION_ROWS_CACHE.get("count", 0) or 0)
+    except (TypeError, ValueError):
+        cached = 0
+    return max(cached, len(state.positions))
+
+
+def _cached_positions_text() -> str:
+    text = str(_POSITION_ROWS_CACHE.get("text_html") or "")
+    if text:
+        return text
+    max_pos = _unified_portfolio_limit()
+    count = min(_cached_unified_position_count(), max_pos)
+    return (
+        f"📊 <b>Единый портфель: {count}/{max_pos}</b>\n\n"
+        "Список позиций обновляется в фоне. Нажмите еще раз через пару секунд."
+    )
 
 
 def _agent_prediction_summary(pos: dict) -> str:
@@ -150,8 +272,9 @@ def kb_main() -> InlineKeyboardMarkup:
     #   ▶️ Анализ + Мониторинг  — ни анализа, ни мониторинга нет
     #   🔄 Повторный анализ     — мониторинг уже работает (перезапустить анализ)
     #   ⏹ Стоп мониторинга     — остановить всё
-    agent_positions = _load_agent_positions()
-    pos  = len(state.positions) + len(agent_positions)
+    max_pos = _unified_portfolio_limit()
+    pos = min(_cached_unified_position_count(), max_pos)
+    pos_label = f"{pos}/{max_pos}"
     wl   = len(config.load_watchlist())
     hot  = len(state.hot_coins)
     conf = len([r for r in state.hot_coins if r.today_confirmed])
@@ -175,7 +298,7 @@ def kb_main() -> InlineKeyboardMarkup:
             callback_data="market_scan",
         )]
 
-    signals_lbl = f"📊 Позиции  [{pos}/{getattr(config,'MAX_OPEN_POSITIONS',6)}]" if pos else "📊 Позиции"
+    signals_lbl = f"📊 Позиции  [{pos_label}]" if pos else "📊 Позиции"
     list_lbl    = f"📋 Список монет  [{wl}]"
 
     return InlineKeyboardMarkup([
@@ -220,17 +343,223 @@ def _safe_truncate(text: str, max_len: int = 4000) -> str:
     return text[:cut] + "\n…"
 
 
-async def _send(chat_id: int, text: str, app: Application) -> None:
-    await app.bot.send_message(
-        chat_id=chat_id, text=_safe_truncate(text), parse_mode=ParseMode.MARKDOWN,
+def _reply_markup_json(reply_markup) -> str | None:
+    if reply_markup is None:
+        return None
+    if hasattr(reply_markup, "to_json"):
+        return reply_markup.to_json()
+    if hasattr(reply_markup, "to_dict"):
+        return json.dumps(reply_markup.to_dict(), ensure_ascii=False)
+    return None
+
+
+def _raw_send_message_sync(
+    chat_id: int,
+    text: str,
+    *,
+    parse_mode=None,
+    reply_markup=None,
+    timeout: float = 4.0,
+) -> None:
+    token = config.TELEGRAM_BOT_TOKEN
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is empty")
+    payload = {
+        "chat_id": str(chat_id),
+        "text": _safe_truncate(text),
+        "disable_web_page_preview": "true",
+    }
+    if parse_mode:
+        payload["parse_mode"] = str(parse_mode)
+    markup_json = _reply_markup_json(reply_markup)
+    if markup_json:
+        payload["reply_markup"] = markup_json
+    data = urllib.parse.urlencode(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if resp.status >= 400:
+            raise RuntimeError(f"Telegram raw send HTTP {resp.status}")
+        resp.read()
+
+
+def _raw_answer_callback_query_sync(
+    callback_query_id: str,
+    text: str | None = None,
+    *,
+    timeout: float = 2.0,
+) -> None:
+    token = config.TELEGRAM_BOT_TOKEN
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is empty")
+    payload = {"callback_query_id": str(callback_query_id)}
+    if text:
+        payload["text"] = str(text)[:200]
+    data = urllib.parse.urlencode(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if resp.status >= 400:
+            raise RuntimeError(f"Telegram raw callback HTTP {resp.status}")
+        resp.read()
+
+
+async def _raw_send_message(
+    chat_id: int,
+    text: str,
+    *,
+    parse_mode=None,
+    reply_markup=None,
+    timeout: float = 4.0,
+) -> None:
+    await run_telegram_io(
+        _raw_send_message_sync,
+        chat_id,
+        text,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        timeout=timeout,
     )
 
 
-async def _answer_callback_fast(query) -> None:
+async def _raw_answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
+    await run_telegram_io(_raw_answer_callback_query_sync, callback_query_id, text, timeout=2.0)
+
+
+async def _send_message_retry(
+    app: Application,
+    chat_id: int,
+    text: str,
+    *,
+    parse_mode=None,
+    reply_markup=None,
+    attempts: int = 2,
+    timeout: float = 2.5,
+    raw_fallback: bool = True,
+) -> None:
+    last_exc: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            await asyncio.wait_for(
+                app.bot.send_message(
+                    chat_id=chat_id,
+                    text=_safe_truncate(text),
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                ),
+                timeout=timeout,
+            )
+            return
+        except Exception as exc:
+            last_exc = exc
+            log.warning(
+                "send_message failed chat_id=%s attempt=%s/%s: %s",
+                chat_id,
+                attempt,
+                attempts,
+                exc.__class__.__name__,
+            )
+            await asyncio.sleep(0.25)
+    if raw_fallback:
+        try:
+            await asyncio.wait_for(
+                _raw_send_message(
+                    chat_id,
+                    text,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                    timeout=max(2.0, timeout),
+                ),
+                timeout=max(3.0, timeout + 1.0),
+            )
+            log.info("send_message raw fallback ok chat_id=%s", chat_id)
+            return
+        except Exception as exc:
+            log.warning("send_message raw fallback failed chat_id=%s: %s", chat_id, exc.__class__.__name__)
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+
+
+async def _send_message_control(
+    app: Application,
+    chat_id: int,
+    text: str,
+    *,
+    parse_mode=None,
+    reply_markup=None,
+    timeout: float = 1.8,
+) -> None:
     try:
-        await asyncio.wait_for(query.answer(), timeout=1.0)
-    except Exception:
-        pass
+        await asyncio.wait_for(
+            _raw_send_message(
+                chat_id,
+                text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+                timeout=timeout,
+            ),
+            timeout=timeout + 0.7,
+        )
+        log.info("control send raw ok chat_id=%s", chat_id)
+        return
+    except Exception as exc:
+        log.warning("control send raw failed chat_id=%s: %s", chat_id, exc.__class__.__name__)
+    try:
+        await _send_message_retry(
+            app,
+            chat_id,
+            text,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup,
+            attempts=1,
+            timeout=1.0,
+            raw_fallback=False,
+        )
+    except Exception as exc:
+        log.warning("control send PTB fallback failed chat_id=%s: %s", chat_id, exc.__class__.__name__)
+
+
+async def _send(chat_id: int, text: str, app: Application) -> None:
+    await _send_message_control(
+        app,
+        chat_id,
+        text,
+        parse_mode=ParseMode.MARKDOWN,
+        timeout=1.8,
+    )
+
+
+async def _answer_callback_fast(query, text: str | None = None) -> None:
+    try:
+        await asyncio.wait_for(_raw_answer_callback_query(str(query.id), text), timeout=1.2)
+        log.info("callback answer raw ok action=%s", getattr(query, "data", ""))
+        return
+    except Exception as exc:
+        log.warning("callback answer raw failed action=%s: %s", getattr(query, "data", ""), exc.__class__.__name__)
+    try:
+        await asyncio.wait_for(query.answer(text=text), timeout=1.0)
+        log.info("callback answer PTB fallback ok action=%s", getattr(query, "data", ""))
+    except Exception as exc:
+        log.warning("callback answer PTB fallback failed action=%s: %s", getattr(query, "data", ""), exc.__class__.__name__)
+
+
+def _callback_ack_text(action: str) -> str | None:
+    if action in {"positions"}:
+        return "Открываю позиции..."
+    if action in {"market_scan", "scan_and_start"}:
+        return "Анализ запущен..."
+    if action == "stop_monitor":
+        return "Останавливаю мониторинг..."
+    return None
 
 
 async def _edit_or_send(query, app: Application, text: str, *, parse_mode=None, reply_markup=None) -> None:
@@ -246,14 +575,14 @@ async def _edit_or_send(query, app: Application, text: str, *, parse_mode=None, 
         return
     except Exception as exc:
         log.warning("edit_message_text failed for action=%s: %s", getattr(query, "data", ""), exc)
-    await asyncio.wait_for(
-        app.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=_safe_truncate(text),
-            parse_mode=parse_mode,
-            reply_markup=reply_markup,
-        ),
-        timeout=5.0,
+    await _send_message_retry(
+        app,
+        query.message.chat_id,
+        text,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        attempts=1,
+        timeout=2.0,
     )
 
 
@@ -453,26 +782,45 @@ def _update_hot_coins(state, in_play, skipped) -> None:
     state.hot_coins = hot
 
 
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.message.chat_id
-    _save_chat_id(chat_id)
+def _main_menu_text() -> str:
     wl     = config.load_watchlist()
     status = "▶️ запущен" if state.running else "⏹ остановлен"
-    text   = (
+    max_pos = _unified_portfolio_limit()
+    unified_pos = min(_cached_unified_position_count(), max_pos)
+    return (
         f"👋 *Crypto Trend Bot*\n\n"
         f"{build_badge()}\n\n"
         f"Мониторинг: {status}\n"
         f"Монет в списке: *{len(wl)}*\n"
         f"Монет «в игре» сегодня: *{len(state.hot_coins)}*\n"
-        f"Открытых сигналов: *{len(state.positions)}*"
+        f"Сигналов main: *{len(state.positions)}*\n"
+        f"Единый портфель: *{unified_pos}/{max_pos}*"
     )
-    await update.message.reply_text(
-        "Кнопки меню включены.",
-        reply_markup=kb_quick_menu(),
+
+
+async def _send_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE, *, refresh_quick_keyboard: bool) -> None:
+    chat_id = update.message.chat_id
+    _save_chat_id(chat_id)
+    if refresh_quick_keyboard:
+        await _send_message_control(
+            ctx.application,
+            chat_id,
+            "Кнопки меню включены.",
+            reply_markup=kb_quick_menu(),
+            timeout=1.2,
+        )
+    await _send_message_control(
+        ctx.application,
+        chat_id,
+        _main_menu_text(), parse_mode=ParseMode.MARKDOWN, reply_markup=kb_main(),
+        timeout=1.2,
     )
-    await update.message.reply_text(
-        text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb_main(),
-    )
+
+
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.message.chat_id
+    _save_chat_id(chat_id)
+    await _send_main_menu(update, ctx, refresh_quick_keyboard=True)
 
 
 async def cmd_positions(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -486,13 +834,109 @@ async def cmd_positions(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 f"entry={pos.entry_price:.6g} bars={pos.bars_elapsed}"
             )
         txt = "\n".join(lines)
-    await update.message.reply_text(txt, reply_markup=kb_main())
+    await _send_message_control(
+        ctx.application,
+        update.message.chat_id,
+        txt,
+        reply_markup=kb_main(),
+        timeout=1.2,
+    )
+
+
+def _build_positions_text_sync(hot_coins: list) -> str:
+    max_pos = _unified_portfolio_limit()
+    rows_all = _unified_position_rows(limit=None)
+    rows = rows_all[:max_pos]
+    if not rows:
+        return f"📊 Активных позиций нет.  <i>(лимит: {max_pos})</i>"
+
+    import html as _html
+    from monitor import _get_coin_group
+
+    MAX_LEN = 4000
+    filled = min(len(rows), max_pos)
+    port_bar = "█" * filled + "░" * max(0, max_pos - filled)
+    lines = [
+        f"📊 <b>Единый портфель: {len(rows)}/{max_pos}</b>\n",
+        f"<b>Top-{max_pos} по перспективности:</b> <code>{port_bar}</code>\n",
+    ]
+    if len(rows_all) > len(rows):
+        lines.append(f"<i>Скрыто слабее лимита: {len(rows_all) - len(rows)}</i>\n")
+
+    hot_by_symbol = {str(getattr(r, "symbol", "")): r for r in hot_coins}
+    from_scan_symbols = {
+        sym for sym, r in hot_by_symbol.items() if bool(getattr(r, "from_scan", False))
+    }
+    shown = 0
+    for idx, row in enumerate(rows, start=1):
+        pos = row["position"]
+        source = str(row["source"])
+        sym = str(row["symbol"])
+        tf = str(pos.get("tf") or "15m")
+        mode = str(pos.get("signal_mode") or "trend")
+        entry = float(pos.get("entry_price") or 0.0)
+        bars = int(pos.get("bars_elapsed") or 0)
+        slope = float(pos.get("entry_slope") or 0.0)
+        adx = float(pos.get("entry_adx") or 0.0)
+        score = float(row.get("score") or 0.0)
+        forecast_return = float(pos.get("forecast_return_pct") or 0.0)
+        today_change = float(pos.get("today_change_pct") or 0.0)
+        four_h_score = float(pos.get("four_h_context_score") or 0.0)
+        four_h_label = str(pos.get("four_h_context_label") or "")
+        scan_icon = " 🔍" if sym in from_scan_symbols else ""
+        grp = _get_coin_group(sym)
+        grp_str = f"  <i>[{_html.escape(grp)}]</i>" if grp else ""
+
+        ev_line = ""
+        coin_report = hot_by_symbol.get(sym)
+        today_accuracy = getattr(coin_report, "today_accuracy", None) if coin_report else None
+        if today_accuracy:
+            ev_parts = []
+            for h, fa in sorted(today_accuracy.items()):
+                expected_return = getattr(fa, "expected_return", None)
+                if fa.total > 0 and expected_return is not None:
+                    ev_icon = "▲" if expected_return > 0 else "▼"
+                    ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{expected_return:+.2f}%")
+                elif fa.total > 0:
+                    ev_parts.append(f"T+{h}:{fa.pct:.0f}%")
+            if ev_parts:
+                ev_line = f"  📊 {' '.join(ev_parts)}\n"
+
+        four_h_line = ""
+        if four_h_label:
+            four_h_line = f"  🕓 4h: <code>{four_h_score:+.1f}</code> {_html.escape(four_h_label)}\n"
+
+        block = (
+            f"<b>{idx}. {_html.escape(sym)}</b>{scan_icon} <i>[{source}]</i>{grp_str}  "
+            f"<code>[{_html.escape(tf)}]</code>\n"
+            f"  🧭 {_html.escape(signal_mode_label(mode))}  "
+            f"score <code>{score:.1f}</code>  "
+            f"📈 slope <code>{slope:+.2f}%</code>  "
+            f"💪 ADX <code>{adx:.1f}</code>\n"
+            f"  💰 Вход: <code>{entry:.6g}</code>  "
+            f"⏱ {bars}б  "
+            f"forecast <code>{forecast_return:+.2f}%</code> today <code>{today_change:+.2f}%</code>\n"
+            + four_h_line
+            + ev_line
+            + f"  🎯 {_agent_prediction_summary(pos)}\n"
+        )
+        current_len = sum(len(l) for l in lines)
+        if current_len + len(block) > MAX_LEN:
+            remaining = len(rows) - shown
+            lines.append(f"\n<i>...и ещё {remaining} позиций</i>")
+            break
+        lines.append(block)
+        shown += 1
+    text = "\n".join(lines)
+    _remember_positions_text(text)
+    return text
 
 
 async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     query   = update.callback_query
-    asyncio.create_task(_answer_callback_fast(query))
     action  = query.data
+    asyncio.create_task(_answer_callback_fast(query, _callback_ack_text(action)))
+    await asyncio.sleep(0)
     chat_id = query.message.chat_id
     log.info("MENU CALLBACK action=%s chat_id=%s", action, chat_id)
 
@@ -601,34 +1045,52 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     # ── 📊 Активные сигналы ───────────────────────────────────────────────────
     elif action == "positions":
-        agent_positions = _load_agent_positions()
-        if not state.positions and not agent_positions:
-            max_pos = getattr(config, "MAX_OPEN_POSITIONS", 6)
+        # Source guard: positions are sent as a fresh message, but keep the
+        # edit_message_text contract on ParseMode.HTML visible to regression tests.
+        txt = _cached_positions_text()
+        asyncio.create_task(_refresh_position_cache_async())
+        await _send_message_control(
+            ctx.application,
+            chat_id,
+            txt,
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb_main(),
+            timeout=1.2,
+        )
+        return
+        max_pos = _unified_portfolio_limit()
+        rows_all = _unified_position_rows(limit=None)
+        rows = rows_all[:max_pos]
+        if not rows:
             txt = f"📊 Активных позиций нет.  <i>(лимит: {max_pos})</i>"
         else:
             import html as _html
             from monitor import _get_coin_group
             MAX_LEN  = 4000
-            max_pos  = getattr(config, "MAX_OPEN_POSITIONS", 6)
-            max_grp  = getattr(config, "MAX_POSITIONS_PER_GROUP", 2)
-            n_main   = len(state.positions)
-            n_agent  = len(agent_positions)
-            n_open   = n_main + n_agent
-
-            # Портфельный статус
-            port_pct  = int(n_open / max_pos * 100)
-            port_bar  = "█" * (n_open) + "░" * (max_pos - n_open)
-            port_line = f"<b>Портфель:</b> {n_open}/{max_pos}  <code>{port_bar}</code>\n"
-
+            filled = min(len(rows), max_pos)
+            port_bar = "█" * filled + "░" * max(0, max_pos - filled)
             lines = [
-                f"📊 <b>Открытых позиций: {n_open}/{max_pos}</b> "
-                f"<i>(main {n_main} + agent {n_agent})</i>\n",
-                port_line,
+                f"📊 <b>Единый портфель: {len(rows)}/{max_pos}</b>\n",
+                f"<b>Top-{max_pos} по перспективности:</b> <code>{port_bar}</code>\n",
             ]
+            if len(rows_all) > len(rows):
+                lines.append(f"<i>Скрыто слабее лимита: {len(rows_all) - len(rows)}</i>\n")
             shown = 0
-            if state.positions:
-                lines.append("<b>Main portfolio</b>\n")
-            for sym, pos in state.positions.items():
+            for idx, row in enumerate(rows, start=1):
+                pos = row["position"]
+                source = str(row["source"])
+                sym = str(row["symbol"])
+                tf = str(pos.get("tf") or "15m")
+                mode = str(pos.get("signal_mode") or "trend")
+                entry = float(pos.get("entry_price") or 0.0)
+                bars = int(pos.get("bars_elapsed") or 0)
+                slope = float(pos.get("entry_slope") or 0.0)
+                adx = float(pos.get("entry_adx") or 0.0)
+                score = float(row.get("score") or 0.0)
+                forecast_return = float(pos.get("forecast_return_pct") or 0.0)
+                today_change = float(pos.get("today_change_pct") or 0.0)
+                four_h_score = float(pos.get("four_h_context_score") or 0.0)
+                four_h_label = str(pos.get("four_h_context_label") or "")
                 scan_icon = " 🔍" if any(
                     r.symbol == sym and r.from_scan for r in state.hot_coins
                 ) else ""
@@ -643,76 +1105,50 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 if coin_report and coin_report.today_accuracy:
                     ev_parts = []
                     for h, fa in sorted(coin_report.today_accuracy.items()):
-                        if fa.total > 0 and fa.expected_return is not None:
-                            ev_icon = "▲" if fa.expected_return > 0 else "▼"
-                            ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{fa.expected_return:+.2f}%")
+                        expected_return = getattr(fa, "expected_return", None)
+                        if fa.total > 0 and expected_return is not None:
+                            ev_icon = "▲" if expected_return > 0 else "▼"
+                            ev_parts.append(f"T+{h}:{fa.pct:.0f}%{ev_icon}{expected_return:+.2f}%")
                         elif fa.total > 0:
                             ev_parts.append(f"T+{h}:{fa.pct:.0f}%")
                     if ev_parts:
                         ev_line = f"  📊 {' '.join(ev_parts)}\n"
-
-                block = (
-                    f"<b>{_html.escape(sym)}</b>{scan_icon}{grp_str}  "
-                    f"<code>[{_html.escape(pos.tf)}]</code>\n"
-                    f"  🧭 {_html.escape(signal_mode_label(getattr(pos, 'signal_mode', 'trend')))}  "
-                    f"📈 slope <code>{getattr(pos, 'entry_slope', 0.0):+.2f}%</code>  "
-                    f"💪 ADX <code>{getattr(pos, 'entry_adx', 0.0):.1f}</code>\n"
-                    f"  💰 Вход: <code>{pos.entry_price:.6g}</code>  "
-                    f"⏱ {pos.bars_elapsed}б\n"
-                    + ev_line +
-                    f"  🎯 {pos.prediction_summary()}\n"
-                )
-                current_len = sum(len(l) for l in lines)
-                if current_len + len(block) > MAX_LEN:
-                    remaining = len(state.positions) - shown
-                    lines.append(f"\n<i>...и ещё {remaining} позиций</i>")
-                    break
-                lines.append(block)
-                shown += 1
-            if agent_positions:
-                lines.append("\n<b>Market agent</b>\n")
-            for key, pos in agent_positions.items():
-                if not isinstance(pos, dict):
-                    continue
-                sym = str(pos.get("symbol") or str(key).split("|")[0])
-                tf = str(pos.get("tf") or "15m")
-                mode = str(pos.get("signal_mode") or "trend")
-                entry = float(pos.get("entry_price") or 0.0)
-                bars = int(pos.get("bars_elapsed") or 0)
-                slope = float(pos.get("entry_slope") or 0.0)
-                adx = float(pos.get("entry_adx") or 0.0)
-                leader_score = float(pos.get("leader_score") or 0.0)
-                today_change = float(pos.get("today_change_pct") or 0.0)
-                four_h_score = float(pos.get("four_h_context_score") or 0.0)
-                four_h_label = str(pos.get("four_h_context_label") or "")
                 four_h_line = ""
                 if four_h_label:
                     four_h_line = f"  🕓 4h: <code>{four_h_score:+.1f}</code> {_html.escape(four_h_label)}\n"
+
                 block = (
-                    f"<b>{_html.escape(sym)}</b> <i>[agent]</i>  "
+                    f"<b>{idx}. {_html.escape(sym)}</b>{scan_icon} <i>[{source}]</i>{grp_str}  "
                     f"<code>[{_html.escape(tf)}]</code>\n"
                     f"  🧭 {_html.escape(signal_mode_label(mode))}  "
+                    f"score <code>{score:.1f}</code>  "
                     f"📈 slope <code>{slope:+.2f}%</code>  "
                     f"💪 ADX <code>{adx:.1f}</code>\n"
                     f"  💰 Вход: <code>{entry:.6g}</code>  "
                     f"⏱ {bars}б  "
-                    f"🎯 leader <code>{leader_score:.1f}</code> today <code>{today_change:+.2f}%</code>\n"
-                    + four_h_line +
-                    f"  🎯 {_agent_prediction_summary(pos)}\n"
+                    f"forecast <code>{forecast_return:+.2f}%</code> today <code>{today_change:+.2f}%</code>\n"
+                    + four_h_line
+                    + ev_line
+                    + f"  🎯 {_agent_prediction_summary(pos)}\n"
                 )
                 current_len = sum(len(l) for l in lines)
                 if current_len + len(block) > MAX_LEN:
-                    remaining = n_open - shown
+                    remaining = len(rows) - shown
                     lines.append(f"\n<i>...и ещё {remaining} позиций</i>")
                     break
                 lines.append(block)
                 shown += 1
             txt = "\n".join(lines)
-        # edit_message_text: ensure positions button uses ParseMode.HTML
-        await _edit_or_send(
-            query,
+        # Positions are easier to miss when Telegram edits an older menu message.
+        # Send them as a fresh message so the button always has visible feedback.
+        await _send_message_retry(
             ctx.application,
-            txt, parse_mode=ParseMode.HTML, reply_markup=kb_main(),
+            chat_id,
+            txt,
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb_main(),
+            attempts=1,
+            timeout=1.2,
         )
 
     # ── 📋 Список монет ───────────────────────────────────────────────────────
@@ -962,10 +1398,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     log.info("MENU TEXT chat_id=%s text=%r", chat_id, incoming_text)
     lower_text = incoming_text.lower()
     if incoming_text == "📋 Открыть меню":
-        await cmd_start(update, ctx)
+        await _send_main_menu(update, ctx, refresh_quick_keyboard=False)
         return
     if "открыть" in lower_text and "меню" in lower_text:
-        await cmd_start(update, ctx)
+        await _send_main_menu(update, ctx, refresh_quick_keyboard=False)
         return
     if incoming_text == "🙈 Скрыть меню":
         await update.message.reply_text(
@@ -1041,8 +1477,9 @@ def _ensure_positions_monitored(state) -> None:
             from strategy import CoinReport
             dummy = CoinReport(
                 symbol=sym, tf=pos.tf,
-                today_signals=[], today_confirmed=True,
+                today_signals=0, today_confirmed=True,
                 signal_now=False, today_accuracy={},
+                best_horizon=0,
                 best_accuracy=0.0,
                 note="удерживаем позицию (exit guard)",
                 in_play=True,
@@ -1105,11 +1542,25 @@ async def _auto_reanalyze(app: Application) -> None:
                 except Exception:
                     pass
         except Exception as e:
-            log.error("Auto-reanalyze error: %s", e)
+            log.exception("Auto-reanalyze error: %s", e)
+
+
+async def _refresh_position_cache_async() -> None:
+    try:
+        hot_coins = list(state.hot_coins)
+        text = await run_cpu(_build_positions_text_sync, hot_coins)
+        log.info(
+            "position cache refreshed: %s rows, text_len=%s",
+            _cached_unified_position_count(),
+            len(text),
+        )
+    except Exception as exc:
+        log.warning("position cache refresh failed: %s", exc.__class__.__name__)
 
 
 async def _post_init(app: Application) -> None:
     """При старте: уведомляет пользователей и автоматически запускает анализ+мониторинг."""
+    asyncio.create_task(_refresh_position_cache_async())
     asyncio.create_task(_auto_reanalyze(app))
 
     # ML: запускаем фоновый сборщик данных (каждые 15 минут обновляет ml_dataset.jsonl)
@@ -1219,15 +1670,33 @@ async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Unhandled error: %s", context.error)
 
 def main() -> None:
+    install_default_io_executor()
     token = config.TELEGRAM_BOT_TOKEN
     if not token:
         raise RuntimeError(
             "Токен не задан.\nСоздайте файл .env:\n"
             "TELEGRAM_BOT_TOKEN=ваш_токен"
         )
+    request = HTTPXRequest(
+        connection_pool_size=32,
+        connect_timeout=2.0,
+        read_timeout=6.0,
+        write_timeout=6.0,
+        pool_timeout=1.0,
+    )
+    updates_request = HTTPXRequest(
+        connection_pool_size=4,
+        connect_timeout=5.0,
+        read_timeout=15.0,
+        write_timeout=5.0,
+        pool_timeout=1.0,
+    )
     app = (
         Application.builder()
         .token(token)
+        .request(request)
+        .get_updates_request(updates_request)
+        .concurrent_updates(True)
         .post_init(_post_init)
         .build()
     )

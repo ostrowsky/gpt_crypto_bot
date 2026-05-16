@@ -24,6 +24,7 @@ HISTORY_FILE = REPORT_DIR / "top_gainer_critic_history.jsonl"
 BINANCE_API = "https://api.binance.com"
 WATCHLIST_FILE = ROOT / "watchlist.json"
 BOT_EVENTS_FILE = ROOT / "bot_events.jsonl"
+AGENT_EVENTS_FILE = ROOT / "agent_events.jsonl"
 
 DEFAULT_TOP_N = 15
 DEFAULT_MIN_QUOTE_VOLUME = 1_000_000.0
@@ -103,7 +104,82 @@ def _parse_utc_ts(raw: str | None) -> datetime | None:
             return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-    return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _event_log_files() -> tuple[tuple[Path, str], ...]:
+    files = [(BOT_EVENTS_FILE, "bot")]
+    if AGENT_EVENTS_FILE != BOT_EVENTS_FILE:
+        files.append((AGENT_EVENTS_FILE, "agent"))
+    return tuple(files)
+
+
+def _event_source(rec: dict[str, Any]) -> str:
+    source = str(
+        rec.get("_source")
+        or rec.get("source")
+        or rec.get("_log_source")
+        or "bot"
+    ).strip()
+    return source or "bot"
+
+
+def _blocked_reason_code(rec: dict[str, Any]) -> str:
+    signal_type = str(rec.get("signal_type") or "").strip().lower()
+    reason = str(rec.get("reason") or "").strip().lower()
+    text = f"{signal_type} {reason}"
+
+    if "portfolio" in text or "портфель" in text or "рїрѕсђс‚с„" in text:
+        return "portfolio_full"
+    if "open_cluster_cap" in text or ("cluster" in text and "cap" in text):
+        return "open_cluster_cap"
+    if "symbol_cooldown" in text or "cooldown" in text:
+        return "symbol_cooldown"
+    if "top_gainer_score" in text:
+        return "top_gainer_score_gate"
+    if "top_gainer_objective" in text or "objective gate" in text:
+        return "top_gainer_objective_gate"
+    if "mtf" in text or "deep correction" in text:
+        return "mtf_correction"
+    if "best_accuracy" in text or "best accuracy" in text or "accuracy <" in text:
+        return "accuracy_gate"
+    if "mode disabled" in text or "agent mode disabled" in text:
+        return "agent_mode_disabled"
+    if "replacement_filter" in text or "replacement filter" in text:
+        return "agent_replacement_filter"
+    if "chase_guard" in text or "chase guard" in text:
+        return "chase_guard"
+    if "agent_leader_filter" in text:
+        return "agent_leader_filter"
+    if "adx" in text:
+        return "adx_gate"
+    if "volume" in text or "vol_x" in text:
+        return "volume_gate"
+    if signal_type:
+        return signal_type
+    if reason:
+        return "blocked_rule"
+    return "blocked_unknown"
+
+
+def _counter_payload(counter: Counter) -> dict[str, int]:
+    return {str(key): int(value) for key, value in counter.most_common()}
+
+
+def _compact_count_map(counts: Any, limit: int = 5) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "none"
+    items = sorted(
+        ((str(key), int(value or 0)) for key, value in counts.items()),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return ", ".join(f"{key}: {value}" for key, value in items[:limit])
 
 
 def _load_watchlist() -> set[str]:
@@ -278,31 +354,34 @@ async def fetch_day_performance(
 
 def _load_day_events(start_local: datetime, end_local: datetime, tz: ZoneInfo) -> dict[str, dict[str, list[dict[str, Any]]]]:
     rows: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for rec in _iter_jsonl(BOT_EVENTS_FILE):
-        sym = str(rec.get("sym", ""))
-        if not sym:
-            continue
-        ts = _parse_utc_ts(rec.get("ts"))
-        if not ts:
-            continue
-        ts_local = ts.astimezone(tz)
-        if not (start_local <= ts_local <= end_local):
-            continue
-        bucket = rows.setdefault(
-            sym,
-            {"entries": [], "exits": [], "blocked": [], "forwards": []},
-        )
-        rec = dict(rec)
-        rec["_ts_local"] = ts_local.strftime("%H:%M")
-        event = str(rec.get("event", ""))
-        if event == "entry":
-            bucket["entries"].append(rec)
-        elif event == "exit":
-            bucket["exits"].append(rec)
-        elif event == "blocked":
-            bucket["blocked"].append(rec)
-        elif event == "forward":
-            bucket["forwards"].append(rec)
+    for event_file, default_source in _event_log_files():
+        for rec in _iter_jsonl(event_file):
+            sym = str(rec.get("sym", ""))
+            if not sym:
+                continue
+            ts = _parse_utc_ts(rec.get("ts"))
+            if not ts:
+                continue
+            ts_local = ts.astimezone(tz)
+            if not (start_local <= ts_local <= end_local):
+                continue
+            bucket = rows.setdefault(
+                sym,
+                {"entries": [], "exits": [], "blocked": [], "forwards": []},
+            )
+            rec = dict(rec)
+            rec["_ts_local"] = ts_local.strftime("%H:%M")
+            rec["_log_source"] = default_source
+            rec["_source"] = str(rec.get("source") or default_source)
+            event = str(rec.get("event", ""))
+            if event == "entry":
+                bucket["entries"].append(rec)
+            elif event == "exit":
+                bucket["exits"].append(rec)
+            elif event == "blocked":
+                bucket["blocked"].append(rec)
+            elif event == "forward":
+                bucket["forwards"].append(rec)
     return rows
 
 
@@ -312,6 +391,46 @@ def _capture_ratio(day_open: float, day_close: float, entry_price: float) -> flo
         return None
     ratio = (day_close - entry_price) / move
     return max(0.0, min(1.5, ratio))
+
+
+def _event_local_dt(rec: dict[str, Any] | None, tz: ZoneInfo) -> datetime | None:
+    if not rec:
+        return None
+    ts = _parse_utc_ts(rec.get("ts"))
+    if not ts:
+        return None
+    return ts.astimezone(tz)
+
+
+def _event_price(rec: dict[str, Any] | None, field: str) -> float | None:
+    if not rec:
+        return None
+    try:
+        value = float(rec.get(field, 0.0))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _exit_quality_metrics(
+    *,
+    entry_price: float | None,
+    day_high: float,
+    last_exit: dict[str, Any] | None,
+) -> tuple[float | None, float | None]:
+    if not entry_price or entry_price <= 0 or not last_exit:
+        return None, None
+    try:
+        exit_pnl = float(last_exit.get("pnl_pct"))
+    except (TypeError, ValueError):
+        exit_price = _event_price(last_exit, "exit_price")
+        exit_pnl = ((exit_price / entry_price) - 1.0) * 100.0 if exit_price else 0.0
+    max_favorable = (day_high / entry_price - 1.0) * 100.0
+    if max_favorable <= 0:
+        return None, None
+    exit_efficiency = exit_pnl / max_favorable
+    giveback_pct = max(0.0, max_favorable - exit_pnl)
+    return exit_efficiency, giveback_pct
 
 
 def _status_for_symbol(in_watchlist: bool, events: dict[str, list[dict[str, Any]]]) -> tuple[str, str | None]:
@@ -324,7 +443,9 @@ def _status_for_symbol(in_watchlist: bool, events: dict[str, list[dict[str, Any]
     if blocked:
         reasons = Counter(str(x.get("reason", "")) for x in blocked)
         top_reason = reasons.most_common(1)[0][0] if reasons else None
-        if top_reason and "портфель полон" in top_reason:
+        reason_codes = Counter(_blocked_reason_code(x) for x in blocked)
+        top_reason_code = reason_codes.most_common(1)[0][0] if reason_codes else None
+        if top_reason_code == "portfolio_full":
             return "blocked_portfolio", top_reason
         return "blocked_rule", top_reason
     return "no_signal", None
@@ -333,24 +454,62 @@ def _status_for_symbol(in_watchlist: bool, events: dict[str, list[dict[str, Any]
 def summarize_top_gainer(
     perf: DayPerformance,
     events: dict[str, list[dict[str, Any]]],
+    *,
+    end_local: datetime | None = None,
+    tz: ZoneInfo | None = None,
 ) -> dict[str, Any]:
+    tz = tz or ZoneInfo(DEFAULT_TZ)
     entries = sorted(events.get("entries", []), key=lambda x: x.get("ts", ""))
     exits = sorted(events.get("exits", []), key=lambda x: x.get("ts", ""))
+    blocked = sorted(events.get("blocked", []), key=lambda x: x.get("ts", ""))
     first_entry = entries[0] if entries else None
     last_exit = exits[-1] if exits else None
+    first_block = blocked[0] if blocked else None
+    last_block = blocked[-1] if blocked else None
+    first_cooldown_block = next((item for item in blocked if _blocked_reason_code(item) == "symbol_cooldown"), None)
     status, reason = _status_for_symbol(perf.in_watchlist, events)
 
     first_entry_price = float(first_entry.get("price", 0.0)) if first_entry else None
+    first_block_price = _event_price(first_block, "price")
+    first_cooldown_block_price = _event_price(first_cooldown_block, "price")
     capture_ratio = (
         _capture_ratio(perf.day_open, perf.day_close, first_entry_price)
         if first_entry_price
         else None
+    )
+    first_entry_dt = _event_local_dt(first_entry, tz)
+    lead_time_to_final_top_min = (
+        max(0, int((end_local - first_entry_dt).total_seconds() // 60))
+        if end_local is not None and first_entry_dt is not None
+        else None
+    )
+    exit_efficiency, giveback_pct = _exit_quality_metrics(
+        entry_price=first_entry_price,
+        day_high=perf.day_high,
+        last_exit=last_exit,
     )
     opportunity_from_entry = (
         (perf.day_close / first_entry_price - 1.0) * 100.0
         if first_entry_price and first_entry_price > 0
         else None
     )
+    opportunity_from_first_block = (
+        (perf.day_close / first_block_price - 1.0) * 100.0
+        if first_block_price and first_block_price > 0 and not first_entry
+        else None
+    )
+    cooldown_harm = None
+    if first_cooldown_block_price and first_cooldown_block_price > 0:
+        cooldown_move = (perf.day_close / first_cooldown_block_price - 1.0) * 100.0
+        cooldown_harm = max(0.0, cooldown_move)
+    blocked_reason_counts = Counter(_blocked_reason_code(item) for item in blocked)
+    missed_reason_code = None
+    if status != "bought":
+        missed_reason_code = (
+            blocked_reason_counts.most_common(1)[0][0]
+            if blocked_reason_counts
+            else status
+        )
 
     summary = {
         "symbol": perf.symbol,
@@ -362,17 +521,106 @@ def summarize_top_gainer(
         "status": status,
         "reason": reason,
         "entries_count": len(entries),
-        "blocked_count": len(events.get("blocked", [])),
+        "blocked_count": len(blocked),
+        "blocked_reason_counts": _counter_payload(blocked_reason_counts),
+        "blocked_sources": sorted({_event_source(item) for item in blocked}),
+        "first_block_time": first_block.get("_ts_local") if first_block else None,
+        "last_block_time": last_block.get("_ts_local") if last_block else None,
+        "first_block_reason_code": _blocked_reason_code(first_block) if first_block else None,
+        "first_block_price": first_block_price,
+        "missed_reason_code": missed_reason_code,
+        "opportunity_no_entry_pct": None if first_entry else round(perf.day_change_pct, 3),
+        "opportunity_from_first_block_pct": None if opportunity_from_first_block is None else round(opportunity_from_first_block, 3),
+        "entry_sources": sorted({_event_source(item) for item in entries}),
         "first_entry_time": first_entry.get("_ts_local") if first_entry else None,
-        "first_entry_mode": first_entry.get("mode") if first_entry else None,
+        "first_entry_mode": (first_entry.get("mode") or first_entry.get("signal_type")) if first_entry else None,
+        "first_entry_source": _event_source(first_entry) if first_entry else None,
         "first_entry_price": first_entry_price,
         "capture_ratio": None if capture_ratio is None else round(capture_ratio, 4),
+        "capture_ratio_at_entry": None if capture_ratio is None else round(capture_ratio, 4),
+        "lead_time_to_final_top_min": lead_time_to_final_top_min,
         "opportunity_from_entry_pct": None if opportunity_from_entry is None else round(opportunity_from_entry, 3),
         "latest_exit_time": last_exit.get("_ts_local") if last_exit else None,
         "latest_exit_pnl_pct": last_exit.get("pnl_pct") if last_exit else None,
         "latest_exit_reason": last_exit.get("reason") if last_exit else None,
+        "exit_efficiency": None if exit_efficiency is None else round(exit_efficiency, 4),
+        "giveback_pct": None if giveback_pct is None else round(giveback_pct, 4),
+        "first_cooldown_block_time": first_cooldown_block.get("_ts_local") if first_cooldown_block else None,
+        "first_cooldown_block_price": first_cooldown_block_price,
+        "cooldown_harm_pct": None if cooldown_harm is None else round(cooldown_harm, 4),
     }
     return summary
+
+
+def _blocked_reason_harm(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    acc: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        symbol = str(row.get("symbol") or "")
+        counts = row.get("blocked_reason_counts") or {}
+        if not symbol or not isinstance(counts, dict):
+            continue
+        for code, count in counts.items():
+            code_text = str(code)
+            payload = acc.setdefault(
+                code_text,
+                {
+                    "reason_code": code_text,
+                    "blocked_events": 0,
+                    "symbols": set(),
+                    "missed_symbols": set(),
+                    "missed_opportunity_pct": 0.0,
+                    "examples": [],
+                },
+            )
+            payload["blocked_events"] += int(count or 0)
+            payload["symbols"].add(symbol)
+            if row.get("status") != "bought":
+                payload["missed_symbols"].add(symbol)
+                opportunity = row.get("opportunity_from_first_block_pct")
+                if opportunity is None:
+                    opportunity = row.get("opportunity_no_entry_pct")
+                try:
+                    opportunity_value = float(opportunity or 0.0)
+                except (TypeError, ValueError):
+                    opportunity_value = 0.0
+                payload["missed_opportunity_pct"] += opportunity_value
+                if len(payload["examples"]) < 5:
+                    payload["examples"].append(
+                        {
+                            "symbol": symbol,
+                            "opportunity_pct": round(opportunity_value, 3),
+                            "status": row.get("status"),
+                        }
+                    )
+
+    out: list[dict[str, Any]] = []
+    for payload in acc.values():
+        symbols = sorted(payload.pop("symbols"))
+        missed_symbols = sorted(payload.pop("missed_symbols"))
+        missed_count = len(missed_symbols)
+        missed_opportunity = round(float(payload["missed_opportunity_pct"]), 3)
+        out.append(
+            {
+                **payload,
+                "symbols": symbols,
+                "symbols_count": len(symbols),
+                "missed_symbols": missed_symbols,
+                "missed_symbols_count": missed_count,
+                "missed_opportunity_pct": missed_opportunity,
+                "avg_missed_opportunity_pct": round(missed_opportunity / missed_count, 3)
+                if missed_count
+                else 0.0,
+            }
+        )
+    out.sort(
+        key=lambda item: (
+            -int(item.get("missed_symbols_count") or 0),
+            -float(item.get("missed_opportunity_pct") or 0.0),
+            -int(item.get("blocked_events") or 0),
+            str(item.get("reason_code") or ""),
+        )
+    )
+    return out
 
 
 def build_report(
@@ -402,21 +650,43 @@ def build_report(
     watchlist_top = [x for x in day_performance if x.in_watchlist][:top_n]
     event_rows = _load_day_events(start_local, end_local, tz)
 
-    all_top_summary = [summarize_top_gainer(item, event_rows.get(item.symbol, {})) for item in all_top]
-    watchlist_top_summary = [summarize_top_gainer(item, event_rows.get(item.symbol, {})) for item in watchlist_top]
+    all_top_summary = [
+        summarize_top_gainer(item, event_rows.get(item.symbol, {}), end_local=end_local, tz=tz)
+        for item in all_top
+    ]
+    watchlist_top_summary = [
+        summarize_top_gainer(item, event_rows.get(item.symbol, {}), end_local=end_local, tz=tz)
+        for item in watchlist_top
+    ]
 
     watchlist_top_set = {item["symbol"] for item in watchlist_top_summary}
-    bought_symbols = {
-        str(rec.get("sym"))
-        for rec in _iter_jsonl(BOT_EVENTS_FILE)
-        if rec.get("event") == "entry"
-        and (ts := _parse_utc_ts(rec.get("ts")))
-        and start_local <= ts.astimezone(tz) <= end_local
-    }
+    bought_symbols: set[str] = set()
+    entry_source_counts: Counter = Counter()
+    for sym, buckets in event_rows.items():
+        for rec in buckets.get("entries", []):
+            bought_symbols.add(sym)
+            entry_source_counts[_event_source(rec)] += 1
     false_positive_symbols = sorted(sym for sym in bought_symbols if sym not in watchlist_top_set)
 
     bought_top = [x for x in watchlist_top_summary if x["status"] == "bought"]
     missed_top = [x for x in watchlist_top_summary if x["status"] != "bought"]
+    blocked_winners = [x for x in missed_top if int(x.get("blocked_count") or 0) > 0]
+    missed_reason_counts = Counter(
+        str(x.get("missed_reason_code") or x.get("status") or "unknown")
+        for x in missed_top
+    )
+    missed_reason_symbols: dict[str, list[str]] = {}
+    for item in missed_top:
+        reason_code = str(item.get("missed_reason_code") or item.get("status") or "unknown")
+        missed_reason_symbols.setdefault(reason_code, []).append(str(item.get("symbol") or ""))
+    watchlist_blocked_reason_counts: Counter = Counter()
+    for item in watchlist_top_summary:
+        for reason_code, count in (item.get("blocked_reason_counts") or {}).items():
+            watchlist_blocked_reason_counts[str(reason_code)] += int(count or 0)
+    blocked_winner_reason_counts: Counter = Counter()
+    for item in blocked_winners:
+        for reason_code, count in (item.get("blocked_reason_counts") or {}).items():
+            blocked_winner_reason_counts[str(reason_code)] += int(count or 0)
     early_captured = [
         x for x in bought_top
         if (x.get("capture_ratio") or 0.0) >= 0.35
@@ -448,9 +718,17 @@ def build_report(
             "watchlist_top_early_capture_rate_pct": round((len(early_captured) / len(watchlist_top_summary) * 100.0), 2) if watchlist_top_summary else 0.0,
             "bot_unique_buys": len(bought_symbols),
             "bot_false_positive_buys": len(false_positive_symbols),
+            "entry_source_counts": _counter_payload(entry_source_counts),
+            "blocked_winner_count": len(blocked_winners),
+            "blocked_winner_symbols": [str(x.get("symbol")) for x in blocked_winners],
+            "missed_reason_counts": _counter_payload(missed_reason_counts),
+            "watchlist_blocked_reason_counts": _counter_payload(watchlist_blocked_reason_counts),
+            "blocked_winner_reason_counts": _counter_payload(blocked_winner_reason_counts),
         },
         "exchange_top_gainers": all_top_summary,
         "watchlist_top_gainers": watchlist_top_summary,
+        "missed_reason_symbols": missed_reason_symbols,
+        "blocked_reason_harm": _blocked_reason_harm(watchlist_top_summary),
         "bot_false_positive_symbols": false_positive_symbols[:top_n],
     }
     return report
@@ -469,24 +747,61 @@ def render_text(report: dict[str, Any]) -> str:
         f"  watchlist top bought: {summary['watchlist_top_bought']}/{summary['watchlist_top_count']} ({summary['watchlist_top_capture_rate_pct']:.1f}%)",
         f"  early captures: {summary['watchlist_top_early_captured']}/{summary['watchlist_top_count']} ({summary['watchlist_top_early_capture_rate_pct']:.1f}%)",
         f"  bot false-positive buys: {summary['bot_false_positive_buys']}/{summary['bot_unique_buys']}",
+        f"  blocked winners: {summary.get('blocked_winner_count', 0)}",
+        f"  missed reasons: {_compact_count_map(summary.get('missed_reason_counts'))}",
+        f"  blocked winner filters: {_compact_count_map(summary.get('blocked_winner_reason_counts'))}",
+        f"  blocked filters: {_compact_count_map(summary.get('watchlist_blocked_reason_counts'))}",
         "",
-        "Watchlist top gainers and bot reaction:",
     ]
+    if report.get("blocked_reason_harm"):
+        lines.append("Filter harm by missed top-gainers:")
+        for item in report["blocked_reason_harm"][:5]:
+            lines.append(
+                "  "
+                f"{item['reason_code']}: missed={item['missed_symbols_count']} "
+                f"events={item['blocked_events']} "
+                f"opportunity={float(item['missed_opportunity_pct']):+.2f}%"
+            )
+        lines.append("")
+    lines.append("Watchlist top gainers and bot reaction:")
     for idx, item in enumerate(report["watchlist_top_gainers"], start=1):
         lines.append(
             f"{idx}. {item['symbol']} {item['day_change_pct']:+.2f}% status={item['status']}"
         )
         if item["first_entry_time"]:
             capture = "n/a" if item["capture_ratio"] is None else f"{float(item['capture_ratio']) * 100:.1f}%"
+            lead = item.get("lead_time_to_final_top_min")
+            lead_text = "n/a" if lead is None else f"{int(lead)}m"
             lines.append(
-                f"   BUY {item['first_entry_time']} mode={item['first_entry_mode']} entry={item['first_entry_price']} capture={capture}"
+                f"   BUY {item['first_entry_time']} mode={item['first_entry_mode']} source={item.get('first_entry_source')} entry={item['first_entry_price']} capture={capture}"
+                f" lead={lead_text}"
+            )
+        if item.get("first_block_time"):
+            opp = item.get("opportunity_from_first_block_pct")
+            opp_text = "n/a" if opp is None else f"{float(opp):+.2f}%"
+            lines.append(
+                f"   BLOCKED {item['first_block_time']}..{item['last_block_time']} "
+                f"codes={_compact_count_map(item.get('blocked_reason_counts'))} "
+                f"sources={','.join(item.get('blocked_sources') or [])} "
+                f"opp_from_first_block={opp_text}"
             )
         if item["latest_exit_pnl_pct"] is not None:
+            eff = item.get("exit_efficiency")
+            giveback = item.get("giveback_pct")
+            eff_text = "n/a" if eff is None else f"{float(eff) * 100:.1f}%"
+            giveback_text = "n/a" if giveback is None else f"{float(giveback):+.2f}%"
             lines.append(
-                f"   EXIT {item['latest_exit_time']} pnl={float(item['latest_exit_pnl_pct']):+.2f}%"
+                f"   EXIT {item['latest_exit_time']} pnl={float(item['latest_exit_pnl_pct']):+.2f}% "
+                f"eff={eff_text} giveback={giveback_text}"
+            )
+        if item.get("cooldown_harm_pct") is not None:
+            lines.append(
+                f"   COOLDOWN harm={float(item['cooldown_harm_pct']):+.2f}% "
+                f"from={item.get('first_cooldown_block_time')}"
             )
         if item["reason"]:
-            lines.append(f"   WHY {item['reason']}")
+            code = item.get("missed_reason_code") or item.get("first_block_reason_code") or "rule"
+            lines.append(f"   WHY {code}: {item['reason']}")
 
     if report["bot_false_positive_symbols"]:
         lines.append("")

@@ -61,12 +61,13 @@ def _write(event: Dict[str, Any]) -> None:
 def log_bull_day(is_bull: bool, btc_price: float, btc_ema50: float,
                  eff_range_max: float, eff_rsi_hi: float) -> None:
     """П5: характер дня — вызывать после is_bull_day() в market_scan."""
+    btc_vs_ema50 = round((btc_price / btc_ema50 - 1) * 100, 2) if btc_ema50 > 0 else 0.0
     _write({
         "event":         "bull_day",
         "is_bull":       is_bull,
         "btc_price":     round(btc_price, 2),
         "btc_ema50":     round(btc_ema50, 2),
-        "btc_vs_ema50":  round((btc_price / btc_ema50 - 1) * 100, 2),
+        "btc_vs_ema50":  btc_vs_ema50,
         "eff_range_max": eff_range_max,
         "eff_rsi_hi":    eff_rsi_hi,
     })
@@ -92,9 +93,9 @@ def log_entry(sym: str, tf: str, mode: str, price: float,
               ema20: float, slope: float, rsi: float, adx: float,
               vol_x: float, macd_hist: float, daily_range: float,
               trail_k: float, max_hold_bars: int,
-              ml_proba: Optional[float] = None) -> None:
+              ml_proba: float = 0.0) -> None:
     """Открытие позиции."""
-    rec: Dict[str, Any] = {
+    _write({
         "event":        "entry",
         "sym":          sym,
         "tf":           tf,
@@ -109,10 +110,8 @@ def log_entry(sym: str, tf: str, mode: str, price: float,
         "daily_range":  round(daily_range, 2),
         "trail_k":      trail_k,
         "max_hold_bars":max_hold_bars,
-    }
-    if ml_proba is not None:
-        rec["ml_proba"] = round(float(ml_proba), 4)
-    _write(rec)
+        "ml_proba":     round(float(ml_proba or 0.0), 4),
+    })
 
 
 def log_exit(sym: str, tf: str, mode: str, entry_price: float,
@@ -215,6 +214,46 @@ def log_ranker_shadow(
     if ranker_expected_drawdown is not None:
         rec["ranker_expected_drawdown"] = round(float(ranker_expected_drawdown), 6)
     _write(rec)
+
+
+def log_scout_shadow(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    ema20: float,
+    slope: float,
+    rsi: float,
+    adx: float,
+    vol_x: float,
+    daily_range: float,
+    macd_hist: float,
+    candidate_score: float,
+    score_floor: float,
+    reason: str,
+    scout_profile: str,
+) -> None:
+    """Hypothetical scout entry for post-factum evaluation only."""
+    _write({
+        "event": "scout_shadow",
+        "source": "scout",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "price": price,
+        "ema20": round(ema20, 8),
+        "slope_pct": round(slope, 3),
+        "rsi": round(rsi, 1),
+        "adx": round(adx, 1),
+        "vol_x": round(vol_x, 2),
+        "daily_range": round(daily_range, 2),
+        "macd_hist": round(macd_hist, 8),
+        "candidate_score": round(candidate_score, 4),
+        "score_floor": round(score_floor, 4),
+        "reason": reason,
+        "scout_profile": scout_profile,
+    })
 
 
 def log_cooldown(sym: str, tf: str, bars_remaining: int, first: bool = False) -> None:

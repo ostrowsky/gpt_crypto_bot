@@ -33,6 +33,7 @@ import config
 import critic_dataset
 import ml_dataset
 from indicators import compute_features
+from runtime_executors import run_cpu
 from strategy import fetch_klines, check_entry_conditions, check_retest_conditions, \
     check_breakout_conditions, check_impulse_conditions, check_alignment_conditions, \
     check_trend_surge_conditions, get_entry_mode
@@ -53,10 +54,10 @@ def _detect_rule_signal(feat: dict, i: int, data: np.ndarray) -> str:
     """Что сказала бы стратегия на этом баре."""
     try:
         c = data["c"].astype(float)
-        brk_ok, _ = check_breakout_conditions(feat, i)  # нет третьего аргумента
+        brk_ok, _ = check_breakout_conditions(feat, i)
         if brk_ok:
             return "breakout"
-        ret_ok, _ = check_retest_conditions(feat, i)   # нет третьего аргумента
+        ret_ok, _ = check_retest_conditions(feat, i)
         if ret_ok:
             return "retest"
         buy_ok, _ = check_entry_conditions(feat, i, c)
@@ -87,93 +88,6 @@ def _signal_flags_from_rule_signal(rule_signal: str) -> dict:
     }
 
 
-def _process_coin_sync(
-    sym: str,
-    tf: str,
-    is_bull_day: bool,
-    btc_vs_ema50: float,
-    btc_momentum_4h: float,
-    market_vol_24h: float,
-    data,
-) -> bool:
-    """
-    CPU/file-heavy part of the collector hot path.
-
-    Runs in a worker thread so the main asyncio loop can continue servicing
-    Telegram polling while we compute features and append/fill dataset rows.
-    """
-    c = data["c"].astype(float)
-    i = len(c) - 2  # последний ЗАКРЫТЫЙ бар
-    if i < 20:
-        return False
-
-    feat = compute_features(
-        data["o"], data["h"], data["l"], c, data["v"]
-    )
-
-    rule_signal = _detect_rule_signal(feat, i, data)
-
-    if rule_signal != "none":
-        critic_dataset.log_candidate(
-            sym=sym,
-            tf=tf,
-            bar_ts=int(data["t"][i]),
-            signal_type=rule_signal,
-            is_bull_day=is_bull_day,
-            feat=feat,
-            i=i,
-            data=data,
-            action="candidate",
-            reason_code="rule_signal",
-            reason="collector detected candidate",
-            stage="collector",
-            candidate_score=0.0,
-            base_score=0.0,
-            score_floor=0.0,
-            forecast_return_pct=0.0,
-            today_change_pct=0.0,
-            ml_proba=None,
-            mtf_soft_penalty=0.0,
-            fresh_priority=False,
-            catchup=False,
-            continuation_profile=rule_signal in {"impulse_speed", "impulse", "alignment"},
-            signal_flags=_signal_flags_from_rule_signal(rule_signal),
-            btc_vs_ema50=btc_vs_ema50,
-            btc_momentum_4h=btc_momentum_4h,
-            market_vol_24h=market_vol_24h,
-        )
-
-    ml_dataset.log_bar_snapshot(
-        sym=sym, tf=tf,
-        bar_ts=int(data["t"][i]),
-        rule_signal=rule_signal,
-        is_bull_day=is_bull_day,
-        feat=feat, i=i, data=data,
-        btc_vs_ema50=btc_vs_ema50,
-        btc_momentum_4h=btc_momentum_4h,
-        market_vol_24h=market_vol_24h,
-    )
-
-    # Заполняем forward labels для ранее записанных баров
-    # ВАЖНО: bar_ms должен соответствовать tf записи, а не всегда 15m!
-    # Если tf="1h" и horizon=3, то T+3 = 3 часа (180 мин), а не 45 минут.
-    _TF_SECONDS = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
-    bar_ms = _TF_SECONDS.get(tf, BAR_SECONDS) * 1000
-    ml_dataset.fill_pending_from_data(
-        sym=sym, tf=tf,
-        t_arr=data["t"].astype(int),
-        c_arr=c,
-        bar_ms=bar_ms,
-    )
-    critic_dataset.fill_pending_from_data(
-        sym=sym, tf=tf,
-        t_arr=data["t"].astype(int),
-        c_arr=c,
-        bar_ms=bar_ms,
-    )
-    return True
-
-
 # ── Обработка одной монеты ─────────────────────────────────────────────────────
 
 async def _process_coin(
@@ -194,16 +108,81 @@ async def _process_coin(
         if data is None or len(data) < 30:
             return False
 
-        return await asyncio.to_thread(
-            _process_coin_sync,
-            sym,
-            tf,
-            is_bull_day,
-            btc_vs_ema50,
-            btc_momentum_4h,
-            market_vol_24h,
-            data,
+        c = data["c"].astype(float)
+        i = len(c) - 2  # последний ЗАКРЫТЫЙ бар
+
+        if i < 20:
+            return False
+
+        feat = await run_cpu(
+            compute_features,
+            data["o"], data["h"], data["l"], c, data["v"],
         )
+
+        rule_signal = await run_cpu(_detect_rule_signal, feat, i, data)
+
+        if rule_signal != "none":
+            await run_cpu(
+                critic_dataset.log_candidate,
+                sym=sym,
+                tf=tf,
+                bar_ts=int(data["t"][i]),
+                signal_type=rule_signal,
+                is_bull_day=is_bull_day,
+                feat=feat,
+                i=i,
+                data=data,
+                action="candidate",
+                reason_code="rule_signal",
+                reason="collector detected candidate",
+                stage="collector",
+                candidate_score=0.0,
+                base_score=0.0,
+                score_floor=0.0,
+                forecast_return_pct=0.0,
+                today_change_pct=0.0,
+                ml_proba=None,
+                mtf_soft_penalty=0.0,
+                fresh_priority=False,
+                catchup=False,
+                continuation_profile=rule_signal in {"impulse_speed", "impulse", "alignment"},
+                signal_flags=_signal_flags_from_rule_signal(rule_signal),
+                btc_vs_ema50=btc_vs_ema50,
+                btc_momentum_4h=btc_momentum_4h,
+                market_vol_24h=market_vol_24h,
+            )
+
+        # Логируем бар с полным рыночным контекстом
+        await run_cpu(
+            ml_dataset.log_bar_snapshot,
+            sym=sym, tf=tf,
+            bar_ts=int(data["t"][i]),
+            rule_signal=rule_signal,
+            is_bull_day=is_bull_day,
+            feat=feat, i=i, data=data,
+            btc_vs_ema50=btc_vs_ema50,
+            btc_momentum_4h=btc_momentum_4h,
+            market_vol_24h=market_vol_24h,
+        )
+
+        # Заполняем forward labels для ранее записанных баров
+        tf_seconds = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+        bar_ms = tf_seconds.get(tf, BAR_SECONDS) * 1000
+        await run_cpu(
+            ml_dataset.fill_pending_from_data,
+            sym=sym, tf=tf,
+            t_arr=data["t"].astype(int),
+            c_arr=c,
+            bar_ms=bar_ms,
+        )
+        await run_cpu(
+            critic_dataset.fill_pending_from_data,
+            sym=sym, tf=tf,
+            t_arr=data["t"].astype(int),
+            c_arr=c,
+            bar_ms=bar_ms,
+        )
+        return True
 
     except Exception as e:
         log.debug("_process_coin %s error: %s", sym, e)
@@ -248,7 +227,6 @@ async def _collect_once(btc_context: dict) -> dict:
                     ok += 1
                 else:
                     fail += 1
-            await asyncio.sleep(0)
             if batch_start + BATCH_SIZE < len(pairs):
                 await asyncio.sleep(BATCH_DELAY)
 
@@ -376,7 +354,7 @@ async def run_forever(app=None) -> None:
 
             # Статистика размера датасета раз в час
             if datetime.now(timezone.utc).minute < 15:
-                await asyncio.to_thread(_log_dataset_stats)
+                _log_dataset_stats()
 
         except asyncio.CancelledError:
             log.info("DataCollector cancelled — stopping")
@@ -387,42 +365,26 @@ async def run_forever(app=None) -> None:
 
 
 def _log_dataset_stats() -> None:
-    """Логирует статистику датасетов раз в час."""
+    """Логирует статистику датасета раз в час."""
     import json
+    from pathlib import Path
+    from collections import Counter
     try:
-        if ml_dataset.ML_FILE.exists():
-            lines = ml_dataset.ML_FILE.read_text(encoding="utf-8").splitlines()
-            records = []
-            for line in lines:
-                if not line.strip():
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
-            total = len(records)
-            labeled = sum(1 for r in records if r["labels"]["ret_3"] is not None)
-            signals = sum(1 for r in records if r["signal_type"] != "none")
-            size_kb = ml_dataset.ML_FILE.stat().st_size // 1024
-            log.info(
-                "ML Dataset: %d records (%d labeled, %d signals) — %d KB",
-                total, labeled, signals, size_kb,
-            )
-
+        if not ml_dataset.ML_FILE.exists():
+            return
+        lines   = ml_dataset.ML_FILE.read_text(encoding="utf-8").splitlines()
+        records = [json.loads(l) for l in lines if l.strip()]
+        total   = len(records)
+        labeled = sum(1 for r in records if r["labels"]["ret_3"] is not None)
+        signals = sum(1 for r in records if r["signal_type"] != "none")
+        size_kb = ml_dataset.ML_FILE.stat().st_size // 1024
+        log.info(
+            "ML Dataset: %d records (%d labeled, %d signals) — %d KB",
+            total, labeled, signals, size_kb,
+        )
         if critic_dataset.CRITIC_FILE.exists():
             lines = critic_dataset.CRITIC_FILE.read_text(encoding="utf-8").splitlines()
-            records = []
-            for line in lines:
-                if not line.strip():
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
+            records = [json.loads(line) for line in lines if line.strip()]
             total = len(records)
             labeled = sum(1 for r in records if r.get("labels", {}).get("ret_3") is not None)
             taken = sum(1 for r in records if bool(r.get("labels", {}).get("trade_taken")))

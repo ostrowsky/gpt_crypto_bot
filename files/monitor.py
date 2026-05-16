@@ -39,6 +39,9 @@ from strategy import (
 import botlog
 import critic_dataset
 import ml_dataset
+import signal_quality_feedback
+from runtime_executors import run_cpu
+from unified_portfolio import external_agent_symbol_count
 
 log = logging.getLogger(__name__)
 
@@ -944,6 +947,209 @@ def _near_miss_candidate_snapshot(
     return best
 
 
+def _early_top_mover_scout_shadow_snapshot(
+    *,
+    tf: str,
+    feat: dict,
+    data: np.ndarray,
+    i: int,
+    price: float,
+    ema20: float,
+    slope: float,
+    adx: float,
+    rsi: float,
+    vol_x: float,
+    daily_range: float,
+    forecast_return_pct: float,
+    today_change_pct: float,
+) -> Optional[Dict[str, Any]]:
+    if not getattr(config, "EARLY_TOP_MOVER_SCOUT_SHADOW_ENABLED", False):
+        return None
+    allowed_tf = tuple(str(x) for x in getattr(config, "EARLY_TOP_MOVER_SCOUT_TF", ("15m", "1h")))
+    if allowed_tf and tf not in allowed_tf:
+        return None
+    if i <= 0 or price <= 0 or ema20 <= 0:
+        return None
+    if today_change_pct < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_MIN_TODAY_CHANGE_PCT", 0.0)):
+        return None
+    if forecast_return_pct < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_MIN_FORECAST_RETURN_PCT", 0.0)):
+        return None
+    if vol_x < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_VOL_X_MIN", 0.55)):
+        return None
+    if slope < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_SLOPE_MIN", 0.08)):
+        return None
+    if adx < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_ADX_MIN", 14.0)):
+        return None
+    if rsi < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_RSI_MIN", 50.0)):
+        return None
+    if rsi > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_RSI_MAX", 75.5)):
+        return None
+
+    ema_slow_arr = feat.get("ema_slow")
+    ema_slow = (
+        float(ema_slow_arr[i])
+        if ema_slow_arr is not None and i < len(ema_slow_arr) and np.isfinite(ema_slow_arr[i])
+        else 0.0
+    )
+    ema_sep_pct = ((ema20 - ema_slow) / ema_slow * 100.0) if ema_slow > 0 else 0.0
+    if ema_sep_pct < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_EMA_SEP_MIN_PCT", -0.18)):
+        return None
+
+    price_edge = _time_block_price_edge_pct(price=price, ema20=ema20)
+    if price_edge < float(getattr(config, "EARLY_TOP_MOVER_SCOUT_PRICE_EDGE_MIN_PCT", -0.25)):
+        return None
+    if price_edge > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_PRICE_EDGE_MAX_PCT", 2.80)):
+        return None
+    if price < ema20 * 0.998:
+        return None
+
+    lookback = int(getattr(config, "EARLY_TOP_MOVER_SCOUT_RECENT_HIGH_LOOKBACK", 10))
+    recent_high = float(np.max(data["h"][max(0, i - lookback):i])) if i > 0 else price
+    recent_high_gap_pct = ((recent_high / price) - 1.0) * 100.0 if recent_high > 0 else 0.0
+    if recent_high_gap_pct > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_RECENT_HIGH_GAP_MAX_PCT", 1.10)):
+        return None
+
+    macd_hist_arr = feat.get("macd_hist")
+    macd_hist = (
+        float(macd_hist_arr[i])
+        if macd_hist_arr is not None and i < len(macd_hist_arr) and np.isfinite(macd_hist_arr[i])
+        else 0.0
+    )
+    if macd_hist < price * float(getattr(config, "EARLY_TOP_MOVER_SCOUT_MACD_MIN_REL", -0.00008)):
+        return None
+
+    mode = str(getattr(config, "EARLY_TOP_MOVER_SCOUT_MODE", "trend"))
+    base_score = _entry_signal_score(
+        mode=mode,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+    )
+    candidate_score = base_score
+    candidate_score += _top_mover_score_bonus(today_change_pct)
+    candidate_score += _forecast_return_score_bonus(forecast_return_pct)
+    score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
+    if score_floor > 0.0:
+        deficit = score_floor - candidate_score
+        if deficit > float(getattr(config, "EARLY_TOP_MOVER_SCOUT_SCORE_DEFICIT_MAX", 10.0)):
+            return None
+    else:
+        deficit = 0.0
+
+    return {
+        "mode": mode,
+        "candidate_score": float(candidate_score),
+        "base_score": float(base_score),
+        "score_floor": float(score_floor),
+        "macd_hist": float(macd_hist),
+        "ema_sep_pct": float(ema_sep_pct),
+        "price_edge_pct": float(price_edge),
+        "recent_high_gap_pct": float(recent_high_gap_pct),
+        "profile": str(getattr(config, "EARLY_TOP_MOVER_SCOUT_PROFILE", "precise_v1")),
+        "reason": (
+            "early top-mover scout shadow "
+            f"{str(getattr(config, 'EARLY_TOP_MOVER_SCOUT_PROFILE', 'precise_v1'))}: "
+            f"score {candidate_score:.2f}, floor {score_floor:.2f}, deficit {max(0.0, deficit):.2f}"
+        ),
+    }
+
+
+def _maybe_log_early_top_mover_scout_shadow(
+    *,
+    state: "MonitorState",
+    sym: str,
+    tf: str,
+    feat: dict,
+    data: np.ndarray,
+    i: int,
+    price: float,
+    ema20: float,
+    slope: float,
+    adx: float,
+    rsi: float,
+    vol_x: float,
+    daily_range: float,
+    forecast_return_pct: float,
+    today_change_pct: float,
+) -> Optional[Dict[str, Any]]:
+    scout = _early_top_mover_scout_shadow_snapshot(
+        tf=tf,
+        feat=feat,
+        data=data,
+        i=i,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+        forecast_return_pct=forecast_return_pct,
+        today_change_pct=today_change_pct,
+    )
+    if scout is None:
+        return None
+
+    bar_ts = int(data["t"][i])
+    dedup_bars = max(1, int(getattr(config, "EARLY_TOP_MOVER_SCOUT_DEDUP_BARS", 4)))
+    dedup_until = state.scout_shadow_logged.get(f"{sym}|{tf}", 0)
+    if bar_ts < dedup_until:
+        return None
+    state.scout_shadow_logged[f"{sym}|{tf}"] = bar_ts + dedup_bars * _tf_bar_ms(tf)
+
+    reason = str(scout["reason"])
+    mode = str(scout["mode"])
+    signal_flags = {"early_top_mover_scout": True}
+    _log_critic_candidate(
+        sym=sym,
+        tf=tf,
+        bar_ts=bar_ts,
+        signal_type=mode,
+        feat=feat,
+        data=data,
+        i=i,
+        action="shadow",
+        reason_code="early_top_mover_scout_shadow",
+        reason=reason,
+        stage="early_top_mover_scout",
+        candidate_score=float(scout["candidate_score"]),
+        base_score=float(scout["base_score"]),
+        score_floor=float(scout["score_floor"]),
+        forecast_return_pct=forecast_return_pct,
+        today_change_pct=today_change_pct,
+        ml_proba=None,
+        mtf_soft_penalty=0.0,
+        fresh_priority=True,
+        catchup=False,
+        continuation_profile=True,
+        signal_flags=signal_flags,
+        near_miss=True,
+    )
+    botlog.log_scout_shadow(
+        sym=sym,
+        tf=tf,
+        mode=mode,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        rsi=rsi,
+        adx=adx,
+        vol_x=vol_x,
+        daily_range=daily_range,
+        macd_hist=float(scout["macd_hist"]),
+        candidate_score=float(scout["candidate_score"]),
+        score_floor=float(scout["score_floor"]),
+        reason=reason,
+        scout_profile=str(scout["profile"]),
+    )
+    log.info("EARLY TOP-MOVER SCOUT SHADOW %s [%s]: %s", sym, tf, reason)
+    return scout
+
+
 def _log_critic_candidate(
     *,
     sym: str,
@@ -1012,11 +1218,11 @@ def _compute_features_from_data_sync(data: np.ndarray) -> tuple[np.ndarray, dict
 
 
 async def _compute_features_from_data(data: np.ndarray) -> tuple[np.ndarray, dict]:
-    return await asyncio.to_thread(_compute_features_from_data_sync, data)
+    return await run_cpu(_compute_features_from_data_sync, data)
 
 
 async def _analyze_coin_live(sym: str, tf: str, data: np.ndarray) -> CoinReport:
-    return await asyncio.to_thread(analyze_coin, sym, tf, data, False)
+    return await run_cpu(analyze_coin, sym, tf, data, False)
 
 
 # ── Portfolio risk helpers ─────────────────────────────────────────────────────
@@ -1492,6 +1698,134 @@ def _top_gainer_objective_gate_reason(
     return None
 
 
+def _top_gainer_live_score(
+    *,
+    mode: str,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    rsi: float,
+    ranker_info: Optional[Dict[str, float]],
+) -> float:
+    ranker_final_score = float((ranker_info or {}).get("final_score", 0.0))
+    ranker_top_gainer_prob = float((ranker_info or {}).get("top_gainer_prob", 0.0))
+    score = 0.0
+    score += max(-8.0, min(45.0, intraday_change_pct * 6.0))
+    score += max(0.0, min(18.0, daily_range * 1.1))
+    score += max(0.0, min(14.0, (vol_x - 1.0) * 7.0))
+    score += max(0.0, min(14.0, (adx - 18.0) * 0.7))
+    score += max(-8.0, min(12.0, ranker_final_score * 6.0))
+    score += max(0.0, min(18.0, ranker_top_gainer_prob * 45.0))
+    if mode in ("impulse_speed", "impulse"):
+        score += 5.0
+    if mode == "retest":
+        score += 1.5
+    if mode == "breakout":
+        score += 1.5
+    if rsi > 76.0 and daily_range >= 8.0:
+        score -= min(16.0, (rsi - 76.0) * 1.2 + (daily_range - 8.0) * 0.4)
+    if daily_range > 25.0:
+        score -= min(18.0, (daily_range - 25.0) * 0.6)
+    if intraday_change_pct < -0.25:
+        score -= 8.0
+    return round(score, 4)
+
+
+def _top_gainer_score_gate_reason(
+    *,
+    tf: str,
+    mode: str,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    rsi: float,
+    ranker_info: Optional[Dict[str, float]],
+) -> Optional[str]:
+    if not getattr(config, "TOP_GAINER_SCORE_GATE_ENABLED", False):
+        return None
+    allowed_modes = tuple(str(x) for x in getattr(config, "TOP_GAINER_SCORE_GATE_MODES", ()))
+    if allowed_modes and mode not in allowed_modes:
+        return None
+    score = _top_gainer_live_score(
+        mode=mode,
+        intraday_change_pct=intraday_change_pct,
+        daily_range=daily_range,
+        vol_x=vol_x,
+        adx=adx,
+        rsi=rsi,
+        ranker_info=ranker_info,
+    )
+    min_score = _top_gainer_score_gate_min_for_mode(mode)
+    if score >= min_score:
+        return None
+    return f"top-gainer score gate: score {score:.2f} < {min_score:.2f} for {tf} {mode}"
+
+
+def _top_gainer_score_gate_min_for_mode(mode: str) -> float:
+    mode_min_scores = getattr(config, "TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE", {}) or {}
+    try:
+        return float(mode_min_scores.get(mode, getattr(config, "TOP_GAINER_SCORE_GATE_MIN_SCORE", 18.0)))
+    except Exception:
+        return float(getattr(config, "TOP_GAINER_SCORE_GATE_MIN_SCORE", 18.0))
+
+
+async def _maybe_send_top_gainer_watch_alert(
+    *,
+    send: Callable[[str], Awaitable[None]],
+    state: "MonitorState",
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    rsi: float,
+    ranker_info: Optional[Dict[str, float]],
+    reason: str,
+    bar_ts: int,
+) -> None:
+    if not getattr(config, "TOP_GAINER_WATCH_ALERTS_ENABLED", False):
+        return
+    allowed_modes = tuple(str(x) for x in getattr(config, "TOP_GAINER_WATCH_ALERT_MODES", ("impulse_speed",)))
+    if allowed_modes and mode not in allowed_modes:
+        return
+    score = _top_gainer_live_score(
+        mode=mode,
+        intraday_change_pct=intraday_change_pct,
+        daily_range=daily_range,
+        vol_x=vol_x,
+        adx=adx,
+        rsi=rsi,
+        ranker_info=ranker_info,
+    )
+    min_score = _top_gainer_score_gate_min_for_mode(mode)
+    if score >= min_score or score < float(getattr(config, "TOP_GAINER_WATCH_ALERT_MIN_SCORE", 30.0)):
+        return
+    day_key = _local_day_key(bar_ts)
+    key = f"top_gainer_score|{sym}|{tf}|{mode}"
+    logged = getattr(state, "watch_alert_logged", None)
+    if logged is None:
+        logged = {}
+        setattr(state, "watch_alert_logged", logged)
+    if logged.get(key) == day_key:
+        return
+    logged[key] = day_key
+    await send(
+        "WATCH ONLY - blocked top-gainer candidate\n\n"
+        f"*{sym}*  `[{tf}]`  `{mode}`\n"
+        f"Price: `{price:.6g}`\n"
+        f"Top-gainer score: `{score:.2f}` / `{min_score:.2f}`\n"
+        f"RSI: `{rsi:.1f}`  ADX: `{adx:.1f}`  Vol x: `{vol_x:.2f}`\n"
+        f"Daily range: `{daily_range:.2f}%`\n"
+        f"Blocked: `{reason}`\n"
+        "No position opened."
+    )
+
+
 def _continuation_profit_lock_active(
     *,
     tf: str,
@@ -1785,8 +2119,14 @@ def _cooldown_bars_after_exit(
     ):
         return 0
     if _is_weak_exit_reason(reason) and mode in ("trend", "alignment"):
-        return max(base, int(getattr(config, "WEAK_REENTRY_COOLDOWN_BARS", base)))
-    return base
+        base = max(base, int(getattr(config, "WEAK_REENTRY_COOLDOWN_BARS", base)))
+    return signal_quality_feedback.effective_cooldown_bars(
+        base,
+        mode=mode,
+        reason=reason,
+        tf=tf,
+        pnl_pct=pnl_pct,
+    )
 
 
 def _fast_loss_ema_exit_reason(
@@ -2597,7 +2937,7 @@ async def _check_mtf(
         return True, "no 15m data"
 
     c = data_15m["c"].astype(float)
-    feat_15m = await asyncio.to_thread(
+    feat_15m = await run_cpu(
         compute_features,
         data_15m["o"],
         data_15m["h"],
@@ -3053,14 +3393,28 @@ def _check_portfolio_limits(
       2. MAX_POSITIONS_PER_GROUP — не более M позиций в одной группе монет
          (защита от ситуации 11.03.2026 когда 12 L1/AI вошли одновременно)
     """
-    max_pos_cfg = int(getattr(config, "MAX_OPEN_POSITIONS", 6))
+    max_pos_cfg = int(
+        getattr(
+            config,
+            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
+            getattr(config, "MAX_OPEN_POSITIONS", 6),
+        )
+        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
+        else getattr(config, "MAX_OPEN_POSITIONS", 6)
+    )
     max_pos  = int(max_positions_override if max_positions_override is not None else max_pos_cfg)
     max_grp  = getattr(config, "MAX_POSITIONS_PER_GROUP", 2)
 
     # Лимит 1: общее число позиций
-    n_open = len(state.positions)
+    main_symbols = set(state.positions)
+    n_external = (
+        external_agent_symbol_count(main_symbols)
+        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
+        else 0
+    )
+    n_open = len(state.positions) + n_external
     if n_open >= max_pos:
-        return False, f"портфель полон: {n_open}/{max_pos} позиций"
+        return False, f"единый портфель полон: {n_open}/{max_pos} позиций"
 
     # Лимит 2: группа монеты
     my_group = _get_coin_group(sym)
@@ -3249,6 +3603,8 @@ class MonitorState:
     # Портфельный лимит проверяется каждые 60с → без dedup = 100+ строк на монету.
     # Логируем не чаще 1 раза в BLOCK_LOG_INTERVAL_BARS баров (по умолчанию 4 = 1ч на 15m).
     block_logged:  Dict[str, int]  = field(default_factory=dict)
+    watch_alert_logged: Dict[str, str] = field(default_factory=dict)
+    scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
     time_block_recent: Dict[str, dict] = field(default_factory=dict)
     time_block_streaks: Dict[str, dict] = field(default_factory=dict)
     last_discovery_ts: int = 0
@@ -3687,6 +4043,23 @@ async def _poll_coin(
                         tf,
                         str(near_miss["reason"]),
                     )
+            _maybe_log_early_top_mover_scout_shadow(
+                state=state,
+                sym=sym,
+                tf=tf,
+                feat=feat,
+                data=data,
+                i=i,
+                price=preview_price,
+                ema20=preview_ema20,
+                slope=preview_slope,
+                adx=preview_adx,
+                rsi=preview_rsi,
+                vol_x=preview_vol,
+                daily_range=preview_range,
+                forecast_return_pct=float(getattr(report, "forecast_return_pct", 0.0)),
+                today_change_pct=float(getattr(report, "today_change_pct", 0.0)),
+            )
             if not any_signal:
                 return
         else:
@@ -4142,10 +4515,11 @@ async def _poll_coin(
                 )
                 botlog.log_blocked(sym, tf, float(c[i]), chase_guard_reason, signal_type="top_gainer_chase_guard")
                 return
+            intraday_change_pct_now = _intraday_change_pct_from_data(data, i)
             objective_gate_reason = _top_gainer_objective_gate_reason(
                 tf=tf,
                 mode=preview_mode,
-                intraday_change_pct=_intraday_change_pct_from_data(data, i),
+                intraday_change_pct=intraday_change_pct_now,
                 daily_range=preview_range,
                 vol_x=preview_vol,
                 adx=preview_adx,
@@ -4191,6 +4565,75 @@ async def _poll_coin(
                     reason=objective_gate_reason,
                 )
                 botlog.log_blocked(sym, tf, float(c[i]), objective_gate_reason, signal_type="top_gainer_objective_gate")
+                return
+            top_gainer_score_gate_reason = _top_gainer_score_gate_reason(
+                tf=tf,
+                mode=preview_mode,
+                intraday_change_pct=intraday_change_pct_now,
+                daily_range=preview_range,
+                vol_x=preview_vol,
+                adx=preview_adx,
+                rsi=preview_rsi,
+                ranker_info=ranker_info,
+            )
+            if top_gainer_score_gate_reason:
+                _log_critic_candidate(
+                    sym=sym,
+                    tf=tf,
+                    bar_ts=int(data["t"][i]),
+                    signal_type=preview_mode,
+                    feat=feat,
+                    data=data,
+                    i=i,
+                    action="blocked",
+                    reason_code="top_gainer_score_gate",
+                    reason=top_gainer_score_gate_reason,
+                    stage="quality_floor",
+                    candidate_score=candidate_score,
+                    base_score=base_score,
+                    score_floor=score_floor,
+                    forecast_return_pct=float(getattr(report, "forecast_return_pct", 0.0)),
+                    today_change_pct=float(getattr(report, "today_change_pct", 0.0)),
+                    ml_proba=ml_proba,
+                    mtf_soft_penalty=mtf_soft_penalty,
+                    fresh_priority=_is_fresh_priority_candidate(preview_mode, catchup_snapshot),
+                    catchup=catchup_snapshot is not None,
+                    continuation_profile=continuation_profile,
+                    signal_flags=signal_flags,
+                )
+                log.info("TOP GAINER SCORE BLOCK %s [%s]: %s", sym, tf, top_gainer_score_gate_reason)
+                _maybe_log_ranker_shadow(
+                    sym=sym,
+                    tf=tf,
+                    mode=preview_mode,
+                    price=float(c[i]),
+                    candidate_score=candidate_score,
+                    score_floor=score_floor,
+                    ranker_proba=ranker_proba,
+                    ranker_info=ranker_info,
+                    bot_action="blocked",
+                    reason=top_gainer_score_gate_reason,
+                )
+                botlog.log_blocked(sym, tf, float(c[i]), top_gainer_score_gate_reason, signal_type="top_gainer_score_gate")
+                try:
+                    await _maybe_send_top_gainer_watch_alert(
+                        send=send,
+                        state=state,
+                        sym=sym,
+                        tf=tf,
+                        mode=preview_mode,
+                        price=float(c[i]),
+                        intraday_change_pct=intraday_change_pct_now,
+                        daily_range=preview_range,
+                        vol_x=preview_vol,
+                        adx=preview_adx,
+                        rsi=preview_rsi,
+                        ranker_info=ranker_info,
+                        reason=top_gainer_score_gate_reason,
+                        bar_ts=int(data["t"][i]),
+                    )
+                except Exception as exc:
+                    log.warning("top-gainer watch alert failed for %s [%s]: %s", sym, tf, exc)
                 return
             if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False):
                 min_score = score_floor
@@ -5121,7 +5564,7 @@ async def _poll_coin(
         if continuation_profit_lock_active and tf == "1h":
             micro_data = await fetch_klines(session, sym, "15m", limit=config.LIVE_LIMIT)
             if micro_data is not None and len(micro_data) >= 60:
-                micro_feat = await asyncio.to_thread(
+                micro_feat = await run_cpu(
                     compute_features,
                     micro_data["o"],
                     micro_data["h"],
