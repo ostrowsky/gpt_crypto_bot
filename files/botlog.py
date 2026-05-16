@@ -256,6 +256,37 @@ def log_scout_shadow(
     })
 
 
+def log_peak_risk_shadow(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    entry_price: float,
+    pnl_pct: float,
+    score: float,
+    score_bucket: int,
+    rsi: float,
+    price_edge_pct: float,
+    macd_decelerating: bool,
+) -> None:
+    """Shadow-only lifecycle telemetry for profitable but overextended positions."""
+    _write({
+        "event": "peak_risk_shadow",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "price": round(price, 8),
+        "entry_price": round(entry_price, 8),
+        "pnl_pct": round(pnl_pct, 4),
+        "score": round(score, 4),
+        "score_bucket": int(score_bucket),
+        "rsi": round(rsi, 2),
+        "price_edge_pct": round(price_edge_pct, 4),
+        "macd_decelerating": bool(macd_decelerating),
+    })
+
+
 def log_cooldown(sym: str, tf: str, bars_remaining: int, first: bool = False) -> None:
     """
     Вход заблокирован кулдауном. Логируется только при first=True

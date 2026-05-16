@@ -153,6 +153,7 @@ TODAY_T10_MIN: float = 40.0
 # РРЅС‚РµСЂРІР°Р» Р°РІС‚Рѕ-СЂРµР°РЅР°Р»РёР·Р° РІ СЃРµРєСѓРЅРґР°С… (0 = РІС‹РєР»СЋС‡РµРЅ)
 # 7200 = РєР°Р¶РґС‹Рµ 2 С‡Р°СЃР° Р±РѕС‚ СЃР°Рј РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ СЃРїРёСЃРѕРє РјРѕРЅРµС‚
 AUTO_REANALYZE_SEC: int = 900
+AUTO_REANALYZE_TELEGRAM_REPORTS_ENABLED: bool = False
 BOT_ENABLE_DATA_COLLECTOR: bool = False
 BOT_STARTUP_AUTO_SCAN_ENABLED: bool = True
 RL_WORKER_ENABLE_COLLECTOR: bool = True
@@ -546,6 +547,14 @@ SIGNAL_QUALITY_FEEDBACK_COOLDOWN_BARS_ON_PRESSURE: int = 2
 SIGNAL_QUALITY_FEEDBACK_EXIT_RULES_ENABLED: bool = False
 SIGNAL_QUALITY_FEEDBACK_CLUSTER_RULES_ENABLED: bool = False
 SIGNAL_QUALITY_FEEDBACK_REPLACEMENT_RULES_ENABLED: bool = False
+
+# Shadow-only lifecycle telemetry for profitable positions. This does not emit
+# exits or change trails; it only records potential overextension for later
+# evaluator/backtest analysis.
+PEAK_RISK_SHADOW_ENABLED: bool = True
+PEAK_RISK_SHADOW_THRESHOLD: float = 50.0
+PEAK_RISK_RSI_FLOOR: float = 75.0
+PEAK_RISK_EDGE_FLOOR_PCT: float = 5.0
 
 # в”Ђв”Ђ Early trend warnings (Stage-1, NO ENTRY) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Stage-1 only sends РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ (watch), РЅРµ РѕС‚РєСЂС‹РІР°РµС‚ РїРѕР·РёС†РёСЋ.

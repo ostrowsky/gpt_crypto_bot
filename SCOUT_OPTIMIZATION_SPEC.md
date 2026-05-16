@@ -1,6 +1,6 @@
 # Scout Optimization Spec
 
-Last updated: 2026-05-15 17:52 Europe/Budapest
+Last updated: 2026-05-16 13:29 Europe/Budapest
 
 ## Objective
 The bot is optimized for timely capture of same-day watchlist top gainers while keeping a single unified portfolio of the 10 most promising positions. Every production algorithm change must be backed by replay/backtest evidence before it is enabled.
@@ -172,6 +172,26 @@ Required live checks:
 3. Apply only if capture is not worse and at least one quality metric improves materially: total PnL, average PnL, precision, false positives, or blocked-winner reduction.
 4. If results are mixed, keep the change disabled or replay-only.
 5. After applying, run unit tests, compile touched modules, and restart bot/RL worker/market agent.
+
+## 2026-05-16 Research Governance Layer
+
+Implemented without changing BUY/SELL behavior:
+
+- Added `docs/FEATURE_SPEC_INDEX.md` as the canonical map of objective-linked capabilities.
+- Added diagnostic-only hypothesis queue generation:
+  - `files/build_quality_hypotheses.py`
+  - `.runtime/reports/quality_hypotheses_latest.{json,txt}`
+- Added wake-up scout funnel reporting:
+  - `files/report_wakeup_funnel.py`
+  - `.runtime/reports/wakeup_funnel_latest.{json,txt}`
+- Added `peak_risk_shadow` telemetry for profitable overextended positions:
+  - config flags in `files/config.py`
+  - event logger in `files/botlog.py`
+  - live shadow capture in `files/monitor.py`
+
+Governance rule:
+- evaluator/scout findings may now become ranked hypotheses automatically;
+- they still cannot mutate production behavior until a dedicated replay/backtest gate confirms the change.
 
 ## Near-Term Plan
 1. Day 1: Done for requested metric-only fields: `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `exit_efficiency`, `giveback_pct`, and `cooldown_harm_pct`.
