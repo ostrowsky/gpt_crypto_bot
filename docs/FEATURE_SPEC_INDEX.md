@@ -22,6 +22,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Local context MCP | local tooling | `docs/specs/local-context-mcp.md` | context-read latency, report compactness | keep outside trading path |
 | Full-stack restart helper | shipped local tooling | `docs/specs/full-stack-restart-helper.md` | restart success, operator recovery time | keep operational-only |
 | Repository skills tooling | shipped local tooling | `docs/specs/repo-skills-tooling.md` | workflow reuse, review consistency | keep outside trading path |
+| Market-data / execution scaffold | research-only | `docs/specs/market-data-execution-research-scaffold.md` | replay/live parity groundwork, slippage realism | no production import without later gate |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
