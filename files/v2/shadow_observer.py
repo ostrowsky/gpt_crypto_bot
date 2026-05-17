@@ -65,6 +65,17 @@ def material_transition(previous: Mapping[str, object] | None, decision: ShadowD
     )
 
 
+def telegram_eligible(previous: Mapping[str, object] | None, decision: ShadowDecision) -> bool:
+    if not previous:
+        return False
+    if not material_transition(previous, decision):
+        return False
+    return decision.state in {
+        SymbolState.EMERGING_MOVE,
+        SymbolState.CONFIRMED_TREND,
+    }
+
+
 def append_shadow_event(path: Path, event: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:

@@ -18,6 +18,7 @@ from v2.shadow_observer import (
     append_decision_trace,
     estimate_shadow_state,
     material_transition,
+    telegram_eligible,
 )
 
 
@@ -81,7 +82,7 @@ def _load_chat_ids() -> list[int]:
 
 async def _send_shadow_alert(session: aiohttp.ClientSession, event: dict) -> None:
     token = getattr(config, "TELEGRAM_BOT_TOKEN", "")
-    if not token or event["state"] == "noise" or event["previous_state"] is None:
+    if not token:
         return
     chat_ids = _load_chat_ids()
     if not chat_ids:
@@ -168,7 +169,8 @@ async def run_once() -> dict:
                         append_decision_trace(TRACE_FILE, trace_event)
                     if changed:
                         append_shadow_event(EVENTS_FILE, event)
-                        await _send_shadow_alert(session, event)
+                        if telegram_eligible(previous, decision):
+                            await _send_shadow_alert(session, event)
                         emitted += 1
                     state[key] = {
                         "state": decision.state.value,

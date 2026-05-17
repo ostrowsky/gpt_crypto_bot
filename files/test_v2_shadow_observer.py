@@ -31,6 +31,19 @@ class TestV2ShadowObserver(unittest.TestCase):
         current = ShadowDecision(SymbolState.EMERGING_MOVE, "elevate_priority", 0.6, "same")
         self.assertFalse(material_transition(previous, current))
 
+    def test_telegram_only_for_upside_discovery(self) -> None:
+        from v2.shadow_observer import ShadowDecision, telegram_eligible
+        from v2.state import SymbolState
+
+        previous = {"state": "noise", "action": "watch"}
+        emerging = ShadowDecision(SymbolState.EMERGING_MOVE, "elevate_priority", 0.64, "early")
+        reversal = ShadowDecision(SymbolState.REVERSAL, "sell_candidate", 0.80, "down")
+        noise = ShadowDecision(SymbolState.NOISE, "watch", 0.55, "flat")
+
+        self.assertTrue(telegram_eligible(previous, emerging))
+        self.assertFalse(telegram_eligible(previous, reversal))
+        self.assertFalse(telegram_eligible({"state": "emerging_move", "action": "elevate_priority"}, noise))
+
     def test_decision_trace_dedupes_by_symbol_timeframe_bar(self) -> None:
         import json
         import tempfile
