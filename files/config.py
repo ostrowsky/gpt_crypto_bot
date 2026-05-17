@@ -531,6 +531,8 @@ SIGNAL_QUALITY_EVALUATOR_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
 SIGNAL_QUALITY_EVALUATOR_SOURCE: str = "all"
 SIGNAL_QUALITY_EVALUATOR_TOP_MOVERS_N: int = 15
 SIGNAL_QUALITY_EVALUATOR_SYMBOLS: tuple[str, ...] = ()
+V2_SHADOW_DAILY_SUMMARY_ENABLED: bool = True
+V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED: bool = True
 
 # Automatic post-factum feedback from the signal-quality evaluator. The feedback
 # layer may only apply narrow, replay-confirmed runtime adjustments. Wider BUY,

@@ -38,6 +38,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
+| V2 shadow daily summary | expedited shadow-only | `docs/specs/v2-shadow-daily-summary.md` | daily discovery count, confirmation ratio, operator noise | daily post-factum report |
 | V2 unified runtime integration | planned | `docs/specs/v2-unified-runtime-integration.md` | one-command startup, runtime health, release parity | required before any live-shadow worker |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |

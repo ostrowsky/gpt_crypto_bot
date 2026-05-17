@@ -37,14 +37,15 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 7 | Full-history population run | done | fill the store for watchlist / 60d target | 95/105 symbols valid, 90.48% |
 | 8 | Shadow signal observer (expedite) | done | expose provisional v2 lifecycle signals for immediate operator observation | tomorrow's shadow stream is inspectable |
 | 9 | Shadow explainability | done | answer quickly why a v2 signal did or did not occur | fast why/why-not lookup works |
-| 10 | Hindsight lifecycle labeling | next | label hidden-state proxies after the fact | labels pass audit |
-| 11 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
-| 12 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
-| 13 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
-| 14 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
-| 15 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
-| 16 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
-| 17 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
+| 10 | Shadow daily summary | now | replace raw alert noise with one daily operator view | concise end-of-day visibility |
+| 11 | Hindsight lifecycle labeling | next | label hidden-state proxies after the fact | labels pass audit |
+| 12 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
+| 13 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
+| 14 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
+| 15 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
+| 16 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
+| 17 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
+| 18 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
 
 ## What We Have Learned So Far
 

@@ -25,6 +25,7 @@ import report_candidate_ranker_shadow
 import report_critic_dataset
 import signal_quality_feedback
 import top_gainer_critic
+import v2_shadow_daily_summary
 import watchlist_top_gainer_goal
 from ml_signal_model import save_json
 
@@ -1302,6 +1303,15 @@ async def _signal_quality_loop(state: WorkerState) -> None:
             else:
                 state.signal_quality_last_telegram_sent_count = 0
                 state.signal_quality_last_telegram_error = "signal_quality_telegram_disabled"
+            if bool(getattr(config, "V2_SHADOW_DAILY_SUMMARY_ENABLED", True)):
+                v2_summary = await asyncio.to_thread(
+                    v2_shadow_daily_summary.build_summary,
+                    target_day,
+                    timezone_name=tz_name,
+                )
+                await asyncio.to_thread(v2_shadow_daily_summary.save_report, v2_summary)
+                if bool(getattr(config, "V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED", True)):
+                    await _send_telegram_text(v2_shadow_daily_summary.render_text(v2_summary))
             await _write_status_now(state)
         except asyncio.CancelledError:
             raise
