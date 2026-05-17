@@ -51,6 +51,10 @@ class TestExplainV2ShadowSignal(unittest.TestCase):
                 payload = expl.explain("AAAUSDT", "15m", "2026-05-17")
         self.assertEqual(payload["material_signals"], 0)
         self.assertEqual(payload["bootstrap_rows"], 1)
+        self.assertEqual(
+            payload["why_no_signal"],
+            "only bootstrap observation so far; latest rule outcome: early positive structure",
+        )
 
 
 if __name__ == "__main__":

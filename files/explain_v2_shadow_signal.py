@@ -14,6 +14,10 @@ def _local_day_utc(raw_ms: int) -> str:
     return datetime.fromtimestamp(raw_ms / 1000, tz=timezone.utc).date().isoformat()
 
 
+def _is_bootstrap(row: dict) -> bool:
+    return bool(row.get("bootstrap") is True or ("previous_state" in row and row.get("previous_state") is None))
+
+
 def explain(symbol: str, timeframe: str | None = None, day: str | None = None) -> dict:
     rows = []
     if TRACE.exists():
@@ -34,22 +38,31 @@ def explain(symbol: str, timeframe: str | None = None, day: str | None = None) -
         row
         for row in rows
         if row.get("material_transition")
-        and not row.get("bootstrap", row.get("previous_state") is None)
+        and not _is_bootstrap(row)
     ]
     latest = rows[-1] if rows else None
     latest_material = material[-1] if material else None
+    latest_is_bootstrap = bool(latest and _is_bootstrap(latest))
     return {
         "symbol": symbol,
         "timeframe": timeframe,
         "day_utc": day,
         "rows": len(rows),
         "material_signals": len(material),
-        "bootstrap_rows": sum(1 for row in rows if row.get("bootstrap", row.get("previous_state") is None)),
+        "bootstrap_rows": sum(1 for row in rows if _is_bootstrap(row)),
         "latest_decision": latest,
         "latest_material_signal": latest_material,
         "why_no_signal": None
         if latest_material is not None
-        else (None if latest is None else latest.get("reason")),
+        else (
+            None
+            if latest is None
+            else (
+                f"only bootstrap observation so far; latest rule outcome: {latest.get('reason')}"
+                if latest_is_bootstrap
+                else latest.get("reason")
+            )
+        ),
     }
 
 

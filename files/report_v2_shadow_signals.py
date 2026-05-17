@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parent
 EVENTS = ROOT / "v2_shadow_events.jsonl"
 
 
+def _is_bootstrap(row: dict) -> bool:
+    return bool(row.get("bootstrap") is True or ("previous_state" in row and row.get("previous_state") is None))
+
+
 def build(hours: int = 24) -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     rows = []
@@ -23,8 +27,8 @@ def build(hours: int = 24) -> dict:
                 continue
             if ts >= cutoff:
                 rows.append(row)
-    bootstrap_rows = [row for row in rows if row.get("bootstrap", row.get("previous_state") is None)]
-    material_rows = [row for row in rows if not row.get("bootstrap", row.get("previous_state") is None)]
+    bootstrap_rows = [row for row in rows if _is_bootstrap(row)]
+    material_rows = [row for row in rows if not _is_bootstrap(row)]
     return {
         "hours": hours,
         "events": len(material_rows),
