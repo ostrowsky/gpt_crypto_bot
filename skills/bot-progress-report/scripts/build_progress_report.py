@@ -18,6 +18,10 @@ def _load_json(path: Path) -> dict | None:
         return None
 
 
+def _valid(values: list[float | None]) -> list[float]:
+    return [float(v) for v in values if v is not None]
+
+
 def _complete_days(days: int, end_day: date | None = None) -> list[date]:
     end = end_day or (datetime.now().date() - timedelta(days=1))
     return [end - timedelta(days=i) for i in range(days - 1, -1, -1)]
@@ -27,12 +31,30 @@ def _pct(num: float, den: float) -> float:
     return round((num / den) * 100.0, 2) if den else 0.0
 
 
-def _avg(values: list[float]) -> float | None:
-    return round(mean(values), 4) if values else None
+def _avg(values: list[float | None]) -> float | None:
+    cleaned = _valid(values)
+    return round(mean(cleaned), 4) if cleaned else None
 
 
-def _med(values: list[float]) -> float | None:
-    return round(median(values), 4) if values else None
+def _med(values: list[float | None]) -> float | None:
+    cleaned = _valid(values)
+    return round(median(cleaned), 4) if cleaned else None
+
+
+def _load_day_report(prefix: str, day: str, suffix: str) -> dict | None:
+    """Load one canonical report per target day, ignoring manual/duplicate artifacts."""
+    return _load_json(REPORTS / f"{prefix}{day}{suffix}")
+
+
+def _coverage_status(critic: dict | None, goal: dict | None, quality: dict | None) -> str:
+    if not any((critic, goal, quality)):
+        return "missing"
+    summary = (critic or {}).get("summary", {})
+    if critic and int(summary.get("watchlist_top_count") or 0) > 0:
+        if int(summary.get("bot_unique_buys") or 0) == 0:
+            return "zero_activity"
+        return "complete"
+    return "partial"
 
 
 def build(days: int) -> dict:
@@ -40,11 +62,12 @@ def build(days: int) -> dict:
     goal_rows: list[dict] = []
     quality_rows: list[dict] = []
     loaded_days: list[str] = []
+    coverage_days: list[dict] = []
     for day in _complete_days(days):
         ds = day.isoformat()
-        critic = _load_json(REPORTS / f"top_gainer_critic_{ds}_final.json")
-        goal = _load_json(REPORTS / f"watchlist_top_gainer_goal_{ds}_22h.json")
-        quality = _load_json(REPORTS / f"signal_quality_{ds}_final.json")
+        critic = _load_day_report("top_gainer_critic_", ds, "_final.json")
+        goal = _load_day_report("watchlist_top_gainer_goal_", ds, "_22h.json")
+        quality = _load_day_report("signal_quality_", ds, "_final.json")
         if critic:
             critic_rows.append(critic)
             loaded_days.append(ds)
@@ -52,6 +75,15 @@ def build(days: int) -> dict:
             goal_rows.append(goal)
         if quality:
             quality_rows.append(quality)
+        coverage_days.append(
+            {
+                "day": ds,
+                "status": _coverage_status(critic, goal, quality),
+                "has_critic": bool(critic),
+                "has_goal": bool(goal),
+                "has_quality": bool(quality),
+            }
+        )
 
     latest_rl = _load_json(REPORTS / "rl_train_latest.json") or {}
     critic_summaries = [r.get("summary", {}) for r in critic_rows]
@@ -75,7 +107,7 @@ def build(days: int) -> dict:
     goal = {
         "days_loaded": len(goal_rows),
         "recall_at_cutoff_avg_pct": _avg([s.get("recall_at_cutoff_pct", 0.0) for s in goal_summaries]),
-        "median_lead_time_min": _med([s.get("median_lead_time_min", 0.0) for s in goal_summaries]),
+        "median_lead_time_min": _med([s.get("median_lead_time_min") for s in goal_summaries]),
         "positive_coverage_avg_pct": _avg([s.get("mandatory_positive_coverage_pct", 0.0) for s in goal_summaries]),
         "false_positive_buys_total": sum(s.get("bot_false_positive_buys", 0) for s in goal_summaries),
     }
@@ -122,6 +154,13 @@ def build(days: int) -> dict:
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "days_requested": days,
         "loaded_days": loaded_days,
+        "coverage": {
+            "days": coverage_days,
+            "status_counts": {
+                status: sum(1 for row in coverage_days if row["status"] == status)
+                for status in ("complete", "partial", "zero_activity", "missing")
+            },
+        },
         "goal": goal,
         "scout": scout,
         "quality": quality,
