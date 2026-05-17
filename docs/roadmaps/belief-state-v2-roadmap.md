@@ -39,8 +39,9 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 9 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
 | 10 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
 | 11 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
-| 12 | Shadow policy | pending | recommend actions without trading | live-shadow evidence |
-| 13 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
+| 12 | Unified runtime integration | pending | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
+| 13 | Shadow policy | pending | recommend actions without trading | live-shadow evidence |
+| 14 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
 
 ## What We Have Learned So Far
 
@@ -73,3 +74,21 @@ new BUY mode -> more replay tuning
 | Lifecycle labels | not started |
 | HMM / Bayesian inference | not started |
 | RL | intentionally not started |
+| Unified runtime integration | required before live-shadow workers |
+
+## Runtime Rule
+
+Offline-only v2 scripts may exist independently while the architecture is still in
+research. The moment v2 gains a mandatory long-running worker, the single operator
+entrypoint must remain:
+
+```text
+restart_full_stack.bat
+```
+
+Any such worker must ship with:
+
+- its own background launcher;
+- its own status check;
+- integration into `restart_full_stack.bat`;
+- verification from the clean release worktree.
