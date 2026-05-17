@@ -41,6 +41,12 @@ class TestV2CanonicalHistory(unittest.TestCase):
         self.assertFalse(slice_.continuity.is_contiguous)
         self.assertEqual(slice_.continuity.missing_intervals[0].missing_bars, 2)
 
+    def test_empty_slice_is_not_reported_as_contiguous_history(self) -> None:
+        from v2.history import build_history_slice
+
+        slice_ = build_history_slice("AAAUSDT", "15m", [], source="test")
+        self.assertFalse(slice_.is_contiguous)
+
 
 if __name__ == "__main__":
     unittest.main()

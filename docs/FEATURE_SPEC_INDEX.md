@@ -33,6 +33,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 canonical market history | research-only | `docs/specs/v2-canonical-market-history.md` | contiguous OHLCV coverage, missing-interval count | choose canonical history source before lifecycle labels |
 | V2 canonical history store | research-only | `docs/specs/v2-canonical-history-store.md` | stored slice count, continuity, provenance | define population/backfill policy |
 | V2 history coverage plan | research-only planning | `docs/specs/v2-history-coverage-plan.md` | continuous days, valid-symbol ratio, missing-bar count | implement historical population adapter |
+| V2 history population adapter | research-only | `docs/specs/v2-history-population-adapter.md` | valid-symbol ratio, contiguous slices, missing intervals | populate canonical store before lifecycle labels |
 | V2 unified runtime integration | planned | `docs/specs/v2-unified-runtime-integration.md` | one-command startup, runtime health, release parity | required before any live-shadow worker |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |

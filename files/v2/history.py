@@ -56,6 +56,10 @@ class HistorySlice:
     def end_ts_ms(self) -> int | None:
         return self.bars[-1].open_ts_ms if self.bars else None
 
+    @property
+    def is_contiguous(self) -> bool:
+        return bool(self.bars) and self.continuity.is_contiguous
+
 
 def _to_bar(symbol: str, timeframe: str, row: Mapping[str, object]) -> CanonicalBar:
     return CanonicalBar(
@@ -117,4 +121,3 @@ def validate_continuity(
             )
         )
     return ContinuityReport(expected_step_ms=step, missing_intervals=tuple(missing))
-
