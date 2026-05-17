@@ -30,6 +30,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Belief-state v2 architecture | research-only | `docs/specs/belief-state-v2-architecture.md` | state reconstruction quality, objective-aligned reward, later policy uplift | build sequence dataset before any RL |
 | V2 sequence dataset builder | research-only | `docs/specs/v2-sequence-dataset-builder.md` | sequence coverage, transition count, gap diagnostics | label lifecycle states before model fitting |
 | V2 sequence coverage audit | research-only | `docs/specs/v2-sequence-coverage-audit.md` | transition density, contiguous coverage, longest usable history | choose data-repair strategy before state modeling |
+| V2 canonical market history | research-only | `docs/specs/v2-canonical-market-history.md` | contiguous OHLCV coverage, missing-interval count | choose canonical history source before lifecycle labels |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
