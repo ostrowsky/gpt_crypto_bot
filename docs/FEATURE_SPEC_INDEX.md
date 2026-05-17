@@ -25,6 +25,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Market-data / execution scaffold | research-only | `docs/specs/market-data-execution-research-scaffold.md` | replay/live parity groundwork, slippage realism | no production import without later gate |
 | Local artifact hygiene | shipped local tooling | `docs/specs/local-artifact-hygiene.md` | status readability, secret hygiene | keep operational-only |
 | P0 measurement hardening | shipped measurement-only | `docs/specs/p0-measurement-hardening.md` | report coverage, funnel loss point, exit lifecycle | use before next algorithm change |
+| Agent mode rescue replay | research-only | `docs/specs/agent-mode-rescue-replay.md` | `capture_rate`, `trade_precision`, `pnl_total`, entry timing | compare `agent_allowed` vs `agent_mode_rescue` before any live change |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |

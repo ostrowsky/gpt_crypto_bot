@@ -1452,6 +1452,30 @@ def _top_gainer_score_min_for_mode(mode: str, default_min: float) -> float:
         return float(default_min)
 
 
+def _agent_allowed_mode_replay(mode: str) -> bool:
+    return mode in tuple(str(x) for x in getattr(config, "AGENT_ALLOWED_MODES", ()))
+
+
+def _agent_mode_rescue_replay_candidate_ok(candidate: ReplayCandidate, top_gainer_score_min: float) -> bool:
+    if _agent_allowed_mode_replay(candidate.mode):
+        return True
+    if candidate.mode not in {"breakout", "retest"}:
+        return False
+    if candidate.tf != "15m":
+        return False
+    if candidate.top_gainer_score < max(34.0, float(top_gainer_score_min)):
+        return False
+    if candidate.adx < 22.0:
+        return False
+    if candidate.vol_x < 2.0:
+        return False
+    if candidate.daily_range > 8.0:
+        return False
+    if candidate.intraday_change_pct < 1.0:
+        return False
+    return True
+
+
 def _signal_cluster_cap_replay(bucket: str) -> int:
     mapping = {
         "15m_short_bounce": "OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX",
@@ -2310,7 +2334,14 @@ async def simulate_portfolio(
         if not ts_candidates:
             continue
 
-        use_top_gainer_score = variant in {"score", "score_replace", "score_replace_cluster", "trend_start"}
+        use_top_gainer_score = variant in {
+            "score",
+            "score_replace",
+            "score_replace_cluster",
+            "trend_start",
+            "agent_allowed",
+            "agent_mode_rescue",
+        }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
             key=lambda item: (
@@ -2322,6 +2353,13 @@ async def simulate_portfolio(
             reverse=True,
         )
         for candidate in ts_candidates:
+            if variant == "agent_allowed" and not _agent_allowed_mode_replay(candidate.mode):
+                continue
+            if variant == "agent_mode_rescue" and not _agent_mode_rescue_replay_candidate_ok(
+                candidate,
+                top_gainer_score_min,
+            ):
+                continue
             candidate_top_gainer_score_min = _top_gainer_score_min_for_mode(
                 candidate.mode,
                 top_gainer_score_min,
@@ -2808,7 +2846,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replace-min-delta", type=float, default=getattr(config, "PORTFOLIO_REPLACE_MIN_DELTA", 8.0))
     parser.add_argument(
         "--variant",
-        choices=["baseline", "score", "score_replace", "score_replace_cluster", "trend_start"],
+        choices=[
+            "baseline",
+            "score",
+            "score_replace",
+            "score_replace_cluster",
+            "trend_start",
+            "agent_allowed",
+            "agent_mode_rescue",
+        ],
         default="score_replace",
     )
     parser.add_argument("--top-gainer-score-min", type=float, default=18.0)
