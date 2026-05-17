@@ -32,14 +32,15 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 2 | Sequence coverage audit | done | determine whether existing history is fit for modeling | coverage limitations explicit |
 | 3 | Canonical market history contract | done | define clean continuous OHLCV abstraction | continuity is explicit |
 | 4 | Canonical history source/store | done | create the actual v2 source for continuous history | repeatable slices with provenance |
-| 5 | History coverage backfill plan | now | fill enough continuous history for learning | training-grade windows defined |
-| 6 | Hindsight lifecycle labeling | pending | label hidden-state proxies after the fact | labels pass audit |
-| 7 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
-| 8 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
-| 9 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
-| 10 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
-| 11 | Shadow policy | pending | recommend actions without trading | live-shadow evidence |
-| 12 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
+| 5 | History coverage backfill plan | done | fill enough continuous history for learning | training-grade windows defined |
+| 6 | Canonical history population adapter | now | actually populate 60d canonical windows | valid-symbol ratio measured |
+| 7 | Hindsight lifecycle labeling | next | label hidden-state proxies after the fact | labels pass audit |
+| 8 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
+| 9 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
+| 10 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
+| 11 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
+| 12 | Shadow policy | pending | recommend actions without trading | live-shadow evidence |
+| 13 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
 
 ## What We Have Learned So Far
 
