@@ -35,14 +35,16 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 5 | History coverage backfill plan | done | fill enough continuous history for learning | training-grade windows defined |
 | 6 | Canonical history population adapter | done | actually populate 60d canonical windows | adapter validated on real source |
 | 7 | Full-history population run | done | fill the store for watchlist / 60d target | 95/105 symbols valid, 90.48% |
-| 8 | Hindsight lifecycle labeling | now | label hidden-state proxies after the fact | labels pass audit |
-| 9 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
-| 10 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
-| 11 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
-| 12 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
-| 13 | Unified runtime integration | pending | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
-| 14 | Shadow policy | pending | recommend actions without trading | live-shadow evidence |
-| 15 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
+| 8 | Shadow signal observer (expedite) | done | expose provisional v2 lifecycle signals for immediate operator observation | tomorrow's shadow stream is inspectable |
+| 9 | Shadow explainability | done | answer quickly why a v2 signal did or did not occur | fast why/why-not lookup works |
+| 10 | Hindsight lifecycle labeling | next | label hidden-state proxies after the fact | labels pass audit |
+| 11 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
+| 12 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
+| 13 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
+| 14 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
+| 15 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
+| 16 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
+| 17 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
 
 ## What We Have Learned So Far
 
@@ -73,6 +75,8 @@ new BUY mode -> more replay tuning
 | Canonical OHLCV contract | defined |
 | Canonical continuous history source | implemented as local research store |
 | Canonical 60d history coverage | passed minimum gate on 95/105 symbols |
+| Provisional shadow observer | running, shadow-only |
+| Fast why/why-not lookup | implemented from compact decision trace |
 | Lifecycle labels | not started |
 | HMM / Bayesian inference | not started |
 | RL | intentionally not started |
