@@ -38,7 +38,7 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 8 | Shadow signal observer (expedite) | done | expose provisional v2 lifecycle signals for immediate operator observation | tomorrow's shadow stream is inspectable |
 | 9 | Shadow explainability | done | answer quickly why a v2 signal did or did not occur | fast why/why-not lookup works |
 | 10 | Shadow daily summary | done | replace raw alert noise with one daily operator view | concise end-of-day visibility |
-| 11 | Hindsight lifecycle labeling | next | label hidden-state proxies after the fact | labels pass audit |
+| 11 | Hindsight lifecycle labeling | in progress | label hidden-state proxies after the fact | labels pass audit |
 | 12 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
 | 13 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
 | 14 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |

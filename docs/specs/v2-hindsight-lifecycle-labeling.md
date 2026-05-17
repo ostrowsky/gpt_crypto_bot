@@ -1,6 +1,6 @@
 # V2 Hindsight Lifecycle Labeling
 
-Status: research-only planning  
+Status: research-only implementation  
 Last updated: 2026-05-17
 
 ## Purpose
@@ -46,18 +46,25 @@ For each symbol/day trajectory:
 - `reversal`
   - move has failed or materially retraced after exhaustion.
 
-## Candidate Quantitative Anchors
+## V1 Quantitative Anchors
 
-The first implementation spec must define exact thresholds for:
+Version: `hindsight_lifecycle_v1`
 
-- minimum same-day favorable move;
-- minimum persistence duration;
-- confirmed-trend threshold;
-- MFE peak detection;
-- exhaustion / giveback threshold;
-- reset conditions after reversal.
+The first baseline labels each local-day `15m` path independently:
 
-These thresholds must be reported and versioned, not hidden in code.
+| Concept | V1 rule |
+|---|---|
+| Minimum favorable move | same-day MFE from day open `>= 4.0%` |
+| Minimum persistence | at least `4` bars remain after first `+2.0%` confirmation |
+| Confirmed trend | first bar whose high reaches `+2.0%` from day open |
+| Emerging move | all bars from day open until confirmation, only on qualifying trend days |
+| Mature trend | after confirmation, once path reaches `+3.0%` from day open and before exhaustion |
+| Exhaustion | after peak, giveback reaches `>= 35%` of achieved MFE |
+| Reversal | after peak, giveback reaches `>= 60%` of achieved MFE or close falls back to day open |
+| Noise | all non-qualifying days and all bars before any qualifying move is established |
+
+These values are intentionally conservative baseline anchors, not claims of optimality.
+They must be reported in every audit artifact and later tested for sensitivity.
 
 ## Leakage Rule
 
@@ -67,7 +74,7 @@ These thresholds must be reported and versioned, not hidden in code.
   - `label_time`;
   - `observation_cutoff_time`.
 
-## Acceptance Criteria For The Later Implementation
+## Acceptance Criteria
 
 1. Label definitions are deterministic and versioned.
 2. Every label can be explained from the future path.
@@ -77,7 +84,7 @@ These thresholds must be reported and versioned, not hidden in code.
 
 ## Next Gate
 
-Implement the first labeling algorithm and audit:
+Use the first labeling algorithm and audit:
 
 - label balance;
 - transition matrix;
@@ -88,4 +95,3 @@ Implement the first labeling algorithm and audit:
 
 - planning only today;
 - no production behavior change.
-
