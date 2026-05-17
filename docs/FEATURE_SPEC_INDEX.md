@@ -27,6 +27,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | P0 measurement hardening | shipped measurement-only | `docs/specs/p0-measurement-hardening.md` | report coverage, funnel loss point, exit lifecycle | use before next algorithm change |
 | Agent mode rescue replay | research-only | `docs/specs/agent-mode-rescue-replay.md` | `capture_rate`, `trade_precision`, `pnl_total`, entry timing | compare `agent_allowed` vs `agent_mode_rescue` before any live change |
 | Wake-up confirmed agent rescue | research-only | `docs/specs/wakeup-confirmed-agent-rescue.md` | `capture_rate`, `trade_precision`, `pnl_total`, temporal rescue admissions | evaluate only on windows with wake-up coverage |
+| Belief-state v2 architecture | research-only | `docs/specs/belief-state-v2-architecture.md` | state reconstruction quality, objective-aligned reward, later policy uplift | build sequence dataset before any RL |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
