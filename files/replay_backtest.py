@@ -45,6 +45,7 @@ BAR_MS = {"15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000, "4h": 4 * 60 * 60 * 1000}
 _ML_MODEL_CACHE: Optional[dict] = None
 OBJECTIVE_TZ = "Europe/Budapest"
 OBJECTIVE_CUTOFF_HOUR = 22
+BOT_EVENTS_PATH = Path(__file__).resolve().with_name("bot_events.jsonl")
 
 
 @dataclass
@@ -128,6 +129,9 @@ class ReplayRunStats:
     cooldown_skipped_candidates: int = 0
     cooldown_positive_skips: int = 0
     cooldown_harm_pct: float = 0.0
+    temporal_structural_events_loaded: int = 0
+    temporal_wakeup_events_loaded: int = 0
+    temporal_rescue_admitted: int = 0
 
 
 def _load_ml_model_payload() -> dict:
@@ -1476,6 +1480,78 @@ def _agent_mode_rescue_replay_candidate_ok(candidate: ReplayCandidate, top_gaine
     return True
 
 
+def _parse_event_ts_ms(raw: object) -> Optional[int]:
+    if not raw:
+        return None
+    try:
+        return int(datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _load_temporal_scout_events(
+    path: Path = BOT_EVENTS_PATH,
+    *,
+    start_ms: Optional[int] = None,
+    end_ms: Optional[int] = None,
+) -> tuple[Dict[Tuple[str, str], List[int]], Dict[Tuple[str, str], List[int]]]:
+    structural: Dict[Tuple[str, str], List[int]] = {}
+    wakeups: Dict[Tuple[str, str], List[int]] = {}
+    if not path.exists():
+        return structural, wakeups
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        if row.get("event") != "scout_shadow":
+            continue
+        ts_ms = _parse_event_ts_ms(row.get("ts"))
+        sym = str(row.get("sym") or "")
+        tf = str(row.get("tf") or "")
+        if ts_ms is None or not sym or not tf:
+            continue
+        if start_ms is not None and ts_ms < start_ms:
+            continue
+        if end_ms is not None and ts_ms > end_ms:
+            continue
+        key = (sym, tf)
+        if str(row.get("scout_profile") or "") == "wake_up_1m_light15_v1":
+            wakeups.setdefault(key, []).append(ts_ms)
+        else:
+            structural.setdefault(key, []).append(ts_ms)
+    for rows in structural.values():
+        rows.sort()
+    for rows in wakeups.values():
+        rows.sort()
+    return structural, wakeups
+
+
+def _agent_wakeup_rescue_replay_candidate_ok(
+    candidate: ReplayCandidate,
+    top_gainer_score_min: float,
+    structural_events: Dict[Tuple[str, str], List[int]],
+    wakeup_events: Dict[Tuple[str, str], List[int]],
+) -> bool:
+    if _agent_allowed_mode_replay(candidate.mode):
+        return True
+    if not _agent_mode_rescue_replay_candidate_ok(candidate, top_gainer_score_min):
+        return False
+    key = (candidate.sym, candidate.tf)
+    wakeups = [ts for ts in wakeup_events.get(key, []) if ts <= candidate.ts_ms]
+    if not wakeups:
+        return False
+    latest_wakeup = wakeups[-1]
+    if candidate.ts_ms - latest_wakeup > 6 * 60 * 60 * 1000:
+        return False
+    structurals = [
+        ts
+        for ts in structural_events.get(key, [])
+        if ts <= latest_wakeup and latest_wakeup - ts <= 24 * 60 * 60 * 1000
+    ]
+    return bool(structurals)
+
+
 def _signal_cluster_cap_replay(bucket: str) -> int:
     mapping = {
         "15m_short_bounce": "OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX",
@@ -2291,6 +2367,12 @@ async def simulate_portfolio(
             for candidate in built:
                 candidates_by_ts.setdefault(candidate.ts_ms, []).append(candidate)
 
+    min_ts = min(timestamps) if timestamps else None
+    max_ts = max(timestamps) if timestamps else None
+    structural_events, wakeup_events = _load_temporal_scout_events(start_ms=min_ts, end_ms=max_ts)
+    stats.temporal_structural_events_loaded = sum(len(rows) for rows in structural_events.values())
+    stats.temporal_wakeup_events_loaded = sum(len(rows) for rows in wakeup_events.values())
+
     ordered_ts = sorted(timestamps)
     open_positions: Dict[Tuple[str, str], ReplayTrade] = {}
     cooldown_until: Dict[str, int] = {}
@@ -2341,6 +2423,7 @@ async def simulate_portfolio(
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",
+            "agent_wakeup_rescue",
         }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
@@ -2360,6 +2443,16 @@ async def simulate_portfolio(
                 top_gainer_score_min,
             ):
                 continue
+            if variant == "agent_wakeup_rescue":
+                if not _agent_wakeup_rescue_replay_candidate_ok(
+                    candidate,
+                    top_gainer_score_min,
+                    structural_events,
+                    wakeup_events,
+                ):
+                    continue
+                if not _agent_allowed_mode_replay(candidate.mode):
+                    stats.temporal_rescue_admitted += 1
             candidate_top_gainer_score_min = _top_gainer_score_min_for_mode(
                 candidate.mode,
                 top_gainer_score_min,
@@ -2610,6 +2703,9 @@ def _make_report(
             "cooldown_skipped_candidates": run_stats.cooldown_skipped_candidates,
             "cooldown_positive_skips": run_stats.cooldown_positive_skips,
             "cooldown_harm_pct": round(float(run_stats.cooldown_harm_pct), 4),
+            "temporal_structural_events_loaded": run_stats.temporal_structural_events_loaded,
+            "temporal_wakeup_events_loaded": run_stats.temporal_wakeup_events_loaded,
+            "temporal_rescue_admitted": run_stats.temporal_rescue_admitted,
         },
         "summary": summary,
         "objective": objective,
@@ -2854,6 +2950,7 @@ def parse_args() -> argparse.Namespace:
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",
+            "agent_wakeup_rescue",
         ],
         default="score_replace",
     )
