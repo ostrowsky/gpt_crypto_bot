@@ -36,6 +36,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 history population adapter | research-only | `docs/specs/v2-history-population-adapter.md` | valid-symbol ratio, contiguous slices, missing intervals | populate canonical store before lifecycle labels |
 | V2 hindsight lifecycle labeling | research-only implementation | `docs/specs/v2-hindsight-lifecycle-labeling.md` | label balance, transition quality, leakage control | sensitivity audit before reconstruction |
 | V2 lifecycle label sensitivity audit | research-only | `docs/specs/v2-lifecycle-label-sensitivity-audit.md` | teacher-label stability, threshold robustness | complete before reconstruction |
+| V2 soft teacher confidence | research-only | `docs/specs/v2-soft-teacher-confidence.md` | teacher uncertainty, confidence-weighted training readiness | use before reconstruction baseline |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |

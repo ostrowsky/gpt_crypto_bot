@@ -39,14 +39,15 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 9 | Shadow explainability | done | answer quickly why a v2 signal did or did not occur | fast why/why-not lookup works |
 | 10 | Shadow daily summary | done | replace raw alert noise with one daily operator view | concise end-of-day visibility |
 | 11 | Hindsight lifecycle labeling | done baseline | label hidden-state proxies after the fact | labels pass audit |
-| 12 | Lifecycle label sensitivity audit | now | test robustness of teacher labels before training | stable grid evidence |
-| 13 | State reconstruction baseline | pending | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
-| 14 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
-| 15 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
-| 16 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
-| 17 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
-| 18 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
-| 19 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
+| 12 | Lifecycle label sensitivity audit | done | test robustness of teacher labels before training | stable grid evidence |
+| 13 | Soft teacher confidence | done | represent teacher uncertainty instead of binary truth | confidence-weighted labels |
+| 14 | State reconstruction baseline | next | test whether latent lifecycle can be recovered OOS | baseline beats naive states |
+| 15 | Belief update / filtering | pending | move from labels to live-like belief trajectories | calibrated belief quality |
+| 16 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
+| 17 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
+| 18 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
+| 19 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
+| 20 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
 
 ## What We Have Learned So Far
 
