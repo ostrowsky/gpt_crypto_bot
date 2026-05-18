@@ -97,6 +97,7 @@ new BUY mode -> more replay tuning
 | Exit-quality baselines | first audit complete: earlier transparent exits all lose to base; need better exhaustion discrimination |
 | Exhaustion discrimination | complete: interpretable separation exists, but it is not enough by itself for a winning sell rule |
 | Exhaustion-aware exit baselines | complete: all four manual hypotheses lost to `base_sell_0_70`; static threshold exits rejected |
+| Temporal exit baselines | complete first pass: `mature_decay_late_rise` wins OOS (`+122.90` vs base reward); robustness gate next |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -118,6 +119,22 @@ All four reduced average giveback but worsened total reward. This confirms that
 the next exit step is **not** more manual threshold tuning. The exit track should
 move to temporal / supervised modeling while keeping `base_sell_0_70` as the
 control profile.
+
+### Temporal exit hypotheses
+
+The next package replayed short-window trajectory hypotheses on the same OOS
+sample:
+
+| Profile | Reward delta vs base | Result |
+|---|---:|---|
+| `late_mass_acceleration` | `-225.321371` | reject |
+| `mature_decay_late_rise` | `+122.901657` | advance |
+| `rsi_ema_decay` | `-158.311309` | reject |
+| `consensus_temporal` | `-168.251254` | reject |
+
+The winning profile improves total reward by trading less and reducing noisy
+entries, not by reducing average giveback. This makes the next gate a
+**robustness test around the winning thresholds**, not immediate promotion.
 
 ## Runtime Rule
 

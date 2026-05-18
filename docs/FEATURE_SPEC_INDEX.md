@@ -52,6 +52,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 exit quality baselines | research-only implementation | `docs/specs/v2-exit-quality-baselines.md` | giveback, realized PnL, exit reward | choose first better transparent exit profile |
 | V2 exhaustion discrimination audit | research-only implementation | `docs/specs/v2-exhaustion-discrimination-audit.md` | mature-vs-exhaustion separability | choose rule baseline vs richer temporal features |
 | V2 exhaustion-aware exit baselines | research-only complete, first-pass manual rules rejected | `docs/specs/v2-exhaustion-aware-exit-baselines.md` | replay-tested exit reward, giveback, false early exit | move to temporal / supervised exit modeling |
+| V2 temporal exit baselines | research-only first pass complete | `docs/specs/v2-temporal-exit-baselines.md` | replay-tested temporal exit reward, giveback, false early exit | robustness test `mature_decay_late_rise` before promotion |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
