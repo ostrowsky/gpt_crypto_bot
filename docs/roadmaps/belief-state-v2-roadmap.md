@@ -106,6 +106,7 @@ new BUY mode -> more replay tuning
 | Market-environment taxonomy | defined: policy-oriented hidden states, not simple bullish/bearish labels |
 | Market-environment separability | complete first pass: policy-favorable vs unfavorable days are separable enough for a classifier baseline, with small-sample caution |
 | Market-environment switched policy | complete first pass: oracle switch strongly wins, first causal prefix classifier loses to both fixed policies |
+| Market-environment belief v1 | complete first pass, rejected: rolling belief still loses to both fixed policies |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -223,6 +224,18 @@ The full contour now separates two questions cleanly:
 Conclusion: adaptation is valuable, but the first causal environment classifier
 is not yet competent enough to drive it. The next bottleneck is environment
 inference quality, not another hand-written policy family.
+
+### Market-environment belief v1
+
+The first rolling belief implementation also loses:
+
+- `belief_switched = -460.66`
+- `-76.18` vs fixed base
+- `-228.67` vs fixed candidate
+
+It abstains too long, becomes confident too late, and suffers from prior inertia
+under a tiny / imbalanced day-level teacher set. The next step is not another
+policy branch, but an environment-belief diagnostic audit.
 
 ## Runtime Rule
 
