@@ -27,6 +27,26 @@ DEFAULT_OUTPUT = ROOT.parent / ".runtime" / "reports" / "v2_policy_baselines_15m
 
 
 def build(history_root: Path, labels_path: Path, output: Path) -> dict:
+    episodes = _build_episodes(history_root, labels_path)
+    policies = {
+        "always_flat": always_flat_policy,
+        "lifecycle_oracle": lifecycle_oracle_policy,
+        "belief_policy_v1": belief_policy_v1,
+    }
+    payload = {
+        "episodes": len(episodes),
+        "parameters": {"self_bias": 0.85, "temperature": 0.75},
+        "policies": {
+            name: summarize_policy(name, [rollout(env, policy) for env in episodes])
+            for name, policy in policies.items()
+        },
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
+def _build_episodes(history_root: Path, labels_path: Path) -> list[OfflineDecisionEnvironment]:
     labels, day_sizes = _load_labels(labels_path)
     confidence = _build_confidence(labels, day_sizes)
     store = LocalHistoryStore(history_root)
@@ -66,23 +86,7 @@ def build(history_root: Path, labels_path: Path, output: Path) -> dict:
                 prediction=item.prediction,
             )
         )
-    episodes = [OfflineDecisionEnvironment(frames) for frames in grouped.values() if frames]
-    policies = {
-        "always_flat": always_flat_policy,
-        "lifecycle_oracle": lifecycle_oracle_policy,
-        "belief_policy_v1": belief_policy_v1,
-    }
-    payload = {
-        "episodes": len(episodes),
-        "parameters": {"self_bias": 0.85, "temperature": 0.75},
-        "policies": {
-            name: summarize_policy(name, [rollout(env, policy) for env in episodes])
-            for name, policy in policies.items()
-        },
-    }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return payload
+    return [OfflineDecisionEnvironment(frames) for frames in grouped.values() if frames]
 
 
 def main() -> int:

@@ -42,6 +42,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 belief calibration audit | research-only complete | `docs/specs/v2-belief-calibration-audit.md` | early recall vs late-state trade-off | balanced filter selected before policy |
 | V2 offline decision environment | research-only implementation | `docs/specs/v2-offline-decision-environment.md` | deterministic rewards, legal actions, policy-comparison readiness | add fixed policy baselines before offline RL |
 | V2 offline policy baselines | research-only implementation | `docs/specs/v2-offline-policy-baselines.md` | oracle gap, reward decomposition, policy anchors | inspect baseline gap before learned policies |
+| V2 belief action calibration | research-only implementation | `docs/specs/v2-belief-action-calibration.md` | thresholded action quality, trade explosion control | tune belief-to-action bridge before RL |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
