@@ -25,6 +25,21 @@ class V1StructuralFeatures:
 
 
 @dataclass(frozen=True)
+class V1ProjectedStructuralFeatures:
+    projected_today_change_pct: float
+    projected_forecast_proxy_pct: float
+    projected_candidate_score_trend: float
+    projected_candidate_score_impulse_speed: float
+    projected_leader_score_trend: float
+    slope: float
+    adx: float
+    rsi: float
+    vol_x: float
+    daily_range_pct: float
+    price_vs_ema20_pct: float
+
+
+@dataclass(frozen=True)
 class V1TemporalFeatures:
     prior_structural_scout: bool = False
     prior_wakeup_scout: bool = False
@@ -43,6 +58,7 @@ class EntryAdmissionRow:
     belief_entropy: float
     belief_max_prob: float
     v1_structural: V1StructuralFeatures | None
+    v1_projected_structural: V1ProjectedStructuralFeatures | None
     v1_temporal: V1TemporalFeatures
 
 
@@ -50,6 +66,7 @@ def build_row(
     item: FilteredBeliefRow,
     *,
     structural: V1StructuralFeatures | None = None,
+    projected_structural: V1ProjectedStructuralFeatures | None = None,
     temporal: V1TemporalFeatures | None = None,
 ) -> EntryAdmissionRow:
     probs = {state.value: float(prob) for state, prob in item.belief.probabilities.items()}
@@ -63,6 +80,7 @@ def build_row(
         belief_entropy=round(_entropy(probs), 6),
         belief_max_prob=round(max(probs.values()), 6),
         v1_structural=structural,
+        v1_projected_structural=projected_structural,
         v1_temporal=temporal or V1TemporalFeatures(),
     )
 
