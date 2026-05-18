@@ -65,8 +65,8 @@ The audit exposed two different truths:
 | Variant | Precision | Emerging recall | Noise admission |
 |---|---:|---:|---:|
 | best belief-only (`belief>=0.70`) | `0.180` | `0.384` | `0.739` |
-| recall-preserving combined (`belief>=0.50`, `leader>=3.0`) | `0.204` | `0.358` | `0.664` |
-| precision-max combined + temporal (`belief>=0.70`, `leader>=8.0`) | `0.259` | `0.024` | `0.518` |
+| recall-preserving combined (`belief>=0.60`, `leader>=3.0`) | `0.190` | `0.355` | `0.701` |
+| precision-max combined + temporal (`belief>=0.70`, `leader>=8.0`) | `0.246` | `0.035` | `0.572` |
 
 Interpretation:
 

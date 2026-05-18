@@ -20,6 +20,7 @@ class V1StructuralProjectionTest(unittest.TestCase):
         projected = project_v1_structural_features(row, today_change_pct=3.0)
         self.assertGreater(projected.projected_forecast_proxy_pct, 0.0)
         self.assertGreater(projected.projected_leader_score_trend, projected.projected_candidate_score_trend)
+        self.assertEqual(projected.rsi, 62.0)
 
 
 if __name__ == "__main__":

@@ -74,17 +74,17 @@ If exit monetization dominates:
 
 The improved admission policy still has material admission error:
 
-- productive entry share: `20.467%`;
-- noise entry share: `67.088%`;
-- late entry share: `12.445%`.
+- productive entry share: `19.563%`;
+- noise entry share: `68.355%`;
+- late entry share: `12.082%`.
 
 However, the largest remaining reward gaps versus oracle are:
 
 | Reward component | Gap versus oracle |
 |---|---:|
-| `giveback_penalty` | `-2750.039` |
-| `realized_pnl_reward` | `-1899.155` |
-| `false_buy_penalty` | `-1380.000` |
+| `giveback_penalty` | `-2915.976` |
+| `realized_pnl_reward` | `-1883.641` |
+| `false_buy_penalty` | `-1471.000` |
 
 Conclusion:
 

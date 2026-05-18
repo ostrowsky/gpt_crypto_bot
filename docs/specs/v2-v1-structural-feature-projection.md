@@ -45,6 +45,8 @@ formulas:
 3. Do not use future bars.
 4. Keep exact historical v1 joins separately; projected and observed-v1 features
    must not be silently conflated.
+5. Projected v1-style features must be computed from **raw feature units**, never
+   from scaled reconstruction vectors.
 
 ## Acceptance Criteria
 
@@ -75,16 +77,16 @@ Selected projected means by true lifecycle state:
 
 | State | Forecast proxy | Leader score trend |
 |---|---:|---:|
-| `noise` | `0.469` | `2.959` |
-| `emerging_move` | `0.610` | `3.389` |
-| `confirmed_trend` | `1.555` | `8.143` |
-| `mature_trend` | `3.954` | `21.360` |
-| `exhaustion` | `2.981` | `19.234` |
+| `noise` | `0.906` | `4.899` |
+| `emerging_move` | `0.844` | `4.649` |
+| `confirmed_trend` | `1.563` | `8.991` |
+| `mature_trend` | `3.583` | `21.073` |
+| `exhaustion` | `3.353` | `20.151` |
 
 Interpretation:
 
 - v1-style strength features are reusable densely;
 - they separate established trend phases well;
-- they only weakly separate `emerging_move` from `noise`;
+- they do **not** cleanly separate `emerging_move` from `noise` on their own;
 - admission still needs belief dynamics and temporal evidence, not just projected
   v1 strength scores.

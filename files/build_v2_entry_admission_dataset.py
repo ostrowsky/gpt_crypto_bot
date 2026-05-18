@@ -59,6 +59,7 @@ def build(
     means, stds = fit_scaler(train)
     scaled_train = [_scaled(row, means, stds) for row in train]
     scaled_test = [_scaled(row, means, stds) for row in test]
+    raw_test_by_key = {(row.symbol, row.ts_ms): row for row in test}
     centroids = fit_centroids(scaled_train)
     filtered = filter_rows(scaled_test, centroids, self_bias=0.85, temperature=0.75)
 
@@ -75,7 +76,10 @@ def build(
             build_row(
                 item,
                 structural=structural.get(key),
-                projected_structural=project_v1_structural_features(item.row, today_change_pct=today_change),
+                projected_structural=project_v1_structural_features(
+                    raw_test_by_key[(item.row.symbol, item.row.ts_ms)],
+                    today_change_pct=today_change,
+                ),
                 temporal=_temporal_features(events.get(item.row.symbol, []), item.row.ts_ms),
             )
         )

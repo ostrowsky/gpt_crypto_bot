@@ -59,14 +59,14 @@ If recall-preserving admission improves reward:
 | Policy | Trades | Total reward | Noise entries | Emerging entries |
 |---|---:|---:|---:|---:|
 | threshold base | `2213` | `-554.283` | `1529` | `373` |
-| belief + projected-v1 admission | `2057` | `-305.751` | `1380` | `370` |
+| belief + projected-v1 admission | `2152` | `-384.481` | `1471` | `371` |
 
 Delta versus current threshold base:
 
-- total reward: `+248.532`;
-- false-buy penalty: `-1529.0 -> -1380.0`;
-- giveback penalty: `-4526.589 -> -4176.749`;
-- emerging entries retained: `370 / 373`.
+- total reward: `+169.802`;
+- false-buy penalty: `-1529.0 -> -1471.0`;
+- giveback penalty: `-4526.589 -> -4342.686`;
+- emerging entries retained: `371 / 373`.
 
 Interpretation:
 

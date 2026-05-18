@@ -51,11 +51,11 @@ No tested early-exit profile beat the current base:
 
 | Profile | Total reward | Avg giveback | Avg realized PnL |
 |---|---:|---:|---:|
-| `base_sell_0_70` | `-305.751` | `-2.038` | `0.212` |
-| `early_sell_0_60` | `-503.727` | `-1.960` | `0.175` |
-| `exhaustion_sensitive` | `-671.799` | `-1.825` | `0.160` |
-| `reversal_sensitive` | `-598.499` | `-1.913` | `0.169` |
-| `hybrid_peak_guard` | `-532.602` | `-1.923` | `0.184` |
+| `base_sell_0_70` | `-384.481` | `-2.026` | `0.210` |
+| `early_sell_0_60` | `-576.457` | `-1.951` | `0.176` |
+| `exhaustion_sensitive` | `-741.815` | `-1.820` | `0.161` |
+| `reversal_sensitive` | `-683.343` | `-1.903` | `0.168` |
+| `hybrid_peak_guard` | `-613.790` | `-1.914` | `0.182` |
 
 Interpretation:
 
