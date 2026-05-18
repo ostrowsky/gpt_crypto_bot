@@ -107,6 +107,7 @@ new BUY mode -> more replay tuning
 | Market-environment separability | complete first pass: policy-favorable vs unfavorable days are separable enough for a classifier baseline, with small-sample caution |
 | Market-environment switched policy | complete first pass: oracle switch strongly wins, first causal prefix classifier loses to both fixed policies |
 | Market-environment belief v1 | complete first pass, rejected: rolling belief still loses to both fixed policies |
+| Market-environment target design | complete: day labels disagree with future-horizon truth in `35-47%` of samples; use 1h/2h targets next |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -236,6 +237,17 @@ The first rolling belief implementation also loses:
 It abstains too long, becomes confident too late, and suffers from prior inertia
 under a tiny / imbalanced day-level teacher set. The next step is not another
 policy branch, but an environment-belief diagnostic audit.
+
+### Market-environment target design
+
+The current day-level ground truth is too coarse for intraday belief:
+
+- `1h` horizon disagreement: `35.75%`;
+- `2h` horizon disagreement: `36.31%`;
+- `rest_of_day` disagreement: `46.93%`.
+
+The next environment belief model should train/evaluate against rolling
+future-horizon policy advantage, not whole-day labels.
 
 ## Runtime Rule
 
