@@ -108,6 +108,7 @@ new BUY mode -> more replay tuning
 | Market-environment switched policy | complete first pass: oracle switch strongly wins, first causal prefix classifier loses to both fixed policies |
 | Market-environment belief v1 | complete first pass, rejected: rolling belief still loses to both fixed policies |
 | Market-environment target design | complete: day labels disagree with future-horizon truth in `35-47%` of samples; use 1h/2h targets next |
+| Market-environment horizon-belief diagnostic | complete: 1h/2h targets are better balanced, but current causal classifier is below majority baseline |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -248,6 +249,17 @@ The current day-level ground truth is too coarse for intraday belief:
 
 The next environment belief model should train/evaluate against rolling
 future-horizon policy advantage, not whole-day labels.
+
+### Market-environment horizon-belief diagnostic
+
+The `1h` / `2h` horizon targets improve sample balance, but current features and
+nearest-centroid inference still fail:
+
+- `1h` accuracy `0.5367` vs majority `0.6089`;
+- `2h` accuracy `0.5314` vs majority `0.6369`.
+
+So the next bottleneck is the market observation layer, not another switched
+policy replay.
 
 ## Runtime Rule
 
