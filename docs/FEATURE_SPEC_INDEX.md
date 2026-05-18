@@ -55,6 +55,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 temporal exit baselines | research-only first pass complete | `docs/specs/v2-temporal-exit-baselines.md` | replay-tested temporal exit reward, giveback, false early exit | robustness test `mature_decay_late_rise` before promotion |
 | V2 temporal exit robustness | research-only complete, locally robust | `docs/specs/v2-temporal-exit-robustness.md` | local-grid reward stability | test window / regime stability before promotion |
 | V2 temporal exit window stability | research-only complete, promising but regime-sensitive | `docs/specs/v2-temporal-exit-window-stability.md` | per-window reward stability | explain the losing latest window before promotion |
+| V2 temporal exit failure-slice audit | research-only complete, coherent weak-structure slice found | `docs/specs/v2-temporal-exit-failure-slice-audit.md` | winning-vs-losing slice explainability | test conditional temporal-exit hypotheses next |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |

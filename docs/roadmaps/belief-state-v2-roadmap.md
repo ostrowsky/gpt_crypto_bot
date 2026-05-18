@@ -100,6 +100,7 @@ new BUY mode -> more replay tuning
 | Temporal exit baselines | complete first pass: `mature_decay_late_rise` wins OOS (`+122.90` vs base reward); robustness gate next |
 | Temporal exit robustness | complete: local 3x3 grid is positive in `9/9` cells; center `+122.90`, worst `+91.86` |
 | Temporal exit window stability | complete: wins `3/4` windows, aggregate `+152.49`, but latest window loses `-100.29` |
+| Temporal exit failure-slice audit | complete: latest losing window is noise-dominant / weak-structure, with lower RSI, lower range, below-EMA mean |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -160,6 +161,21 @@ chronological windows, but the latest window (`2026-05-13 -> 2026-05-17`) loses
 This is good enough to preserve the candidate, but not enough to promote it.
 The next exit step is a failure-slice / regime audit focused on why the latest
 window reverses the uplift.
+
+### Temporal exit failure slice
+
+The losing latest window differs coherently from the winning windows:
+
+- noise share `81.55%` vs `70.15%`;
+- mature-trend share `4.70%` vs `8.53%`;
+- RSI `46.54` vs `50.94`;
+- daily range `2.23%` vs `3.12%`;
+- mean price-vs-EMA20 already negative.
+
+The candidate still reduces false buys there, but no longer improves giveback and
+loses `-82.21` on realized-PnL delta. This supports a new, narrower hypothesis:
+the temporal exit family is useful only when market structure is strong enough
+to support real mature trends.
 
 ## Runtime Rule
 
