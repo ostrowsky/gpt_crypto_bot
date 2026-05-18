@@ -88,6 +88,7 @@ new BUY mode -> more replay tuning
 | Offline decision environment | first single-symbol deterministic episode scaffold under construction |
 | Policy baselines | first OOS anchors done: oracle `+5867`, naive belief policy `-1864`; action calibration now required before RL |
 | Belief-to-action bridge | threshold audit complete: best threshold reward `-554`; useful but still insufficient before RL |
+| Policy-gap audit | complete: dominant remaining defect is admission (`1529` noise entries vs `373` emerging entries) |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
