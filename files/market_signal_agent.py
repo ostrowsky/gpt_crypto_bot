@@ -337,13 +337,18 @@ def _agent_allowed_slots(positions: Dict[str, AgentPosition]) -> int:
     return max(0, limit - main_only_count)
 
 
-def _save_state(last_exit_bar: Dict[str, int], symbol_cooldown_until: Dict[str, int]) -> None:
+def _save_state(
+    last_exit_bar: Dict[str, int],
+    symbol_cooldown_until: Dict[str, int],
+    soft_block_watch_alert_day: Dict[str, str] | None = None,
+) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(
         json.dumps(
             {
                 "last_exit_bar": last_exit_bar,
                 "symbol_cooldown_until": symbol_cooldown_until,
+                "soft_block_watch_alert_day": soft_block_watch_alert_day or {},
             },
             ensure_ascii=False,
             indent=2,
@@ -352,22 +357,26 @@ def _save_state(last_exit_bar: Dict[str, int], symbol_cooldown_until: Dict[str, 
     )
 
 
-def _load_state() -> tuple[Dict[str, int], Dict[str, int]]:
+def _load_state() -> tuple[Dict[str, int], Dict[str, int], Dict[str, str]]:
     if not STATE_FILE.exists():
-        return {}, {}
+        return {}, {}, {}
     try:
         payload = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {}, {}
+        return {}, {}, {}
     raw_exit = payload.get("last_exit_bar", {})
     raw_symbol_cd = payload.get("symbol_cooldown_until", {})
+    raw_soft_block_watch = payload.get("soft_block_watch_alert_day", {})
     if not isinstance(raw_exit, dict):
         raw_exit = {}
     if not isinstance(raw_symbol_cd, dict):
         raw_symbol_cd = {}
+    if not isinstance(raw_soft_block_watch, dict):
+        raw_soft_block_watch = {}
     return (
         {str(k): int(v) for k, v in raw_exit.items()},
         {str(k): int(v) for k, v in raw_symbol_cd.items()},
+        {str(k): str(v) for k, v in raw_soft_block_watch.items()},
     )
 
 
@@ -1901,7 +1910,7 @@ async def _run_cycle(
         n_open_positions=len(positions),
     )
     _save_positions(positions)
-    _save_state(last_exit_bar, symbol_cooldown_until)
+    _save_state(last_exit_bar, symbol_cooldown_until, _SOFT_BLOCK_WATCH_ALERT_DAY)
     return entries, len(symbols) * len(config.TIMEFRAMES)
 
 
@@ -1919,7 +1928,8 @@ async def _amain(args: argparse.Namespace) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     positions = _load_positions()
-    last_exit_bar, symbol_cooldown_until = _load_state()
+    last_exit_bar, symbol_cooldown_until, restored_soft_block_watch = _load_state()
+    _SOFT_BLOCK_WATCH_ALERT_DAY.update(restored_soft_block_watch)
     if args.poll_sec:
         config.POLL_SEC = int(args.poll_sec)
 

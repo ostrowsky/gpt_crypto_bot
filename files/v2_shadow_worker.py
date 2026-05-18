@@ -82,7 +82,7 @@ def _load_chat_ids() -> list[int]:
 
 async def _send_shadow_alert(session: aiohttp.ClientSession, event: dict) -> None:
     token = getattr(config, "TELEGRAM_BOT_TOKEN", "")
-    if not token:
+    if not token or not bool(getattr(config, "V2_SHADOW_REALTIME_TELEGRAM_ENABLED", False)):
         return
     chat_ids = _load_chat_ids()
     if not chat_ids:

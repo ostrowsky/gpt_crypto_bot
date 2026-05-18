@@ -21,7 +21,7 @@ position attached to the symbol.
 
 ## Alert Contract
 
-### Telegram-eligible now
+### Telegram-eligible by transition class
 
 Only **upside discovery** transitions:
 
@@ -40,6 +40,9 @@ All other states remain fully logged but do **not** notify Telegram:
 Exit-oriented shadow alerts may be reconsidered later only when they are linked to
 actual held positions or an explicit exit-observation workflow.
 
+The separate operator notification policy may still disable all real-time v2 Telegram
+messages globally.
+
 ## Runtime Contract
 
 - only the clean release worker may be running for operator observation;
@@ -54,4 +57,3 @@ actual held positions or an explicit exit-observation workflow.
 3. Telegram remains available for `emerging_move` / `confirmed_trend`.
 4. All transitions are still present in append-only research telemetry.
 5. Unit tests cover alert eligibility.
-
