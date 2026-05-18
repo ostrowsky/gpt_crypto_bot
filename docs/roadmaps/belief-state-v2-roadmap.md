@@ -6,10 +6,11 @@ Last updated: 2026-05-17
 
 Replace the search for a universal BUY mode with a research architecture that:
 
-1. maintains a belief over hidden symbol / market states;
-2. learns how states evolve over time;
-3. selects actions under uncertainty;
-4. optimizes the bot's real objective:
+1. maintains a belief over hidden market-environment states;
+2. maintains a belief over hidden symbol lifecycle states;
+3. learns how both evolve over time;
+4. selects actions under uncertainty conditioned on both beliefs;
+5. optimizes the bot's real objective:
    - earlier same-day top-mover capture;
    - better use of the unified 10-slot portfolio;
    - better MFE retention near trend exhaustion.
@@ -49,6 +50,7 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 19 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
 | 20 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
 | 21 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
+| 22 | Market-environment belief model | in progress | infer which external game the bot is currently playing | separability before classifier |
 
 ## What We Have Learned So Far
 
@@ -72,7 +74,7 @@ new BUY mode -> more replay tuning
 
 | Dimension | Current state |
 |---|---|
-| Architecture | defined |
+| Architecture | upgraded: symbol belief + market-environment belief + adaptive policy |
 | Production isolation | preserved |
 | Sequence contract | defined |
 | Existing history quality | measured, insufficient for 15m state modeling |
@@ -101,6 +103,8 @@ new BUY mode -> more replay tuning
 | Temporal exit robustness | complete: local 3x3 grid is positive in `9/9` cells; center `+122.90`, worst `+91.86` |
 | Temporal exit window stability | complete: wins `3/4` windows, aggregate `+152.49`, but latest window loses `-100.29` |
 | Temporal exit failure-slice audit | complete: latest losing window is noise-dominant / weak-structure, with lower RSI, lower range, below-EMA mean |
+| Market-environment taxonomy | defined: policy-oriented hidden states, not simple bullish/bearish labels |
+| Market-environment separability | complete first pass: policy-favorable vs unfavorable days are separable enough for a classifier baseline, with small-sample caution |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -176,6 +180,37 @@ The candidate still reduces false buys there, but no longer improves giveback an
 loses `-82.21` on realized-PnL delta. This supports a new, narrower hypothesis:
 the temporal exit family is useful only when market structure is strong enough
 to support real mature trends.
+
+## Architecture Reframe
+
+The v2 agent should behave less like a detector with one universal strategy and
+more like a game-playing agent that models its opponent.
+
+Its target decision form is:
+
+```text
+policy(action | market_environment_belief, symbol_belief, portfolio_state)
+```
+
+not:
+
+```text
+policy(action | symbol_state)
+```
+
+The next architecture track is therefore a **market-environment belief model**:
+infer what kind of external game the bot is currently playing, then condition
+entry / hold / exit policy on that belief.
+
+### Market-environment separability
+
+The first day-level audit found `14` favorable and `4` unfavorable days and
+returned `separable_candidate`.
+
+Important nuance: unfavorable days are not simply "weak markets". Some have
+higher visible trend strength than favorable days. That reinforces the correct
+target: classify **policy-favorability of the environment**, not a human label
+such as bullish / bearish or strong / weak.
 
 ## Runtime Rule
 

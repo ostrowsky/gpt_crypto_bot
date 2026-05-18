@@ -11,9 +11,10 @@ current production system.
 The old line of work searches for better BUY modes and static gates. The v2 line instead
 models trading as sequential decision-making under partial observability:
 
-1. infer a belief over hidden market / symbol states;
-2. choose an action under uncertainty;
-3. learn from intraday and end-of-day rewards aligned with the bot objective.
+1. infer a belief over hidden **market-environment** states;
+2. infer a belief over hidden symbol lifecycle states;
+3. choose an action conditioned on both beliefs plus portfolio state;
+4. learn from intraday and end-of-day rewards aligned with the bot objective.
 
 ## Problem
 
@@ -38,9 +39,10 @@ It is:
 2. **Research-only isolation**
    - v2 modules are not imported by the live trading path;
    - no BUY/SELL behavior changes in this phase.
-3. **Belief before policy**
-   - first define symbol lifecycle states, market states, and belief updates;
-   - only then add RL / policy learning.
+3. **Environment belief before policy**
+   - the bot is not playing one stationary game;
+   - first infer what kind of market environment is currently "playing against it";
+   - then condition symbol-level policy on that environment belief.
 4. **Objective-aligned rewards**
    - rewards must reflect early top-mover capture, hold quality, exit quality, fees,
      and portfolio opportunity cost, not only short-horizon PnL.
@@ -80,12 +82,15 @@ files/v2/
 - `exhaustion`
 - `reversal`
 
-### Market states
+### Market-environment states
 
-- `risk_off`
-- `neutral`
-- `risk_on`
-- `high_dispersion`
+- `continuation_favorable`
+- `mixed_rotation`
+- `noise_dominant`
+- `risk_off_decay`
+
+These are policy-oriented latent states: they describe what kinds of actions the
+environment tends to reward, not merely whether BTC is green or red.
 
 ### Actions
 
@@ -151,17 +156,31 @@ won or lost reward instead of hiding the answer inside one scalar.
 - `python -m unittest test_v2_core.py`
 - repo grep showing no production import of `v2`
 
+## Target Decision Form
+
+```text
+action = pi(market_environment_belief, symbol_belief, portfolio_state)
+```
+
+not:
+
+```text
+action = pi(symbol_state)
+```
+
+This is analogous to an agent that adapts its game plan to the inferred style or
+strength of an opponent rather than using the same strategy against everyone.
+
 ## Next Gate
 
 After this package:
 
 1. build a sequence dataset from existing event logs and OHLCV;
 2. label hindsight lifecycle transitions;
-3. evaluate whether symbol lifecycle states can be reconstructed out-of-sample before
-   introducing RL.
+3. evaluate whether symbol lifecycle states can be reconstructed out-of-sample;
+4. build the first market-environment observability audit before introducing RL.
 
 ## Rollback / Safety
 
 - delete `files/v2/` and this spec with no effect on production;
 - no config switch is required because the package is inert until explicitly imported.
-

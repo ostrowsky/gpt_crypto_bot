@@ -27,7 +27,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | P0 measurement hardening | shipped measurement-only | `docs/specs/p0-measurement-hardening.md` | report coverage, funnel loss point, exit lifecycle | use before next algorithm change |
 | Agent mode rescue replay | research-only | `docs/specs/agent-mode-rescue-replay.md` | `capture_rate`, `trade_precision`, `pnl_total`, entry timing | compare `agent_allowed` vs `agent_mode_rescue` before any live change |
 | Wake-up confirmed agent rescue | research-only | `docs/specs/wakeup-confirmed-agent-rescue.md` | `capture_rate`, `trade_precision`, `pnl_total`, temporal rescue admissions | evaluate only on windows with wake-up coverage |
-| Belief-state v2 architecture | research-only | `docs/specs/belief-state-v2-architecture.md` | state reconstruction quality, objective-aligned reward, later policy uplift | build sequence dataset before any RL |
+| Belief-state v2 architecture | research-only, dual-belief design | `docs/specs/belief-state-v2-architecture.md` | state reconstruction quality, environment-belief quality, later policy uplift | build environment separability before RL |
 | V2 sequence dataset builder | research-only | `docs/specs/v2-sequence-dataset-builder.md` | sequence coverage, transition count, gap diagnostics | label lifecycle states before model fitting |
 | V2 sequence coverage audit | research-only | `docs/specs/v2-sequence-coverage-audit.md` | transition density, contiguous coverage, longest usable history | choose data-repair strategy before state modeling |
 | V2 canonical market history | research-only | `docs/specs/v2-canonical-market-history.md` | contiguous OHLCV coverage, missing-interval count | choose canonical history source before lifecycle labels |
@@ -56,6 +56,8 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 temporal exit robustness | research-only complete, locally robust | `docs/specs/v2-temporal-exit-robustness.md` | local-grid reward stability | test window / regime stability before promotion |
 | V2 temporal exit window stability | research-only complete, promising but regime-sensitive | `docs/specs/v2-temporal-exit-window-stability.md` | per-window reward stability | explain the losing latest window before promotion |
 | V2 temporal exit failure-slice audit | research-only complete, coherent weak-structure slice found | `docs/specs/v2-temporal-exit-failure-slice-audit.md` | winning-vs-losing slice explainability | test conditional temporal-exit hypotheses next |
+| V2 market-environment taxonomy | research-only implementation | `docs/specs/v2-market-environment-taxonomy.md` | policy-relevant environment vocabulary | test separability before classifier |
+| V2 market-environment separability audit | research-only first pass complete | `docs/specs/v2-market-environment-separability-audit.md` | favorable-vs-unfavorable day separability | build first classifier-switched replay baseline |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
