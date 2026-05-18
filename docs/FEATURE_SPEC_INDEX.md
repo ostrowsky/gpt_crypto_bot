@@ -58,6 +58,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 temporal exit failure-slice audit | research-only complete, coherent weak-structure slice found | `docs/specs/v2-temporal-exit-failure-slice-audit.md` | winning-vs-losing slice explainability | test conditional temporal-exit hypotheses next |
 | V2 market-environment taxonomy | research-only implementation | `docs/specs/v2-market-environment-taxonomy.md` | policy-relevant environment vocabulary | test separability before classifier |
 | V2 market-environment separability audit | research-only first pass complete | `docs/specs/v2-market-environment-separability-audit.md` | favorable-vs-unfavorable day separability | build first classifier-switched replay baseline |
+| V2 market-environment switch replay | research-only first pass complete | `docs/specs/v2-market-environment-switch-replay.md` | oracle vs causal switched-policy reward | improve causal environment belief; first classifier rejected |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |

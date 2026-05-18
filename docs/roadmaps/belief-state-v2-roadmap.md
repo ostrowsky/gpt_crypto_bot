@@ -105,6 +105,7 @@ new BUY mode -> more replay tuning
 | Temporal exit failure-slice audit | complete: latest losing window is noise-dominant / weak-structure, with lower RSI, lower range, below-EMA mean |
 | Market-environment taxonomy | defined: policy-oriented hidden states, not simple bullish/bearish labels |
 | Market-environment separability | complete first pass: policy-favorable vs unfavorable days are separable enough for a classifier baseline, with small-sample caution |
+| Market-environment switched policy | complete first pass: oracle switch strongly wins, first causal prefix classifier loses to both fixed policies |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -211,6 +212,17 @@ Important nuance: unfavorable days are not simply "weak markets". Some have
 higher visible trend strength than favorable days. That reinforces the correct
 target: classify **policy-favorability of the environment**, not a human label
 such as bullish / bearish or strong / weak.
+
+### Market-environment switched policy
+
+The full contour now separates two questions cleanly:
+
+- `oracle_switched`: `+498.49` vs fixed base and `+346.00` vs fixed candidate;
+- `causal_prefix_switched`: `-64.54` vs fixed base and `-217.03` vs fixed candidate.
+
+Conclusion: adaptation is valuable, but the first causal environment classifier
+is not yet competent enough to drive it. The next bottleneck is environment
+inference quality, not another hand-written policy family.
 
 ## Runtime Rule
 
