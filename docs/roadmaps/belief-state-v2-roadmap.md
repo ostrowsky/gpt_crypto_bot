@@ -109,6 +109,7 @@ new BUY mode -> more replay tuning
 | Market-environment belief v1 | complete first pass, rejected: rolling belief still loses to both fixed policies |
 | Market-environment target design | complete: day labels disagree with future-horizon truth in `35-47%` of samples; use 1h/2h targets next |
 | Market-environment horizon-belief diagnostic | complete: 1h/2h targets are better balanced, but current causal classifier is below majority baseline |
+| Market observation feature audit | complete: richer features improve 1h to near-majority but still fail the +3pp switched-replay gate |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -260,6 +261,14 @@ nearest-centroid inference still fail:
 
 So the next bottleneck is the market observation layer, not another switched
 policy replay.
+
+### Market observation feature audit
+
+Richer prefix/recent/delta/breadth features improved the `1h` classifier from
+`0.5367` to `0.6102` and reduced wrong-confident errors, but it still does not
+beat majority by the required margin. `2h` remains below majority.
+
+Therefore no switched replay should be run from this model yet.
 
 ## Runtime Rule
 
