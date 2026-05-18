@@ -92,6 +92,7 @@ new BUY mode -> more replay tuning
 | Entry admission layer | first v1-enriched dataset built; temporal reuse is useful, exact structural joins are sparse (`0.96%`) |
 | V1 structural projection | complete: projected block covers `100%` of OOS rows; useful for mature phases, weak alone for `emerging_move` vs `noise` |
 | Admission baseline comparison | first audit complete: projected-v1 improves recall-preserving admission; temporal hard gate collapses early recall |
+| Admission reward replay | first replay complete: combined admission improves reward `-554 -> -306` while preserving `370/373` emerging entries |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 

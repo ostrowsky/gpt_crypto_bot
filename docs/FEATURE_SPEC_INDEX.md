@@ -47,6 +47,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 entry admission dataset | research-only implementation | `docs/specs/v2-entry-admission-dataset.md` | v1-feature reuse coverage, admission readiness | compare belief-only vs v1-enriched admission baselines |
 | V2 v1 structural projection | research-only implementation | `docs/specs/v2-v1-structural-feature-projection.md` | dense projected-v1 coverage, lifecycle separation | compare projected-v1 admission baselines |
 | V2 entry admission baselines | research-only implementation | `docs/specs/v2-entry-admission-baselines.md` | noise rejection, emerging recall, admission precision | compare baseline families before reward replay |
+| V2 entry admission reward replay | research-only implementation | `docs/specs/v2-entry-admission-reward-replay.md` | total reward, false-buy penalty, trade-count reduction | validate admission in offline environment |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
