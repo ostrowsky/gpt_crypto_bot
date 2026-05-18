@@ -43,8 +43,8 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 13 | Soft teacher confidence | done | represent teacher uncertainty instead of binary truth | confidence-weighted labels |
 | 14 | State reconstruction baseline | done baseline | test whether latent lifecycle can be recovered OOS | macro-F1 beats naive baseline |
 | 15 | Belief update / filtering | done v1 | move from labels to live-like belief trajectories | macro-F1 and emerging recall beat isolated baseline |
-| 16 | Belief calibration audit | next | tune transition / emission balance before policy learning | retain early recall without late-state collapse |
-| 17 | Offline decision environment | pending | expose actions/rewards under portfolio constraints | reproducible offline episodes |
+| 16 | Belief calibration audit | done | tune transition / emission balance before policy learning | balanced filter selected without late-state collapse |
+| 17 | Offline decision environment | now | expose actions/rewards under portfolio constraints | reproducible offline episodes |
 | 18 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
 | 19 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
 | 20 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
@@ -83,8 +83,8 @@ new BUY mode -> more replay tuning
 | Fast why/why-not lookup | implemented from compact decision trace |
 | Lifecycle labels | baseline + confidence layer available |
 | State reconstruction | nearest-centroid OOS macro-F1 0.288 > majority 0.141; emerging recall still weak at 0.285 |
-| Belief filtering | v1 OOS macro-F1 0.313; emerging recall 0.456, but reversal recall regressed |
-| HMM / Bayesian inference | first deterministic filter exists; calibration next |
+| Belief filtering | calibrated research default selected: self-bias `0.85`, temperature `0.75`; macro-F1 `0.319`, emerging recall `0.388`, reversal recall `0.409` |
+| HMM / Bayesian inference | first deterministic filter calibrated; next step is decision-environment construction |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
