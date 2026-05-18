@@ -45,7 +45,7 @@ Replace the search for a universal BUY mode with a research architecture that:
 | 15 | Belief update / filtering | done v1 | move from labels to live-like belief trajectories | macro-F1 and emerging recall beat isolated baseline |
 | 16 | Belief calibration audit | done | tune transition / emission balance before policy learning | balanced filter selected without late-state collapse |
 | 17 | Offline decision environment | in progress | expose actions/rewards under portfolio constraints | reproducible offline episodes |
-| 18 | Policy baselines + offline RL | pending | compare rule policy, contextual policy, RL | walk-forward uplift |
+| 18 | Policy baselines + offline RL | in progress | compare rule policy, contextual policy, RL | baseline gap understood before learned policy |
 | 19 | Unified runtime integration | done for first worker | ensure any v2 worker starts from the same BAT and reports health | one-command stack startup |
 | 20 | Learned shadow policy | pending | replace provisional observer with modeled recommendations | live-shadow evidence |
 | 21 | Promotion protocol | pending | define replacement of legacy core safely | explicit go/no-go gate |
@@ -86,6 +86,7 @@ new BUY mode -> more replay tuning
 | Belief filtering | calibrated research default selected: self-bias `0.85`, temperature `0.75`; macro-F1 `0.319`, emerging recall `0.388`, reversal recall `0.409` |
 | HMM / Bayesian inference | first deterministic filter calibrated; next step is decision-environment construction |
 | Offline decision environment | first single-symbol deterministic episode scaffold under construction |
+| Policy baselines | first OOS anchors done: oracle `+5867`, naive belief policy `-1864`; action calibration now required before RL |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
