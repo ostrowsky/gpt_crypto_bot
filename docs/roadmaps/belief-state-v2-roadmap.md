@@ -98,6 +98,7 @@ new BUY mode -> more replay tuning
 | Exhaustion discrimination | complete: interpretable separation exists, but it is not enough by itself for a winning sell rule |
 | Exhaustion-aware exit baselines | complete: all four manual hypotheses lost to `base_sell_0_70`; static threshold exits rejected |
 | Temporal exit baselines | complete first pass: `mature_decay_late_rise` wins OOS (`+122.90` vs base reward); robustness gate next |
+| Temporal exit robustness | complete: local 3x3 grid is positive in `9/9` cells; center `+122.90`, worst `+91.86` |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -135,6 +136,19 @@ sample:
 The winning profile improves total reward by trading less and reducing noisy
 entries, not by reducing average giveback. This makes the next gate a
 **robustness test around the winning thresholds**, not immediate promotion.
+
+### Temporal exit robustness
+
+The first local sensitivity grid around `mature_decay_late_rise` stayed positive
+in all `9 / 9` cells:
+
+- center uplift: `+122.901657`
+- best uplift: `+152.487919`
+- worst uplift: `+91.861713`
+
+The signal is therefore locally robust rather than a one-cell threshold accident.
+The next mandatory gate is time-window / regime stability before any promotion
+claim.
 
 ## Runtime Rule
 
