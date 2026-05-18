@@ -99,6 +99,7 @@ new BUY mode -> more replay tuning
 | Exhaustion-aware exit baselines | complete: all four manual hypotheses lost to `base_sell_0_70`; static threshold exits rejected |
 | Temporal exit baselines | complete first pass: `mature_decay_late_rise` wins OOS (`+122.90` vs base reward); robustness gate next |
 | Temporal exit robustness | complete: local 3x3 grid is positive in `9/9` cells; center `+122.90`, worst `+91.86` |
+| Temporal exit window stability | complete: wins `3/4` windows, aggregate `+152.49`, but latest window loses `-100.29` |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -149,6 +150,16 @@ in all `9 / 9` cells:
 The signal is therefore locally robust rather than a one-cell threshold accident.
 The next mandatory gate is time-window / regime stability before any promotion
 claim.
+
+### Temporal exit window stability
+
+The leading candidate remains positive on aggregate OOS and wins `3 / 4`
+chronological windows, but the latest window (`2026-05-13 -> 2026-05-17`) loses
+`-100.286171`.
+
+This is good enough to preserve the candidate, but not enough to promote it.
+The next exit step is a failure-slice / regime audit focused on why the latest
+window reverses the uplift.
 
 ## Runtime Rule
 
