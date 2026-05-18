@@ -95,9 +95,29 @@ new BUY mode -> more replay tuning
 | Admission reward replay | first replay complete: combined admission improves reward `-554 -> -384` while preserving `371/373` emerging entries |
 | Residual gap decomposition | complete: admission remains weak, but largest next reward lever is exit monetization |
 | Exit-quality baselines | first audit complete: earlier transparent exits all lose to base; need better exhaustion discrimination |
-| Exhaustion discrimination | under construction: test whether mature trend and true exhaustion are separable with current features |
+| Exhaustion discrimination | complete: interpretable separation exists, but it is not enough by itself for a winning sell rule |
+| Exhaustion-aware exit baselines | complete: all four manual hypotheses lost to `base_sell_0_70`; static threshold exits rejected |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
+
+## Latest Backtest-Gated Findings
+
+### Exhaustion-aware exit hypotheses
+
+The first four transparent exit hypotheses were replayed on the same OOS sample
+(`1710` episodes / `163305` bars) under the same fixed admission layer:
+
+| Profile | Reward delta vs base | Result |
+|---|---:|---|
+| `late_mass_rsi_weak` | `-203.097729` | reject |
+| `late_mass_ema_loss` | `-178.395335` | reject |
+| `exhaustion_belief_combo` | `-146.799013` | reject |
+| `consensus_exhaustion` | `-271.917323` | reject |
+
+All four reduced average giveback but worsened total reward. This confirms that
+the next exit step is **not** more manual threshold tuning. The exit track should
+move to temporal / supervised modeling while keeping `base_sell_0_70` as the
+control profile.
 
 ## Runtime Rule
 
