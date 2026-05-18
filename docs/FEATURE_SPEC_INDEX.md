@@ -49,6 +49,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 entry admission baselines | research-only implementation | `docs/specs/v2-entry-admission-baselines.md` | noise rejection, emerging recall, admission precision | compare baseline families before reward replay |
 | V2 entry admission reward replay | research-only implementation | `docs/specs/v2-entry-admission-reward-replay.md` | total reward, false-buy penalty, trade-count reduction | validate admission in offline environment |
 | V2 residual gap decomposition | research-only implementation | `docs/specs/v2-residual-gap-decomposition.md` | residual admission vs exit loss attribution | choose next dominant architecture slice |
+| V2 exit quality baselines | research-only implementation | `docs/specs/v2-exit-quality-baselines.md` | giveback, realized PnL, exit reward | choose first better transparent exit profile |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
