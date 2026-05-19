@@ -117,6 +117,7 @@ new BUY mode -> more replay tuning
 | Exit advantage baseline model | complete: ridge model trained, but rejected; holdout directional accuracy `0.438`, selected threshold underperforms always-sell proxy |
 | Exit advantage model-family comparison | complete: binned nonlinear models rejected; best candidate equals always-sell proxy with `100%` sell rate |
 | Failure casebook | complete: `13` signal-quality reports + `44` top-gainer critic reports; next replay target is early-block-to-entry rescue |
+| Early-block rescue proxy replay | complete: best admissible variant rescues `43` missed winners, `340.041%` proxy opportunity, `0` non-positive cases; advance to candle-level replay |
 
 ## Latest Backtest-Gated Findings
 
@@ -482,6 +483,33 @@ Top failure tracks:
 Decision: stop broad exit-model iteration. The next replay package should be
 **early-block-to-entry rescue**, because it has the clearest path from casebook
 evidence to one concrete behavior change and a full replay gate.
+
+
+
+### Early-block-to-entry rescue proxy replay
+
+The first targeted replay package tested the failure-casebook hypothesis at report
+level before touching candle-level behavior.
+
+Best admissible proxy variant:
+
+- blocker families: `agent_mode_disabled`, `agent_leader_filter`,
+  `top_gainer_score_gate`;
+- max first-block hour: `12`;
+- min blocked count: `5`;
+- min opportunity from first block: `1.0%`;
+- selected cases: `43`;
+- rescued missed winners: `43`;
+- non-positive opportunity cases: `0`;
+- proxy opportunity gain: `340.041%`.
+
+This is strong enough to justify a real candle-level replay, but not production.
+The proxy only sees final top-gainer rows and cannot measure false-positive
+rescues outside the final top list.
+
+Next gate: implement causal candle/event replay and require better
+`capture_ratio_at_entry` and net PnL without increasing `false_positive_buys` by
+more than `10%`.
 
 ## Runtime Rule
 

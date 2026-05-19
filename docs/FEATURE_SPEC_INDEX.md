@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 15:25 Europe/Budapest
+Last updated: 2026-05-19 16:20 Europe/Budapest
 
 ## Objective
 
@@ -88,6 +88,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | P0 observability foundation | shipped first additive slice | `docs/specs/p0-observability-foundation.md` | `blocked_reason_harm`, evaluator coverage | expand blocker context fields |
 | Canonical metrics map | shipped | `docs/specs/metrics-canonical.md` | objective decision consistency | use in roadmap reviews |
 | Failure casebook | diagnostic-only complete | `docs/specs/failure-casebook.md` | ranked real failure cases, opportunity cost, replayable hypotheses | replay early-block-to-entry rescue first |
+| Early-block-to-entry rescue replay | diagnostic proxy complete, advances to candle replay | `docs/specs/early-block-to-entry-rescue-replay.md` | rescued missed winners, proxy opportunity gain, non-positive cases | implement candle-level causal replay with false-positive gate |
 
 ## Governance
 
