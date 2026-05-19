@@ -121,6 +121,7 @@ new BUY mode -> more replay tuning
 | Early-block rescue event replay | complete/rejected: broad variant precision `17.60%` with `82.40%` false positives; strict score-only precision `23.08%`, proxy opportunity only `8.975%` |
 | Post-block causal discriminator dataset | complete: `1,937` candidates, `341` top15, `67` useful missed winners, `1,596` bad candidates, `100%` feature coverage |
 | Post-block causal discriminator audit | complete/rejected: best holdout rule selected `7` candidates, `1` useful winner, useful precision `14.29%`, recall `7.14%` |
+| Post-block experiment suite | complete: selected delayed confirmation target `top15_and_tradable_120m`; best holdout rule precision `58.33%` on `12` candidates, `7` positives |
 
 ## Latest Backtest-Gated Findings
 
@@ -594,6 +595,30 @@ The rule improves precision but is too small and unstable to justify behavior
 replay. The current post-block OHLCV confirmation features are directionally
 useful but not sufficient. The next research step should change the label or add
 v1 score/rank trajectory features, not continue threshold sweeps.
+
+
+### Post-block experiment suite
+
+A bounded experiment suite compared five target definitions on the same
+chronological post-block dataset instead of continuing one weak discriminator
+loop.
+
+The selected direction is `top15_and_tradable_120m`:
+
+- holdout base rate: `1.711%`;
+- best rule: `rel_ret_120m_pct >= 2.0` and `volume_x_120m >= 1.5`;
+- candidates: `12`;
+- positives: `7`;
+- precision: `58.33%`;
+- recall: `77.78%`;
+- bad ratio: `41.67%`.
+
+This is the first post-block direction that clears a bounded precision/candidate
+pressure gate. It must be interpreted carefully: the signal is a **delayed
+confirmation after 120 minutes**, not an immediate entry rescue at the first
+block. The next step is a focused behavior replay that tests whether entering on
+this delayed confirmation improves the bot objective after fees, chase risk,
+portfolio pressure, and exits.
 
 ## Runtime Rule
 

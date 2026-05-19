@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 18:35 Europe/Budapest
+Last updated: 2026-05-19 19:20 Europe/Budapest
 
 ## Objective
 
@@ -92,6 +92,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Early-block rescue event replay | diagnostic-only complete, rejected | `docs/specs/early-block-rescue-event-replay.md` | top15 precision, false-positive ratio, missed-winner coverage | keep diagnostic; needs extra causal discriminator |
 | Post-block causal discriminator dataset | research-only complete | `docs/specs/post-block-causal-discriminator-dataset.md` | post-block feature coverage, useful-missed-winner class balance | run chronological discriminator audit |
 | Post-block causal discriminator audit | research-only complete, rejected | `docs/specs/post-block-causal-discriminator-audit.md` | useful precision, top15 precision, candidate pressure | improve labels or add score/rank trajectory before next model |
+| Post-block experiment suite | research-only complete, selected delayed confirmation target | `docs/specs/post-block-experiment-suite.md` | holdout precision lift, candidate pressure, target selection | replay `top15_and_tradable_120m` delayed confirmation candidate |
 
 ## Governance
 
