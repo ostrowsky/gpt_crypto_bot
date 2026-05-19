@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 17:50 Europe/Budapest
+Last updated: 2026-05-19 18:15 Europe/Budapest
 
 ## Objective
 
@@ -90,6 +90,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Failure casebook | diagnostic-only complete | `docs/specs/failure-casebook.md` | ranked real failure cases, opportunity cost, replayable hypotheses | replay early-block-to-entry rescue first |
 | Early-block-to-entry rescue replay | diagnostic proxy complete, advances to candle replay | `docs/specs/early-block-to-entry-rescue-replay.md` | rescued missed winners, proxy opportunity gain, non-positive cases | implement candle-level causal replay with false-positive gate |
 | Early-block rescue event replay | diagnostic-only complete, rejected | `docs/specs/early-block-rescue-event-replay.md` | top15 precision, false-positive ratio, missed-winner coverage | keep diagnostic; needs extra causal discriminator |
+| Post-block causal discriminator dataset | research-only complete | `docs/specs/post-block-causal-discriminator-dataset.md` | post-block feature coverage, useful-missed-winner class balance | run chronological discriminator audit |
 
 ## Governance
 

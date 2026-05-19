@@ -119,6 +119,7 @@ new BUY mode -> more replay tuning
 | Failure casebook | complete: `13` signal-quality reports + `44` top-gainer critic reports; next replay target is early-block-to-entry rescue |
 | Early-block rescue proxy replay | complete: best admissible variant rescues `43` missed winners, `340.041%` proxy opportunity, `0` non-positive cases; advance to candle-level replay |
 | Early-block rescue event replay | complete/rejected: broad variant precision `17.60%` with `82.40%` false positives; strict score-only precision `23.08%`, proxy opportunity only `8.975%` |
+| Post-block causal discriminator dataset | complete: `1,937` candidates, `341` top15, `67` useful missed winners, `1,596` bad candidates, `100%` feature coverage |
 
 ## Latest Backtest-Gated Findings
 
@@ -543,6 +544,28 @@ Decision: early repeated blocks are useful diagnostic evidence, but not a
 sufficient causal selector. Do not promote rescue behavior. Any future rescue
 attempt must add a second discriminator such as market-relative acceleration,
 watchlist-rank improvement, or volume/range expansion after the block.
+
+
+
+### Post-block causal discriminator dataset
+
+The next package shifted from ?rescue after repeated blocks? to the more precise
+question: after an early block, does the symbol show causal confirmation within a
+short observation window?
+
+The dataset builder produced `1,937` post-block candidates with full OHLCV and
+BTC-relative feature coverage across `15m`, `30m`, `60m`, and `120m` horizons.
+
+Label balance:
+
+- final top15: `341` (`17.60%`);
+- useful missed winners: `67` (`3.46%`);
+- bad candidates: `1,596` (`82.40%`).
+
+This confirms that the discriminator problem is highly imbalanced, but now it is
+well-posed. The next step is not production rescue; it is a chronological audit
+of simple post-block confirmation rules/models, with precision and candidate
+pressure as the main gates.
 
 ## Runtime Rule
 
