@@ -285,6 +285,19 @@ Higher thresholds increase candidate-edge precision but reduce coverage and make
 the class balance easier for the majority baseline. The next bottleneck is not
 label reshaping; it is stronger causal market observations.
 
+### Market breadth observation store
+
+The first canonical OHLCV breadth store covered `99` tracked symbols and all
+`179` evaluation anchors.
+
+Result: useful but insufficient. `existing + breadth` improved `1h` accuracy to
+`0.6215` vs majority `0.6089`, but this is only `+1.25pp`, below the required
+`+3pp` gate. `2h` did not improve.
+
+Decision: keep breadth features as a causal observation primitive, but do not use
+them yet for switched policy or RL. The next gate should test feature selection /
+regularization and conditional breadth use.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in
