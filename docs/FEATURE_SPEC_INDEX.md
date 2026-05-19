@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-18 12:12 Europe/Budapest
+Last updated: 2026-05-19 09:20 Europe/Budapest
 
 ## Objective
 
@@ -63,6 +63,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 market-environment target design | research-only complete | `docs/specs/v2-market-environment-target-design.md` | target disagreement, horizon balance, structural future mix | use 1h/2h future-horizon policy advantage for next belief model |
 | V2 market-environment horizon-belief diagnostic | research-only complete, current classifier rejected | `docs/specs/v2-market-environment-horizon-belief-diagnostic.md` | causal horizon-target accuracy, wrong-confidence, coverage | improve market observation features before switched replay |
 | V2 market observation feature audit | research-only complete, near-majority only | `docs/specs/v2-market-observation-feature-audit.md` | richer observation separability, horizon-target accuracy | add stronger observations before switched replay |
+| V2 market-environment edge target audit | research-only complete, rejected | `docs/specs/v2-market-environment-edge-target-audit.md` | actionable edge separability, no-edge coverage | build stronger market-breadth observations before switched replay |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |

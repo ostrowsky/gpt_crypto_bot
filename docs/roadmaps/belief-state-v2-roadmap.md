@@ -1,6 +1,6 @@
 # Belief-State V2 Roadmap
 
-Last updated: 2026-05-17
+Last updated: 2026-05-19
 
 ## North Star
 
@@ -110,6 +110,7 @@ new BUY mode -> more replay tuning
 | Market-environment target design | complete: day labels disagree with future-horizon truth in `35-47%` of samples; use 1h/2h targets next |
 | Market-environment horizon-belief diagnostic | complete: 1h/2h targets are better balanced, but current causal classifier is below majority baseline |
 | Market observation feature audit | complete: richer features improve 1h to near-majority but still fail the +3pp switched-replay gate |
+| Market-environment edge target audit | complete, rejected: no-edge labels still below majority baseline |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 
@@ -269,6 +270,20 @@ Richer prefix/recent/delta/breadth features improved the `1h` classifier from
 beat majority by the required margin. `2h` remains below majority.
 
 Therefore no switched replay should be run from this model yet.
+
+### Market-environment edge target audit
+
+The no-edge target hypothesis was tested across `0.5`, `1.0`, `2.0`, `5.0`, and
+`10.0` reward-delta thresholds for both `1h` and `2h` horizons.
+
+Result: rejected. The best actionable classifier remained below majority:
+
+- `1h @ 0.5`: accuracy `0.5833` vs majority `0.7239`;
+- `2h @ 0.5`: accuracy `0.6039` vs majority `0.6835`.
+
+Higher thresholds increase candidate-edge precision but reduce coverage and make
+the class balance easier for the majority baseline. The next bottleneck is not
+label reshaping; it is stronger causal market observations.
 
 ## Runtime Rule
 
