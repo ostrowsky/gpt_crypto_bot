@@ -120,6 +120,7 @@ new BUY mode -> more replay tuning
 | Early-block rescue proxy replay | complete: best admissible variant rescues `43` missed winners, `340.041%` proxy opportunity, `0` non-positive cases; advance to candle-level replay |
 | Early-block rescue event replay | complete/rejected: broad variant precision `17.60%` with `82.40%` false positives; strict score-only precision `23.08%`, proxy opportunity only `8.975%` |
 | Post-block causal discriminator dataset | complete: `1,937` candidates, `341` top15, `67` useful missed winners, `1,596` bad candidates, `100%` feature coverage |
+| Post-block causal discriminator audit | complete/rejected: best holdout rule selected `7` candidates, `1` useful winner, useful precision `14.29%`, recall `7.14%` |
 
 ## Latest Backtest-Gated Findings
 
@@ -566,6 +567,33 @@ This confirms that the discriminator problem is highly imbalanced, but now it is
 well-posed. The next step is not production rescue; it is a chronological audit
 of simple post-block confirmation rules/models, with precision and candidate
 pressure as the main gates.
+
+
+
+### Post-block causal discriminator audit
+
+The chronological discriminator audit rejected the first simple rule/binned model
+families.
+
+Holdout base rates:
+
+- useful missed winner: `2.66%`;
+- final top15: `19.58%`;
+- bad candidate: `80.42%`.
+
+Best holdout variant:
+
+- rule: `rel_ret_30m_pct >= 0.5` and `range_x_120m >= 2.0`;
+- candidates: `7`;
+- useful missed winners: `1`;
+- top15 candidates: `3`;
+- useful precision: `14.29%`;
+- useful recall: `7.14%`.
+
+The rule improves precision but is too small and unstable to justify behavior
+replay. The current post-block OHLCV confirmation features are directionally
+useful but not sufficient. The next research step should change the label or add
+v1 score/rank trajectory features, not continue threshold sweeps.
 
 ## Runtime Rule
 
