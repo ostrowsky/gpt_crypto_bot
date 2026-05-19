@@ -298,6 +298,23 @@ Decision: keep breadth features as a causal observation primitive, but do not us
 them yet for switched policy or RL. The next gate should test feature selection /
 regularization and conditional breadth use.
 
+### V1 market-structure feature audit
+
+The audit confirmed that v1 already has substantial reusable measurement history:
+`6279` `ml_dataset` rows from `2024-07-22` through `2026-05-18`, with `49`
+market-structure features at near/full coverage.
+
+The full broad feature sets remain noisy, but compact selected subsets pass the
+causal diagnostic gate:
+
+- `1h`: `market_ret4_positive_share` + `prefix_projected_leader_score_trend`
+  reaches `0.6497` accuracy vs `0.6089` majority (`+4.08pp`);
+- `2h`: `market_btc_ret4_pct` + `market_volume_gt_mean20_share` reaches `0.6800`
+  accuracy vs `0.6369` majority (`+4.31pp`).
+
+This validates reusing v1 as an observation source, not copying v1 policy logic.
+The next mandatory gate is selected-feature switched replay.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in
