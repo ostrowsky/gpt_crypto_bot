@@ -315,6 +315,18 @@ causal diagnostic gate:
 This validates reusing v1 as an observation source, not copying v1 policy logic.
 The next mandatory gate is selected-feature switched replay.
 
+### Selected-feature market switch replay
+
+The selected features passed plain classification gates, but failed reward gates:
+
+- `1h`: switched `+820.61` vs base, but fixed candidate `+881.23`; reject;
+- `2h`: switched `-27.29` vs base while fixed candidate is `+86.58`; reject.
+
+This is an important correction: accuracy is not enough for policy selection.
+Wrong candidate-favorable predictions are asymmetric and can carry very large
+losses. The next selector must be reward-weighted / downside-aware before any
+further switched replay claims.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in
