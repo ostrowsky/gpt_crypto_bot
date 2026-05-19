@@ -113,6 +113,7 @@ new BUY mode -> more replay tuning
 | Market-environment edge target audit | complete, rejected: no-edge labels still below majority baseline |
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
+| Action-level exit advantage dataset | complete: `99,935` in-position frames, `sell_positive` 50.03%, `sell_strong` 33.33%, `hold_strong` 31.62% |
 
 ## Latest Backtest-Gated Findings
 
@@ -384,6 +385,26 @@ switch, but still failed to beat the fixed candidate:
 This rejects more manual threshold tuning as the primary path. The next research
 step should build action-level advantage labels for in-position states, so the
 model learns when `SELL now` is actually better than `HOLD / temporal candidate`.
+
+
+
+### Action-level exit advantage dataset
+
+The next exit package produced a corrected action-level sell-vs-hold dataset over
+`99,935` in-position frames. The target compares immediate `SELL` reward against
+the realized continuation path under the candidate hold/exit policy, including
+all per-step continuation rewards through exit.
+
+The label distribution is usable for supervised research:
+
+- `sell_positive`: `50.03%`;
+- `sell_strong`: `33.33%`;
+- `hold_strong`: `31.62%`;
+- selected causal feature coverage: `100%`.
+
+This is the first credible ground truth for learning a position-aware exit policy.
+It does not authorize live SELL changes. The next gate is a chronological baseline
+exit-advantage model followed by full offline replay against the fixed candidate.
 
 ## Runtime Rule
 
