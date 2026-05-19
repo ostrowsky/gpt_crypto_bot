@@ -327,6 +327,21 @@ Wrong candidate-favorable predictions are asymmetric and can carry very large
 losses. The next selector must be reward-weighted / downside-aware before any
 further switched replay claims.
 
+### Reward-weighted market selector
+
+A downside-aware selector was tested over the selected market-structure features.
+The result splits by horizon:
+
+- `1h`: best selector still loses to fixed candidate (`+821.60` vs `+881.23`);
+- `2h`: `knn_k5_down3.0_thr0.0` wins strongly: `+800.88` vs base and
+  `+714.29` vs fixed candidate.
+
+This validates the important design shift: policy selection must be optimized for
+reward-weighted mistakes, not plain accuracy. It also suggests the external
+market-environment belief should initially operate on a `2h` policy horizon.
+
+Next gate: full offline environment replay for the `2h` reward-weighted selector.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in
