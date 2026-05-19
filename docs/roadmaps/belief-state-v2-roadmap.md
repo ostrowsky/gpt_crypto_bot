@@ -114,6 +114,7 @@ new BUY mode -> more replay tuning
 | RL | intentionally not started |
 | Unified runtime integration | required before live-shadow workers |
 | Action-level exit advantage dataset | complete: `99,935` in-position frames, `sell_positive` 50.03%, `sell_strong` 33.33%, `hold_strong` 31.62% |
+| Exit advantage baseline model | complete: ridge model trained, but rejected; holdout directional accuracy `0.438`, selected threshold underperforms always-sell proxy |
 
 ## Latest Backtest-Gated Findings
 
@@ -405,6 +406,30 @@ The label distribution is usable for supervised research:
 This is the first credible ground truth for learning a position-aware exit policy.
 It does not authorize live SELL changes. The next gate is a chronological baseline
 exit-advantage model followed by full offline replay against the fixed candidate.
+
+
+
+### Exit advantage baseline model
+
+The first supervised exit model was trained as a transparent ridge regression on
+the action-level sell-vs-hold advantage labels.
+
+Result: trained successfully, but rejected as a policy candidate.
+
+- holdout directional accuracy: `0.438344`;
+- actual holdout positive rate: `0.573296`;
+- predicted holdout positive rate: `0.216570`;
+- selected threshold `-2.0` sells `91.73%` of holdout frames;
+- captured advantage: `20,469.65`;
+- naive always-sell proxy: `22,721.46`.
+
+The key finding is regime shift: the train slice is hold-favorable on average,
+while the holdout slice is sell-favorable. The simple linear model is too rigid
+and too biased toward the training regime.
+
+Decision: do not replay or expose this linear model as a signal. The next exit
+research step is a model-family comparison with nonlinear / binned candidates and
+explicit naive-baseline gates.
 
 ## Runtime Rule
 
