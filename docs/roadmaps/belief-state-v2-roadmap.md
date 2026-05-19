@@ -372,6 +372,19 @@ position-aware exit/hold selector
 
 The immediate next research target is the position-aware exit/hold selector.
 
+### Position-aware exit selector
+
+The first manual position-aware profiles were less harmful than the broad market
+switch, but still failed to beat the fixed candidate:
+
+- fixed candidate: `-231.99`;
+- best position-aware profile: `base_override_ema_break` at `-254.69`;
+- delta vs fixed candidate: `-22.70`.
+
+This rejects more manual threshold tuning as the primary path. The next research
+step should build action-level advantage labels for in-position states, so the
+model learns when `SELL now` is actually better than `HOLD / temporal candidate`.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in
