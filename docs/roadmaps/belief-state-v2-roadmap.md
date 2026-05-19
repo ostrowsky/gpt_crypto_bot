@@ -118,6 +118,7 @@ new BUY mode -> more replay tuning
 | Exit advantage model-family comparison | complete: binned nonlinear models rejected; best candidate equals always-sell proxy with `100%` sell rate |
 | Failure casebook | complete: `13` signal-quality reports + `44` top-gainer critic reports; next replay target is early-block-to-entry rescue |
 | Early-block rescue proxy replay | complete: best admissible variant rescues `43` missed winners, `340.041%` proxy opportunity, `0` non-positive cases; advance to candle-level replay |
+| Early-block rescue event replay | complete/rejected: broad variant precision `17.60%` with `82.40%` false positives; strict score-only precision `23.08%`, proxy opportunity only `8.975%` |
 
 ## Latest Backtest-Gated Findings
 
@@ -510,6 +511,38 @@ rescues outside the final top list.
 Next gate: implement causal candle/event replay and require better
 `capture_ratio_at_entry` and net PnL without increasing `false_positive_buys` by
 more than `10%`.
+
+
+
+### Early-block rescue event replay
+
+The causal event-level replay corrected the earlier winners-only proxy result.
+It loaded `669,641` blocked events and `1,273` entries across `43` labeled days.
+
+Result: rejected.
+
+The broad high-opportunity variant captured many future top15 symbols but was too
+noisy:
+
+- candidates: `1,937`;
+- top15 precision: `17.60%`;
+- false-positive ratio: `82.40%`;
+- missed top15 candidates: `165`;
+- proxy top opportunity: `287.272%`.
+
+The stricter score-only variant reduced volume but still did not justify behavior
+replay:
+
+- candidates: `195`;
+- top15 precision: `23.08%`;
+- false-positive ratio: `76.92%`;
+- missed top15 candidates: `13`;
+- proxy top opportunity: `8.975%`.
+
+Decision: early repeated blocks are useful diagnostic evidence, but not a
+sufficient causal selector. Do not promote rescue behavior. Any future rescue
+attempt must add a second discriminator such as market-relative acceleration,
+watchlist-rank improvement, or volume/range expansion after the block.
 
 ## Runtime Rule
 
