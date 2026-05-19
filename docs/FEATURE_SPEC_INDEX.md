@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 14:15 Europe/Budapest
+Last updated: 2026-05-19 14:45 Europe/Budapest
 
 ## Objective
 
@@ -73,6 +73,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 position-aware exit selector | research-only complete, first manual profiles rejected | `docs/specs/v2-position-aware-exit-selector.md` | position-aware exit reward, giveback, trade-count safety | build action-level exit advantage labels |
 | V2 action-level exit advantage dataset | research-only complete | `docs/specs/v2-action-level-exit-advantage-dataset.md` | sell-vs-hold advantage labels, feature coverage | train chronological baseline exit-advantage model |
 | V2 exit advantage baseline model | research-only complete, first linear model rejected | `docs/specs/v2-exit-advantage-baseline-model.md` | holdout directional accuracy, captured advantage vs naive baselines | compare nonlinear / binned model families |
+| V2 exit advantage model-family comparison | research-only complete, binned models rejected | `docs/specs/v2-exit-advantage-model-family-comparison.md` | captured advantage vs always-sell proxy, sell rate, bad sells | add explicit trade-path context features |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |

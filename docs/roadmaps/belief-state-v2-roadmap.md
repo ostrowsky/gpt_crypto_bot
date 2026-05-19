@@ -115,6 +115,7 @@ new BUY mode -> more replay tuning
 | Unified runtime integration | required before live-shadow workers |
 | Action-level exit advantage dataset | complete: `99,935` in-position frames, `sell_positive` 50.03%, `sell_strong` 33.33%, `hold_strong` 31.62% |
 | Exit advantage baseline model | complete: ridge model trained, but rejected; holdout directional accuracy `0.438`, selected threshold underperforms always-sell proxy |
+| Exit advantage model-family comparison | complete: binned nonlinear models rejected; best candidate equals always-sell proxy with `100%` sell rate |
 
 ## Latest Backtest-Gated Findings
 
@@ -430,6 +431,31 @@ and too biased toward the training regime.
 Decision: do not replay or expose this linear model as a signal. The next exit
 research step is a model-family comparison with nonlinear / binned candidates and
 explicit naive-baseline gates.
+
+
+
+### Exit advantage model-family comparison
+
+The next audit tested transparent nonlinear quantile-bin lookup models over
+single features and feature pairs.
+
+Result: rejected.
+
+- best family: `single_bin` on `adx`;
+- selected threshold: `-2.0`;
+- sell rate: `100.00%`;
+- captured advantage: `22,721.46`;
+- always-sell proxy: `22,721.46`.
+
+The best candidate merely reproduced `always_sell`, so it provides no useful
+selection edge. More selective bins found positive pockets but not enough total
+advantage to beat the naive proxy.
+
+Decision: do not replay this model family. The next research move is to enrich
+the action-level dataset with explicit trade-path context (`bars_held`,
+`unrealized_pnl_pct`, `mfe_pct`, `giveback_pct`, and candidate action), because
+exit quality depends not only on market structure but also on the lifecycle of
+the current open trade.
 
 ## Runtime Rule
 
