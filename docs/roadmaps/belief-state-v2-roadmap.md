@@ -122,6 +122,7 @@ new BUY mode -> more replay tuning
 | Post-block causal discriminator dataset | complete: `1,937` candidates, `341` top15, `67` useful missed winners, `1,596` bad candidates, `100%` feature coverage |
 | Post-block causal discriminator audit | complete/rejected: best holdout rule selected `7` candidates, `1` useful winner, useful precision `14.29%`, recall `7.14%` |
 | Post-block experiment suite | complete: selected delayed confirmation target `top15_and_tradable_120m`; best holdout rule precision `58.33%` on `12` candidates, `7` positives |
+| Post-block delayed confirmation replay | complete/rejected: high top15 precision but no post-entry edge; selected mean `240m` return `-0.879%` vs baseline `-0.362%` |
 
 ## Latest Backtest-Gated Findings
 
@@ -619,6 +620,32 @@ confirmation after 120 minutes**, not an immediate entry rescue at the first
 block. The next step is a focused behavior replay that tests whether entering on
 this delayed confirmation improves the bot objective after fees, chase risk,
 portfolio pressure, and exits.
+
+
+### Post-block delayed confirmation replay
+
+The winning experiment-suite target was continued into a behavior replay by
+entering at the close of the `+120m` confirmation bar.
+
+Result: rejected as an entry policy.
+
+| Metric | Selected delayed confirmation | All post-block holdout baseline |
+|---|---:|---:|
+| Top15 precision | `58.33%` | `19.58%` |
+| Mean `60m` return after entry | `-0.890%` | `-0.178%` |
+| Mean `120m` return after entry | `-1.135%` | `-0.418%` |
+| Mean `240m` return after entry | `-0.879%` | `-0.362%` |
+| Mean EOD return after entry | `-9.299%` | `-7.495%` |
+
+This is a clean example of why the research loop must distinguish prediction from
+tradability. The delayed rule predicts future top15 membership much better than
+baseline, but the actual observable entry point is too late and carries worse
+forward returns than the unfiltered post-block baseline.
+
+Decision: stop this branch as an entry policy. Keep it as a diagnostic label, and
+move the next causal experiment earlier in the funnel: features observed before
+`+120m`, v1 score/rank trajectory, and/or partial-confirmation gates that can be
+replayed at `+30m` / `+60m` rather than after the move is already confirmed.
 
 ## Runtime Rule
 
