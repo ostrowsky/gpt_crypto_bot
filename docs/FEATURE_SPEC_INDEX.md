@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 14:45 Europe/Budapest
+Last updated: 2026-05-19 15:25 Europe/Budapest
 
 ## Objective
 
@@ -87,6 +87,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Why-no-signal traces | shipped first read-only version | `docs/specs/p0-observability-foundation.md` | blocker chain per missed top mover | connect to daily reports |
 | P0 observability foundation | shipped first additive slice | `docs/specs/p0-observability-foundation.md` | `blocked_reason_harm`, evaluator coverage | expand blocker context fields |
 | Canonical metrics map | shipped | `docs/specs/metrics-canonical.md` | objective decision consistency | use in roadmap reviews |
+| Failure casebook | diagnostic-only complete | `docs/specs/failure-casebook.md` | ranked real failure cases, opportunity cost, replayable hypotheses | replay early-block-to-entry rescue first |
 
 ## Governance
 

@@ -116,6 +116,7 @@ new BUY mode -> more replay tuning
 | Action-level exit advantage dataset | complete: `99,935` in-position frames, `sell_positive` 50.03%, `sell_strong` 33.33%, `hold_strong` 31.62% |
 | Exit advantage baseline model | complete: ridge model trained, but rejected; holdout directional accuracy `0.438`, selected threshold underperforms always-sell proxy |
 | Exit advantage model-family comparison | complete: binned nonlinear models rejected; best candidate equals always-sell proxy with `100%` sell rate |
+| Failure casebook | complete: `13` signal-quality reports + `44` top-gainer critic reports; next replay target is early-block-to-entry rescue |
 
 ## Latest Backtest-Gated Findings
 
@@ -456,6 +457,31 @@ the action-level dataset with explicit trade-path context (`bars_held`,
 `unrealized_pnl_pct`, `mfe_pct`, `giveback_pct`, and candidate action), because
 exit quality depends not only on market structure but also on the lifecycle of
 the current open trade.
+
+
+
+### Failure casebook pivot
+
+After the first exit-advantage model family comparison failed, the research loop
+was redirected away from generic model iteration and back to concrete failure
+cases.
+
+The casebook loaded `13` signal-quality final reports and `44` top-gainer critic
+final reports. It found that the largest visible opportunity-cost cases are not
+primarily ?which model family should predict exit advantage?? but concrete
+blocked / late-entry winners.
+
+Top failure tracks:
+
+- missed or blocked winners with large post-block opportunity, especially
+  `DOGSUSDT`, `TONUSDT`, `STRKUSDT`, `NEARUSDT`, and `QIUSDT` cases;
+- late entries with `capture_ratio_at_entry = 0.0`, including `TIAUSDT`,
+  `DOTUSDT`, `AEVOUSDT`, `AAVEUSDT`, and `APEUSDT`;
+- high-MFE giveback exits, including `WIFUSDT` and `UMAUSDT`.
+
+Decision: stop broad exit-model iteration. The next replay package should be
+**early-block-to-entry rescue**, because it has the clearest path from casebook
+evidence to one concrete behavior change and a full replay gate.
 
 ## Runtime Rule
 
