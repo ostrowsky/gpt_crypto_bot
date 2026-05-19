@@ -356,6 +356,22 @@ path-dependent entry / hold / sell lifecycle. It should not be exposed as an
 operator-facing Telegram signal. At most it can be logged as research telemetry
 with an explicit `offline_full_replay_failed` gate.
 
+### Selector failure decomposition
+
+The full-replay failure is now localized. The largest loss versus fixed candidate
+is `candidate_suppressed_hold`: `-851.23` reward over `2222` frames. The largest
+action-pair loss is `switch:sell|candidate:hold` at `-878.59`.
+
+This means the market switch is too coarse. It should not choose between whole
+policies while a position is open. The next package should split the problem:
+
+```text
+flat-state entry admission selector
+position-aware exit/hold selector
+```
+
+The immediate next research target is the position-aware exit/hold selector.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in

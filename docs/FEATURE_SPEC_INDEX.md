@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 11:55 Europe/Budapest
+Last updated: 2026-05-19 12:25 Europe/Budapest
 
 ## Objective
 
@@ -68,7 +68,8 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 v1 market-structure feature audit | research-only complete, selected features passed diagnostic gate | `docs/specs/v2-v1-market-structure-feature-audit.md` | v1 feature reuse, causal horizon-target accuracy | run selected-feature switched replay |
 | V2 selected-feature market switch replay | research-only complete, rejected | `docs/specs/v2-selected-feature-market-switch-replay.md` | switched reward vs fixed policies, wrong-confident loss | build reward-weighted selector before switched replay |
 | V2 reward-weighted market selector | research-only partial pass: 2h advances, 1h rejected | `docs/specs/v2-reward-weighted-market-selector.md` | reward-weighted switch reward, downside loss | full offline replay required before telemetry |
-| V2 reward-weighted market selector offline replay | research-only complete, rejected | `docs/specs/v2-reward-weighted-market-selector-offline-replay.md` | full environment reward, trade-count safety | do not expose as trade-like Telegram signal; redesign alignment |
+| V2 reward-weighted market selector offline replay | research-only complete, rejected | `docs/specs/v2-reward-weighted-market-selector-offline-replay.md` | full environment reward, trade-count safety | decompose selector failure before redesign |
+| V2 selector failure decomposition | research-only complete | `docs/specs/v2-selector-failure-decomposition.md` | loss source attribution, stale-choice impact, action mismatch | split entry selector from position-aware exit selector |
 | V2 shadow signal observer | expedited shadow-only | `docs/specs/v2-shadow-signal-observer.md` | transition timeliness, alert precision, later outcome alignment | observe tomorrow; never trade |
 | V2 shadow explainability | expedited shadow-only | `docs/specs/v2-shadow-explainability.md` | answer latency, why/why-not coverage | required before operator observation |
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
