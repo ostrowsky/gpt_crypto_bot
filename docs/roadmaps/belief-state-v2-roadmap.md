@@ -342,6 +342,20 @@ market-environment belief should initially operate on a `2h` policy horizon.
 
 Next gate: full offline environment replay for the `2h` reward-weighted selector.
 
+### Reward-weighted selector full offline replay
+
+The full environment replay rejected the selector despite the earlier horizon
+replay win:
+
+- fixed base: `-384.48`;
+- fixed candidate: `-231.99`;
+- reward-weighted market switch: `-451.30`.
+
+This is a useful failure. It shows the current selector is not yet aligned with
+path-dependent entry / hold / sell lifecycle. It should not be exposed as an
+operator-facing Telegram signal. At most it can be logged as research telemetry
+with an explicit `offline_full_replay_failed` gate.
+
 ## Runtime Rule
 
 Offline-only v2 scripts may exist independently while the architecture is still in
