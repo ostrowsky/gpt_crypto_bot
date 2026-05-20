@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-19 19:45 Europe/Budapest
+Last updated: 2026-05-20 11:55 Europe/Budapest
 
 ## Objective
 
@@ -19,6 +19,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Early trend-start mode | replay-only research, first profile rejected | `docs/specs/trend-start-mode.md` | `capture_rate`, `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `trade_precision`, `PnL` | next narrower replay profile |
 | Agent entry quality gates | shipped | `docs/specs/agent-entry-quality.md` | `trade_precision`, `false_positive_buys`, `blocked_winners` | replay before any relaxation |
 | Local control-plane reliability | shipped | `docs/specs/local-control-plane-reliability.md` | process health, duplicate-launch avoidance | keep operational-only |
+| Telegram positions freshness | shipped operational fix | `docs/specs/telegram-positions-freshness.md` | operator display correctness, stale-position avoidance | keep cache fallback-only |
 | Local context MCP | local tooling | `docs/specs/local-context-mcp.md` | context-read latency, report compactness | keep outside trading path |
 | Full-stack restart helper | shipped local tooling | `docs/specs/full-stack-restart-helper.md` | restart success, operator recovery time | keep operational-only |
 | Repository skills tooling | shipped local tooling | `docs/specs/repo-skills-tooling.md` | workflow reuse, review consistency | keep outside trading path |

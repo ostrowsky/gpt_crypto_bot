@@ -1047,8 +1047,9 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     elif action == "positions":
         # Source guard: positions are sent as a fresh message, but keep the
         # edit_message_text contract on ParseMode.HTML visible to regression tests.
-        txt = _cached_positions_text()
-        asyncio.create_task(_refresh_position_cache_async())
+        # Freshness guard: build the portfolio snapshot before sending it; the
+        # cache is fallback-only so the first button press cannot show stale exits.
+        txt = await _fresh_positions_text_or_cache_async()
         await _send_message_control(
             ctx.application,
             chat_id,
@@ -1548,6 +1549,13 @@ async def _auto_reanalyze(app: Application) -> None:
 
 async def _refresh_position_cache_async() -> None:
     try:
+        await _fresh_positions_text_or_cache_async()
+    except Exception as exc:
+        log.warning("position cache refresh failed: %s", exc.__class__.__name__)
+
+
+async def _fresh_positions_text_or_cache_async() -> str:
+    try:
         hot_coins = list(state.hot_coins)
         text = await run_cpu(_build_positions_text_sync, hot_coins)
         log.info(
@@ -1555,8 +1563,10 @@ async def _refresh_position_cache_async() -> None:
             _cached_unified_position_count(),
             len(text),
         )
+        return text
     except Exception as exc:
-        log.warning("position cache refresh failed: %s", exc.__class__.__name__)
+        log.warning("position cache refresh failed; using cached positions text: %s", exc.__class__.__name__)
+        return _cached_positions_text()
 
 
 async def _post_init(app: Application) -> None:

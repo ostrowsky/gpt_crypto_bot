@@ -4679,6 +4679,22 @@ def run_tests():
     return result
 
 
+
+class TestTelegramPositionsFreshness(unittest.TestCase):
+    def test_T217_positions_callback_builds_fresh_text_before_send(self):
+        src = Path("bot.py").read_text(encoding="utf-8")
+        idx = src.find('elif action == "positions"')
+        self.assertGreater(idx, 0, "positions callback branch not found")
+        block = src[idx:idx + 700]
+        fresh_idx = block.find("await _fresh_positions_text_or_cache_async()")
+        send_idx = block.find("await _send_message_control(")
+        self.assertGreater(fresh_idx, -1, "positions must build fresh portfolio text before sending")
+        self.assertGreater(send_idx, fresh_idx, "positions must send only after fresh rebuild/fallback")
+        pre_send = block[:send_idx]
+        self.assertNotIn("asyncio.create_task(_refresh_position_cache_async())", pre_send)
+        self.assertNotIn("txt = _cached_positions_text()", pre_send)
+
+
 if __name__ == "__main__":
     # Если передан класс — запускаем только его
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
