@@ -949,6 +949,20 @@ class WorkerState:
     latest_training_report_txt: str = ""
     latest_training_latest_json: str = ""
     latest_training_latest_txt: str = ""
+    learning_progress_enabled: bool = bool(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_ENABLED", True))
+    learning_progress_runs_total: int = 0
+    learning_progress_runs_ok: int = 0
+    learning_progress_runs_failed: int = 0
+    learning_progress_last_slot_key: str = ""
+    learning_progress_last_started_at: Optional[str] = None
+    learning_progress_last_finished_at: Optional[str] = None
+    learning_progress_last_error: str = ""
+    learning_progress_last_target_day_local: str = ""
+    learning_progress_last_report_json: str = ""
+    learning_progress_last_report_txt: str = ""
+    learning_progress_last_verdict: str = ""
+    learning_progress_last_telegram_sent_count: int = 0
+    learning_progress_last_telegram_error: str = ""
 
 
 async def _collector_supervisor(state: WorkerState) -> None:

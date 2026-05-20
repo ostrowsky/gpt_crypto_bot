@@ -66,6 +66,12 @@ class LearningProgressWorkerIntegrationTest(unittest.TestCase):
         self.assertIn("LEARNING_PROGRESS_DAILY_REPORT_HOUR_LOCAL: int = 9", cfg)
         self.assertIn("LEARNING_PROGRESS_DAILY_REPORT_TELEGRAM_ENABLED: bool = True", cfg)
 
+    def test_worker_state_has_learning_progress_fields(self) -> None:
+        import rl_headless_worker as worker
+        state = worker.WorkerState(train_interval_sec=60, status_interval_sec=60, min_rows=1, min_new_rows=1, collector_enabled=False)
+        self.assertTrue(hasattr(state, "learning_progress_enabled"))
+        self.assertTrue(hasattr(state, "learning_progress_last_verdict"))
+
 
 if __name__ == "__main__":
     unittest.main()
