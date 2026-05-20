@@ -18,6 +18,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
 | Ranker training freshness | shipped operational fix | `docs/specs/ranker-training-freshness.md` | model freshness, learning-loop reliability | retrain on newer local dataset even after restored row-count rollback |
 | Blocked-winner focus audit | shipped diagnostic tooling | `docs/specs/blocked-winner-focus-audit.md` | blocked-winner explainability, operator answer latency | use for specific “why was/wasn't symbol bought?” checks |
+| Watchlist rescue admission replay | research-only implementation | `docs/specs/watchlist-rescue-admission-replay.md` | early watchlist capture, ret5 precision, missed-winner rescue candidates | advance only if holdout profile passes gate |
 | 1m wake-up scout | shipped shadow-assisted | `SCOUT_OPTIMIZATION_SPEC.md` | `wakeups`, `admitted`, `buy_conversion`, `top_mover_conversion` | live funnel review |
 | Early trend-start mode | replay-only research, first profile rejected | `docs/specs/trend-start-mode.md` | `capture_rate`, `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `trade_precision`, `PnL` | next narrower replay profile |
 | Agent entry quality gates | shipped | `docs/specs/agent-entry-quality.md` | `trade_precision`, `false_positive_buys`, `blocked_winners` | replay before any relaxation |
