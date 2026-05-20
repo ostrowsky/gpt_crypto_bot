@@ -535,6 +535,16 @@ V2_SHADOW_DAILY_SUMMARY_ENABLED: bool = True
 V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED: bool = True
 V2_SHADOW_REALTIME_TELEGRAM_ENABLED: bool = False
 
+# Daily operator learning-progress report. Runs after final previous-day
+# top-gainer and signal-quality reports have landed. Reporting only.
+LEARNING_PROGRESS_DAILY_REPORT_ENABLED: bool = True
+LEARNING_PROGRESS_DAILY_REPORT_TELEGRAM_ENABLED: bool = True
+LEARNING_PROGRESS_DAILY_REPORT_TIMEZONE: str = "Europe/Budapest"
+LEARNING_PROGRESS_DAILY_REPORT_HOUR_LOCAL: int = 9
+LEARNING_PROGRESS_DAILY_REPORT_MINUTE_LOCAL: int = 0
+LEARNING_PROGRESS_DAILY_REPORT_WINDOW_MINUTES: int = 60
+LEARNING_PROGRESS_FOCUS_SYMBOLS: tuple[str, ...] = ()
+
 # Automatic post-factum feedback from the signal-quality evaluator. The feedback
 # layer may only apply narrow, replay-confirmed runtime adjustments. Wider BUY,
 # exit, cluster, or replacement rule changes must stay disabled until a replay

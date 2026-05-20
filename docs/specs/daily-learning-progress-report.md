@@ -1,0 +1,52 @@
+﻿# Daily Learning Progress Report
+
+Status: shipped reporting/observability  
+Last updated: 2026-05-20
+
+## Purpose
+
+Give the operator one daily 09:00 local-time answer to the question:
+
+```text
+Is the bot improving, standing still, or degrading against its target metrics?
+```
+
+The report must not claim learning merely because scripts ran. It separates:
+
+- measurement coverage;
+- top-mover capture and early capture;
+- entry timing and exit monetization;
+- blocked / missed winner pressure;
+- whether feedback or model-training components actually changed anything;
+- decisions awaiting operator approval.
+
+## Schedule
+
+Default schedule: `09:00 Europe/Budapest`, summarizing the latest completed day
+from final reports.
+
+## Inputs
+
+- `top_gainer_critic_*_final.json`;
+- `signal_quality_*_final.json`;
+- `watchlist_top_gainer_goal_*_22h.json`;
+- `.runtime/signal_quality_feedback.json`;
+- `.runtime/rl_worker_status.json`.
+
+## Guardrails
+
+- Reporting only.
+- No BUY/SELL changes.
+- No automatic approval of hypotheses.
+- If data is partial/stale, the report must say so clearly.
+
+## Required Output
+
+A concise Telegram-friendly report with:
+
+- verdict: developing / flat / degrading;
+- one-line main metric summary;
+- where winners are lost;
+- previous decisions and whether they helped;
+- alerts;
+- next operator actions.

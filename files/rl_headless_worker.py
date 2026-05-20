@@ -23,6 +23,7 @@ import ml_candidate_ranker
 import ml_dataset
 import report_candidate_ranker_shadow
 import report_critic_dataset
+import learning_progress_report
 import signal_quality_feedback
 import top_gainer_critic
 import v2_shadow_daily_summary
@@ -222,6 +223,23 @@ def build_status_snapshot(
             "last_telegram_sent_at": state.signal_quality_last_telegram_sent_at,
             "last_telegram_sent_count": state.signal_quality_last_telegram_sent_count,
             "last_telegram_error": state.signal_quality_last_telegram_error,
+        },
+
+        "learning_progress_report": {
+            "enabled": state.learning_progress_enabled,
+            "runs_total": state.learning_progress_runs_total,
+            "runs_ok": state.learning_progress_runs_ok,
+            "runs_failed": state.learning_progress_runs_failed,
+            "last_slot_key": state.learning_progress_last_slot_key,
+            "last_started_at": state.learning_progress_last_started_at,
+            "last_finished_at": state.learning_progress_last_finished_at,
+            "last_error": state.learning_progress_last_error,
+            "last_target_day_local": state.learning_progress_last_target_day_local,
+            "last_report_json": state.learning_progress_last_report_json,
+            "last_report_txt": state.learning_progress_last_report_txt,
+            "last_verdict": state.learning_progress_last_verdict,
+            "last_telegram_sent_count": state.learning_progress_last_telegram_sent_count,
+            "last_telegram_error": state.learning_progress_last_telegram_error,
         },
         "signal_quality_feedback": signal_quality_feedback.status_snapshot(),
         "latest_training_report": {
@@ -1324,6 +1342,70 @@ async def _signal_quality_loop(state: WorkerState) -> None:
         await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
 
 
+def _scheduled_learning_progress_slot(now_local: datetime) -> tuple[date, str] | None:
+    run_hour = int(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_HOUR_LOCAL", 9))
+    run_minute = int(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_MINUTE_LOCAL", 0))
+    window_minutes = max(1, int(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_WINDOW_MINUTES", 60)))
+    current_minute = now_local.hour * 60 + now_local.minute
+    start_minute = run_hour * 60 + run_minute
+    if start_minute <= current_minute < start_minute + window_minutes:
+        target_day = now_local.date() - timedelta(days=1)
+        return target_day, f"{target_day.isoformat()}::learning_progress"
+    return None
+
+
+async def _learning_progress_loop(state: WorkerState) -> None:
+    log = logging.getLogger("rl_headless_worker.learning_progress")
+    tz_name = str(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_TIMEZONE", getattr(config, "TOP_GAINER_CRITIC_TIMEZONE", "Europe/Budapest")))
+    tz = ZoneInfo(tz_name)
+    while True:
+        try:
+            slot = _scheduled_learning_progress_slot(datetime.now(tz))
+            if slot is None:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            target_day, slot_key = slot
+            if not state.learning_progress_enabled:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            if slot_key == state.learning_progress_last_slot_key:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            state.learning_progress_runs_total += 1
+            state.learning_progress_last_started_at = _utc_now_iso()
+            state.learning_progress_last_error = ""
+            focus_symbols = tuple(getattr(config, "LEARNING_PROGRESS_FOCUS_SYMBOLS", ()))
+            report = await asyncio.to_thread(learning_progress_report.build_report, REPORT_DIR, STATUS_FILE, signal_quality_feedback.feedback_path(), focus_symbols)
+            files = report.get("files") or {}
+            verdict = report.get("verdict") or {}
+            state.learning_progress_runs_ok += 1
+            state.learning_progress_last_slot_key = slot_key
+            state.learning_progress_last_finished_at = _utc_now_iso()
+            state.learning_progress_last_target_day_local = str(report.get("latest_day") or target_day.isoformat())
+            state.learning_progress_last_report_json = str(files.get("json", ""))
+            state.learning_progress_last_report_txt = str(files.get("txt", ""))
+            state.learning_progress_last_verdict = str(verdict.get("label") or "")
+            if bool(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_TELEGRAM_ENABLED", True)):
+                notify = await _send_telegram_text(learning_progress_report.render_text(report))
+                state.learning_progress_last_telegram_sent_count = int(notify.get("sent", 0) or 0)
+                if state.learning_progress_last_telegram_sent_count > 0:
+                    state.learning_progress_last_telegram_error = ""
+                else:
+                    errors = notify.get("errors") or []
+                    state.learning_progress_last_telegram_error = "; ".join(str(item) for item in errors) or str(notify.get("skipped") or "not_sent")
+            log.info("Learning progress report done: day=%s verdict=%s", state.learning_progress_last_target_day_local, state.learning_progress_last_verdict)
+            await _write_status_now(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.learning_progress_runs_failed += 1
+            state.learning_progress_last_finished_at = _utc_now_iso()
+            state.learning_progress_last_error = str(exc)
+            log.exception("Learning progress report failed: %s", exc)
+            await _write_status_now(state)
+        await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+
+
 async def _write_status_now(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.status")
     try:
@@ -1372,6 +1454,7 @@ async def _amain(args: argparse.Namespace) -> int:
         asyncio.create_task(_status_loop(state), name="status"),
         asyncio.create_task(_top_gainer_critic_loop(state), name="top_gainer_critic"),
         asyncio.create_task(_signal_quality_loop(state), name="signal_quality_evaluator"),
+        asyncio.create_task(_learning_progress_loop(state), name="learning_progress_report"),
     ]
     if args.enable_collector:
         tasks.insert(0, asyncio.create_task(_collector_supervisor(state), name="collector"))
@@ -1444,3 +1527,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
