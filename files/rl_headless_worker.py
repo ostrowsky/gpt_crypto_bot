@@ -119,6 +119,13 @@ def should_train(
         return False
     if force_first_train and last_trained_rows <= 0:
         return True
+    # Runtime artifacts can be restored from another machine/window where the
+    # previous dataset had more labeled rows than the current local dataset.
+    # In that case a strict row-count baseline suppresses retraining forever:
+    # current rows never reach the old larger baseline, while the model is stale
+    # for the dataset the live bot is actually collecting now.
+    if last_trained_rows > rows_total and dataset_mtime > last_dataset_mtime:
+        return True
     if rows_total >= last_trained_rows + min_new_rows:
         return True
     if dataset_mtime > last_dataset_mtime and rows_total >= last_trained_rows:
@@ -342,6 +349,11 @@ def _restore_training_state_from_latest_report(state: "WorkerState") -> bool:
     rows_total = int(payload.get("rows_total") or 0)
     if rows_total and rows_total > state.last_trained_rows:
         state.last_trained_rows = rows_total
+        changed = True
+
+    dataset_mtime = float(payload.get("dataset_mtime") or 0.0)
+    if dataset_mtime and dataset_mtime > state.last_trained_dataset_mtime:
+        state.last_trained_dataset_mtime = dataset_mtime
         changed = True
 
     model_name = str(payload.get("model_name") or "")

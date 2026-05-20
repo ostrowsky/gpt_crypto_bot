@@ -24,14 +24,27 @@ class TestRLHeadlessWorkerTrainingGate(unittest.TestCase):
             )
         )
 
-    def test_does_not_retrain_when_dataset_is_older_or_rows_regress(self) -> None:
-        self.assertFalse(
+    def test_retrains_when_dataset_rolls_back_but_is_newer(self) -> None:
+        self.assertTrue(
             should_train(
                 rows_total=3200,
                 min_rows=500,
                 last_trained_rows=3255,
                 min_new_rows=50,
                 dataset_mtime=200.0,
+                last_dataset_mtime=100.0,
+                force_first_train=True,
+            )
+        )
+
+    def test_does_not_retrain_when_dataset_is_older_or_unchanged(self) -> None:
+        self.assertFalse(
+            should_train(
+                rows_total=3200,
+                min_rows=500,
+                last_trained_rows=3255,
+                min_new_rows=50,
+                dataset_mtime=100.0,
                 last_dataset_mtime=100.0,
                 force_first_train=True,
             )
