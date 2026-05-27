@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-20 12:15 Europe/Budapest
+Last updated: 2026-05-27 11:05 Europe/Budapest
 
 ## Objective
 
@@ -84,6 +84,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 shadow alert policy | expedited shadow-only | `docs/specs/v2-shadow-alert-policy.md` | alert precision, operator noise | Telegram only for upside discovery |
 | V2 shadow operator notification policy | expedited shadow-only | `docs/specs/v2-shadow-operator-notification-policy.md` | operator noise, summary usefulness | no realtime Telegram until learned policy |
 | V2 shadow daily summary | expedited shadow-only | `docs/specs/v2-shadow-daily-summary.md` | daily discovery count, confirmation ratio, operator noise | daily post-factum report |
+| V2 daily scorecard | shipped measurement-only | `docs/specs/v2-daily-scorecard.md` | `v2_top_recall_pct`, `v2_top_precision_pct`, `v2_confirmation_ratio`, `v2_handoff_bought_pct` | review day-over-day / week-over-week before any V2 promotion |
 | V2 unified runtime integration | planned | `docs/specs/v2-unified-runtime-integration.md` | one-command startup, runtime health, release parity | required before any live-shadow worker |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |

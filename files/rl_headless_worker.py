@@ -23,6 +23,7 @@ import ml_candidate_ranker
 import ml_dataset
 import report_candidate_ranker_shadow
 import report_critic_dataset
+import report_v2_daily_scorecard
 import learning_progress_report
 import signal_quality_feedback
 import top_gainer_critic
@@ -1354,8 +1355,14 @@ async def _signal_quality_loop(state: WorkerState) -> None:
                     timezone_name=tz_name,
                 )
                 await asyncio.to_thread(v2_shadow_daily_summary.save_report, v2_summary)
+                v2_scorecard = await asyncio.to_thread(
+                    report_v2_daily_scorecard.build_scorecard,
+                    target_day,
+                    reports_dir=REPORT_DIR,
+                    timezone_name=tz_name,
+                )
                 if bool(getattr(config, "V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED", True)):
-                    await _send_telegram_text(v2_shadow_daily_summary.render_text(v2_summary))
+                    await _send_telegram_text(report_v2_daily_scorecard.render_text(v2_scorecard))
             await _write_status_now(state)
         except asyncio.CancelledError:
             raise
