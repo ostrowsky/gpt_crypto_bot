@@ -622,7 +622,13 @@ def build_report(
         )
 
     all_top = day_performance[:top_n]
-    watchlist_top = [x for x in day_performance if x.in_watchlist][:top_n]
+    # Primary objective denominator:
+    # Binance/exchange top-N filtered to the bot's tradable watchlist universe.
+    # Do not use "top N within watchlist" here: that turns weak watchlist-relative
+    # symbols into apparent missed Binance top movers when the exchange top-N is
+    # mostly outside the watchlist.
+    watchlist_top = [x for x in all_top if x.in_watchlist]
+    watchlist_universe_top = [x for x in day_performance if x.in_watchlist][:top_n]
     event_rows = _load_day_events(start_local, end_local, tz)
 
     all_top_summary = [
@@ -632,6 +638,10 @@ def build_report(
     watchlist_top_summary = [
         summarize_top_gainer(item, event_rows.get(item.symbol, {}), end_local=end_local, tz=tz)
         for item in watchlist_top
+    ]
+    watchlist_universe_top_summary = [
+        summarize_top_gainer(item, event_rows.get(item.symbol, {}), end_local=end_local, tz=tz)
+        for item in watchlist_universe_top
     ]
 
     watchlist_top_set = {item["symbol"] for item in watchlist_top_summary}
@@ -686,6 +696,8 @@ def build_report(
             "exchange_top_count": len(all_top_summary),
             "exchange_top_in_watchlist": len(coverage),
             "watchlist_top_count": len(watchlist_top_summary),
+            "watchlist_top_denominator": "exchange_top_filtered_to_watchlist",
+            "watchlist_universe_top_count": len(watchlist_universe_top_summary),
             "watchlist_top_bought": len(bought_top),
             "watchlist_top_early_captured": len(early_captured),
             "watchlist_top_missed": len(missed_top),
@@ -702,6 +714,7 @@ def build_report(
         },
         "exchange_top_gainers": all_top_summary,
         "watchlist_top_gainers": watchlist_top_summary,
+        "watchlist_universe_top_gainers": watchlist_universe_top_summary,
         "missed_reason_symbols": missed_reason_symbols,
         "blocked_reason_harm": _blocked_reason_harm(watchlist_top_summary),
         "why_no_signal_examples": [
@@ -733,6 +746,7 @@ def render_text(report: dict[str, Any]) -> str:
         "Summary:",
         f"  exchange top in watchlist: {summary['exchange_top_in_watchlist']}/{summary['exchange_top_count']}",
         f"  watchlist top bought: {summary['watchlist_top_bought']}/{summary['watchlist_top_count']} ({summary['watchlist_top_capture_rate_pct']:.1f}%)",
+        f"  denominator: {summary.get('watchlist_top_denominator', 'unknown')}; watchlist-universe diagnostic top={summary.get('watchlist_universe_top_count', 0)}",
         f"  early captures: {summary['watchlist_top_early_captured']}/{summary['watchlist_top_count']} ({summary['watchlist_top_early_capture_rate_pct']:.1f}%)",
         f"  bot false-positive buys: {summary['bot_false_positive_buys']}/{summary['bot_unique_buys']}",
         f"  blocked winners: {summary.get('blocked_winner_count', 0)}",

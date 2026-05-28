@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-27 11:35 Europe/Budapest
+Last updated: 2026-05-28 09:35 Europe/Budapest
 
 ## Objective
 
@@ -16,6 +16,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Scout objective and metric contract | shipped | `SCOUT_OPTIMIZATION_SPEC.md` | `watchlist_top_bought`, `early_captures`, `false_positive_buys` | keep current |
 | Signal-quality evaluator | shipped | `skills/signal-quality-evaluator/SKILL.md` | `miss_rate`, `capture_ratio_at_entry`, `exit_efficiency`, `giveback_pct` | feed hypothesis queue |
 | Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
+| Watchlist-filtered top-mover denominator | shipped measurement correction | `docs/specs/watchlist-filtered-top-mover-denominator.md` | `watchlist_top_capture_rate_pct`, `watchlist_top_early_capture_rate_pct`, `exchange_top_in_watchlist` | use filtered denominator for operator reports |
 | Ranker training freshness | shipped operational fix | `docs/specs/ranker-training-freshness.md` | model freshness, learning-loop reliability | retrain on newer local dataset even after restored row-count rollback |
 | Blocked-winner focus audit | shipped diagnostic tooling | `docs/specs/blocked-winner-focus-audit.md` | blocked-winner explainability, operator answer latency | use for specific “why was/wasn't symbol bought?” checks |
 | Watchlist rescue admission replay | research-only implementation | `docs/specs/watchlist-rescue-admission-replay.md` | early watchlist capture, ret5 precision, missed-winner rescue candidates | advance only if holdout profile passes gate |

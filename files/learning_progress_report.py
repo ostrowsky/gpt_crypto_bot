@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -346,6 +347,10 @@ def _serious_suffix(alerts: list[dict[str, str]]) -> str:
 
 
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     parser = argparse.ArgumentParser()
     parser.add_argument("--reports-dir", type=Path, default=REPORT_DIR)
     parser.add_argument("--status-file", type=Path, default=STATUS_FILE)

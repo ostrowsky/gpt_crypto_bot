@@ -13,6 +13,83 @@ from rl_headless_worker import _scheduled_top_gainer_slot
 
 
 class TestTopGainerCritic(unittest.TestCase):
+    def test_watchlist_top_denominator_filters_exchange_top_before_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            bot_events = tmp / "bot_events.jsonl"
+            agent_events = tmp / "agent_events.jsonl"
+            bot_events.write_text(
+                "\n".join(
+                    json.dumps(x, ensure_ascii=False)
+                    for x in [
+                        {"event": "entry", "sym": "W1USDT", "mode": "trend", "price": 1.0, "ts": "2026-03-31T00:30:00Z"},
+                        {"event": "entry", "sym": "W3USDT", "mode": "trend", "price": 1.0, "ts": "2026-03-31T01:30:00Z"},
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            agent_events.write_text("", encoding="utf-8")
+
+            old_bot = top_gainer_critic.BOT_EVENTS_FILE
+            old_agent = top_gainer_critic.AGENT_EVENTS_FILE
+            try:
+                top_gainer_critic.BOT_EVENTS_FILE = bot_events
+                top_gainer_critic.AGENT_EVENTS_FILE = agent_events
+                perf = []
+                # Exchange top-10 contains 4 watchlist symbols. The bot bought 2.
+                for idx in range(10):
+                    symbol = {1: "W1USDT", 3: "W2USDT", 6: "W3USDT", 8: "W4USDT"}.get(idx, f"X{idx}USDT")
+                    perf.append(
+                        top_gainer_critic.DayPerformance(
+                            symbol=symbol,
+                            day_open=1.0,
+                            day_close=1.2 - idx * 0.01,
+                            day_high=1.25 - idx * 0.01,
+                            day_low=1.0,
+                            day_change_pct=20.0 - idx,
+                            quote_volume_24h=5_000_000.0,
+                            in_watchlist=symbol.startswith("W"),
+                        )
+                    )
+                # This symbol is in the watchlist and would have entered the old
+                # "top N within watchlist" denominator, but it is not in exchange top-10.
+                perf.append(
+                    top_gainer_critic.DayPerformance(
+                        symbol="W5USDT",
+                        day_open=1.0,
+                        day_close=0.95,
+                        day_high=1.02,
+                        day_low=0.94,
+                        day_change_pct=-5.0,
+                        quote_volume_24h=5_000_000.0,
+                        in_watchlist=True,
+                    )
+                )
+                report = top_gainer_critic.build_report(
+                    target_day=date(2026, 3, 31),
+                    phase="final",
+                    timezone_name="Europe/Budapest",
+                    top_n=10,
+                    min_quote_volume=0.0,
+                    day_performance=perf,
+                )
+            finally:
+                top_gainer_critic.BOT_EVENTS_FILE = old_bot
+                top_gainer_critic.AGENT_EVENTS_FILE = old_agent
+
+        summary = report["summary"]
+        self.assertEqual(summary["exchange_top_count"], 10)
+        self.assertEqual(summary["exchange_top_in_watchlist"], 4)
+        self.assertEqual(summary["watchlist_top_denominator"], "exchange_top_filtered_to_watchlist")
+        self.assertEqual(summary["watchlist_top_count"], 4)
+        self.assertEqual(summary["watchlist_top_bought"], 2)
+        self.assertEqual(summary["watchlist_top_missed"], 2)
+        self.assertEqual(summary["watchlist_top_capture_rate_pct"], 50.0)
+        self.assertEqual(summary["watchlist_universe_top_count"], 5)
+        self.assertEqual([row["symbol"] for row in report["watchlist_top_gainers"]], ["W1USDT", "W2USDT", "W3USDT", "W4USDT"])
+        self.assertIn("W5USDT", [row["symbol"] for row in report["watchlist_universe_top_gainers"]])
+
     def test_build_report_summarizes_top_gainers_and_false_positives(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
