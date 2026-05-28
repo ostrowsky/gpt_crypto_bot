@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-28 09:35 Europe/Budapest
+Last updated: 2026-05-28 10:40 Europe/Budapest
 
 ## Objective
 
@@ -17,6 +17,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Signal-quality evaluator | shipped | `skills/signal-quality-evaluator/SKILL.md` | `miss_rate`, `capture_ratio_at_entry`, `exit_efficiency`, `giveback_pct` | feed hypothesis queue |
 | Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
 | Watchlist-filtered top-mover denominator | shipped measurement correction | `docs/specs/watchlist-filtered-top-mover-denominator.md` | `watchlist_top_capture_rate_pct`, `watchlist_top_early_capture_rate_pct`, `exchange_top_in_watchlist` | use filtered denominator for operator reports |
+| Watchlist top lifecycle audit | research-only diagnostic | `docs/specs/watchlist-top-lifecycle-audit.md` | `early_failures`, `v2_to_buy_delay_min`, `exit_failures`, `exit_efficiency`, `giveback_pct` | use to choose replay-backed early/exit hypotheses |
 | Ranker training freshness | shipped operational fix | `docs/specs/ranker-training-freshness.md` | model freshness, learning-loop reliability | retrain on newer local dataset even after restored row-count rollback |
 | Blocked-winner focus audit | shipped diagnostic tooling | `docs/specs/blocked-winner-focus-audit.md` | blocked-winner explainability, operator answer latency | use for specific “why was/wasn't symbol bought?” checks |
 | Watchlist rescue admission replay | research-only implementation | `docs/specs/watchlist-rescue-admission-replay.md` | early watchlist capture, ret5 precision, missed-winner rescue candidates | advance only if holdout profile passes gate |
@@ -87,6 +88,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 shadow daily summary | expedited shadow-only | `docs/specs/v2-shadow-daily-summary.md` | daily discovery count, confirmation ratio, operator noise | daily post-factum report |
 | V2 daily scorecard | shipped measurement-only | `docs/specs/v2-daily-scorecard.md` | `v2_top_recall_pct`, `v2_top_precision_pct`, `v2_confirmation_ratio`, `v2_handoff_bought_pct` | review day-over-day / week-over-week before any V2 promotion |
 | V2 upside precision discriminator | research-only diagnostic | `docs/specs/v2-upside-precision-discriminator.md` | `baseline_precision_pct`, `slice_precision_pct`, `slice_recall_pct`, `false_favorable_reduction_pct` | advance only a replay candidate, never production directly |
+| V2 early admission full-candidate backtest | research-only diagnostic | `docs/specs/v2-early-admission-full-backtest.md` | top precision/recall, false-favorable rate, hold-to-close return, MFE | advance only to portfolio-aware replay if gate passes |
 | V2 unified runtime integration | planned | `docs/specs/v2-unified-runtime-integration.md` | one-command startup, runtime health, release parity | required before any live-shadow worker |
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
