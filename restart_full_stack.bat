@@ -10,7 +10,11 @@ if /I "%~1"=="--no-pause" set "KEEP_OPEN=0"
 echo ============================================================
 echo  GPT Crypto Bot - Full Stack Restart
 echo  Workspace: %ROOT%
-echo  Build: menu_build_v2 / 2026-04-13
+set "BUILD_COMMIT=unknown"
+set "BUILD_DATE=unknown"
+for /f "usebackq delims=" %%i in (`git rev-parse --short HEAD 2^>nul`) do set "BUILD_COMMIT=%%i"
+for /f "usebackq delims=" %%i in (`git show -s --format=%%cI HEAD 2^>nul`) do set "BUILD_DATE=%%i"
+echo  Build: %BUILD_COMMIT% / %BUILD_DATE%
 echo ============================================================
 echo.
 
