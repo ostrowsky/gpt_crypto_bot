@@ -1189,6 +1189,40 @@ def _find_today_start(timestamps: np.ndarray) -> int:
 
 # ── Main analysis ──────────────────────────────────────────────────────────────
 
+
+def _live_entry_signal_mode(feat: Dict, i: int, c: np.ndarray, *, tf: str = "") -> Tuple[bool, str]:
+    """Return the V1 live-admissible entry mode for a bar.
+
+    Keep today's forward-accuracy gate aligned with the live monitor.  If an
+    early mode is omitted here, `today_confirmed` can lag real candidate
+    admission and create false accuracy-gate blocks.
+    """
+    entry_ok, _ = check_entry_conditions(feat, i, c, tf=tf)
+    if entry_ok:
+        return True, get_entry_mode(feat, i)
+
+    brk_ok, _ = check_breakout_conditions(feat, i)
+    if brk_ok:
+        return True, "breakout"
+
+    retest_ok, _ = check_retest_conditions(feat, i)
+    if retest_ok:
+        return True, "retest"
+
+    surge_ok, _ = check_trend_surge_conditions(feat, i)
+    if surge_ok:
+        return True, "impulse_speed"
+
+    imp_ok, _ = check_impulse_conditions(feat, i)
+    if imp_ok:
+        return True, "impulse"
+
+    aln_ok, _ = check_alignment_conditions(feat, i, tf=tf)
+    if aln_ok and bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False)):
+        return True, "alignment"
+
+    return False, ""
+
 def analyze_coin(
     symbol:    str,
     tf:        str,
@@ -1229,15 +1263,13 @@ def analyze_coin(
     if eval_end >= today_start:
         today_eval_signals = [
             i for i in range(today_start, eval_end + 1)
-            if check_entry_conditions(feat, i, c)[0]
-            or check_alignment_conditions(feat, i)[0]
+            if _live_entry_signal_mode(feat, i, c, tf=tf)[0]
         ]
 
     # Все сигналы сегодня (включая последние, ещё не оценимые)
     today_all_signals: List[int] = [
         i for i in range(today_start, i_now + 1)  # включаем последнюю закрытую свечу
-        if check_entry_conditions(feat, i, c)[0]
-        or check_alignment_conditions(feat, i)[0]
+        if _live_entry_signal_mode(feat, i, c, tf=tf)[0]
     ]
 
     # ── Форвард-тест на сегодняшних данных ───────────────────────────────────
@@ -1292,40 +1324,15 @@ def analyze_coin(
     signal_mode    = ""
 
     if i_now >= warmup:
-        buy_ok, buy_reason = check_entry_conditions(feat, i_now, c)
-        if buy_ok:
-            signal_now  = True
-            signal_mode = get_entry_mode(feat, i_now)  # "trend" или "strong_trend"
+        mode_ok, mode_name = _live_entry_signal_mode(feat, i_now, c, tf=tf)
+        if mode_ok:
+            signal_now = True
+            signal_mode = mode_name
+            no_signal_reason = ""
         else:
-            # П7: проверяем RETEST
-            retest_ok, _ = check_retest_conditions(feat, i_now)
-            if retest_ok:
-                signal_now       = True
-                signal_mode      = "retest"
-                no_signal_reason = ""
-            else:
-                # П7: проверяем BREAKOUT
-                brk_ok, _ = check_breakout_conditions(feat, i_now)
-                if brk_ok:
-                    signal_now       = True
-                    signal_mode      = "breakout"
-                    no_signal_reason = ""
-                else:
-                    # IMPULSE: начало тренда, ADX ещё не вырос
-                    imp_ok, _ = check_impulse_conditions(feat, i_now)
-                    if imp_ok:
-                        signal_now       = True
-                        signal_mode      = "impulse"
-                        no_signal_reason = ""
-                    else:
-                        # ALIGNMENT: плавный тренд, ADX не требуется совсем
-                        aln_ok, aln_reason = check_alignment_conditions(feat, i_now)
-                        if aln_ok and bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False)):
-                            signal_now       = True
-                            signal_mode      = "alignment"
-                            no_signal_reason = ""
-                        else:
-                            no_signal_reason = f"ALIGNMENT: {aln_reason}  |  BUY: {buy_reason}"
+            buy_ok, buy_reason = check_entry_conditions(feat, i_now, c, tf=tf)
+            aln_ok, aln_reason = check_alignment_conditions(feat, i_now, tf=tf)
+            no_signal_reason = f"ALIGNMENT: {aln_reason}  |  BUY: {buy_reason}"
 
     # SETUP: только если нет ни одного сигнала — не влияет на форвард-тест
     setup_now, setup_reason, setup_missing = (False, "", 99)

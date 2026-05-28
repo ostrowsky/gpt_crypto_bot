@@ -855,33 +855,59 @@ def _late_impulse_speed_rotation_reason(
     return None
 
 
+def _local_day_start_utc_ms(ts_ms: int) -> int:
+    dt_utc = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+    dt_local = dt_utc.astimezone(_objective_tz())
+    start_local = datetime.combine(dt_local.date(), datetime.min.time(), tzinfo=_objective_tz())
+    return int(start_local.astimezone(timezone.utc).timestamp() * 1000)
+
+
 def _intraday_change_pct_from_data(data: dict, i: int) -> float:
     try:
         if isinstance(data, dict):
             t_arr = data.get("t")
+            o_arr = data.get("o")
+            c_arr = data.get("c")
         else:
             names = getattr(getattr(data, "dtype", None), "names", ()) or ()
             t_arr = data["t"] if "t" in names else None
-        try:
-            c_arr = data["c"]
-        except Exception:
-            c_arr = None
+            o_arr = data["o"] if "o" in names else None
+            c_arr = data["c"] if "c" in names else None
         if t_arr is None or c_arr is None or i <= 0:
             return 0.0
         ts = int(t_arr[i])
-        day_start = (ts // 86_400_000) * 86_400_000
+        day_start = _local_day_start_utc_ms(ts)
         start_idx = 0
         for j in range(i, -1, -1):
             if int(t_arr[j]) < day_start:
                 start_idx = min(i, j + 1)
                 break
-        base = float(c_arr[start_idx])
+        base_arr = o_arr if o_arr is not None else c_arr
+        base = float(base_arr[start_idx])
         current = float(c_arr[i])
         if base <= 0 or not np.isfinite(base) or not np.isfinite(current):
             return 0.0
         return (current / base - 1.0) * 100.0
     except Exception:
         return 0.0
+
+
+def _forecast_proxy_pct(
+    *,
+    today_change_pct: float,
+    slope: float,
+    adx: float,
+    vol_x: float,
+    rsi: float,
+) -> float:
+    upside = (
+        max(0.0, today_change_pct) * 0.35
+        + max(0.0, slope) * 1.8
+        + max(0.0, adx - 18.0) * 0.06
+        + max(0.0, vol_x - 1.0) * 0.45
+    )
+    downside = max(0.0, rsi - 70.0) * 0.20
+    return max(-2.0, min(12.0, upside - downside))
 
 
 def _top_gainer_objective_gate_reason(
@@ -1761,6 +1787,14 @@ async def _build_candidates_for_symbol(
                             continue
             score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
             mtf_soft_penalty = _mtf_soft_penalty_from_reason(mtf_reason)
+            intraday_change_pct = _intraday_change_pct_from_data(data, i)
+            forecast_return_pct = _forecast_proxy_pct(
+                today_change_pct=intraday_change_pct,
+                slope=slope,
+                adx=adx,
+                vol_x=preview_vol,
+                rsi=rsi,
+            )
             ranker_info = _ml_candidate_ranker_components(
                 sym=sym,
                 tf=tf,
@@ -1772,8 +1806,8 @@ async def _build_candidates_for_symbol(
                 candidate_score=candidate_score,
                 base_score=base_score,
                 score_floor=score_floor,
-                forecast_return_pct=0.0,
-                today_change_pct=0.0,
+                forecast_return_pct=forecast_return_pct,
+                today_change_pct=intraday_change_pct,
                 ml_proba=ml_proba,
                 mtf_soft_penalty=mtf_soft_penalty,
                 fresh_priority=_is_fresh_priority_candidate(mode, None),
@@ -1789,7 +1823,6 @@ async def _build_candidates_for_symbol(
                 daily_range=daily_range,
             ):
                 continue
-            intraday_change_pct = _intraday_change_pct_from_data(data, i)
             if _top_gainer_objective_gate_reason(
                 tf=tf,
                 mode=mode,
@@ -1840,7 +1873,7 @@ async def _build_candidates_for_symbol(
                 rsi=rsi,
                 vol_x=preview_vol,
                 daily_range=daily_range,
-                forecast_return_pct=0.0,
+                forecast_return_pct=forecast_return_pct,
             )
             if trend_guard_reason:
                 continue
