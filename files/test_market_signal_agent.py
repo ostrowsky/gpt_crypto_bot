@@ -83,7 +83,35 @@ class TestMarketSignalAgentEntryGates(unittest.TestCase):
                 vol_x=2.0,
                 report=report,
             )
-        self.assertEqual(reason, "ADX 34.9 < 35.0")
+            self.assertEqual(reason, "ADX 34.9 < 35.0")
+
+    def test_main_exit_cooldown_blocks_agent_reentry(self) -> None:
+        import market_signal_agent as msa
+
+        with tempfile.TemporaryDirectory() as tmp:
+            events = Path(tmp) / "bot_events.jsonl"
+            events.write_text(
+                '{"event":"exit","sym":"HBARUSDT","tf":"15m","ts":"2026-05-28T14:45:52Z"}\n',
+                encoding="utf-8",
+            )
+            now_ms = int(datetime(2026, 5, 28, 15, 0, tzinfo=timezone.utc).timestamp() * 1000)
+            until = msa._main_exit_cooldown_until_ms("HBARUSDT", events_file=events, now_ms=now_ms)
+
+        self.assertGreater(until, now_ms)
+
+    def test_main_exit_cooldown_expires(self) -> None:
+        import market_signal_agent as msa
+
+        with tempfile.TemporaryDirectory() as tmp:
+            events = Path(tmp) / "bot_events.jsonl"
+            events.write_text(
+                '{"event":"exit","sym":"HBARUSDT","tf":"15m","ts":"2026-05-28T14:45:52Z"}\n',
+                encoding="utf-8",
+            )
+            now_ms = int(datetime(2026, 5, 28, 17, 0, tzinfo=timezone.utc).timestamp() * 1000)
+            until = msa._main_exit_cooldown_until_ms("HBARUSDT", events_file=events, now_ms=now_ms)
+
+        self.assertEqual(until, 0)
 
     def test_4h_leader_requires_strength_confirmation(self) -> None:
         import market_signal_agent as msa

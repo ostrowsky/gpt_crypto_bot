@@ -144,6 +144,7 @@ async def _check_mtf(*args, **kwargs):
 
 log = logging.getLogger("market_agent")
 POSITIONS_FILE = Path("agent_positions.json")
+MAIN_BOT_EVENTS_FILE = Path("bot_events.jsonl")
 CHAT_IDS_FILE = Path(".chat_ids")
 STATE_FILE = Path(".runtime") / "market_agent_state.json"
 STATUS_FILE = Path(".runtime") / "market_agent_status.json"
@@ -598,6 +599,63 @@ def _next_local_day_start_utc_ms(ts_ms: int) -> int:
     next_local = datetime.combine(dt_local.date(), time.min, tzinfo=LOCAL_TZ)
     next_local = next_local + timedelta(days=1)
     return int(next_local.astimezone(timezone.utc).timestamp() * 1000)
+
+
+def _parse_event_ts_ms(value: object) -> int:
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.astimezone(timezone.utc).timestamp() * 1000)
+    except Exception:
+        return 0
+
+
+def _main_exit_cooldown_until_ms(
+    symbol: str,
+    *,
+    events_file: Path = MAIN_BOT_EVENTS_FILE,
+    now_ms: Optional[int] = None,
+    max_lines: int = 5000,
+) -> int:
+    """Return cooldown-until timestamp caused by recent main-bot exits."""
+    if not bool(getattr(config, "AGENT_RESPECT_MAIN_EXIT_COOLDOWN", True)):
+        return 0
+    if not events_file.exists():
+        return 0
+    symbol = str(symbol or "").upper()
+    if not symbol:
+        return 0
+    bar_ms = 15 * 60 * 1000
+    cooldown_bars = int(getattr(config, "AGENT_MAIN_EXIT_COOLDOWN_BARS", getattr(config, "COOLDOWN_BARS", 8)))
+    cooldown_ms = max(0, cooldown_bars) * bar_ms
+    if cooldown_ms <= 0:
+        return 0
+    if now_ms is None:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    latest_exit_ms = 0
+    try:
+        lines = events_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return 0
+    for line in lines[-max_lines:]:
+        if symbol not in line or '"exit"' not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        if str(event.get("event") or "") != "exit":
+            continue
+        if str(event.get("sym") or "").upper() != symbol:
+            continue
+        ts_ms = _parse_event_ts_ms(event.get("ts"))
+        if ts_ms > latest_exit_ms:
+            latest_exit_ms = ts_ms
+    if latest_exit_ms <= 0:
+        return 0
+    until = latest_exit_ms + cooldown_ms
+    return until if now_ms < until else 0
 
 
 def _local_day_key(ts_ms: int) -> str:
@@ -1494,6 +1552,20 @@ async def _scan_symbol_tf_candidate(
             float(candidate["price"]),
             "symbol cooldown active",
             signal_type="symbol_cooldown",
+            rsi=float(candidate["rsi"]),
+            adx=float(candidate["adx"]),
+            vol_x=float(candidate["vol_x"]),
+            daily_range=float(candidate["daily_range"]),
+        )
+        return None
+    main_exit_cooldown_until = _main_exit_cooldown_until_ms(symbol, now_ms=current_bar_ts)
+    if main_exit_cooldown_until and current_bar_ts < main_exit_cooldown_until:
+        agentlog.log_blocked(
+            symbol,
+            tf,
+            float(candidate["price"]),
+            "main bot exit cooldown active",
+            signal_type="main_exit_cooldown",
             rsi=float(candidate["rsi"]),
             adx=float(candidate["adx"]),
             vol_x=float(candidate["vol_x"]),
