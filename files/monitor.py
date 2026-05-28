@@ -1676,26 +1676,99 @@ def _top_gainer_chase_guard_reason(
     return None
 
 
-def _intraday_change_pct_from_data(data: dict, i: int) -> float:
+def _candle_field(data: Any, name: str):
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return data.get(name)
     try:
-        t_arr = data.get("t")
-        c_arr = data.get("c")
-        if t_arr is None or c_arr is None or i <= 0:
+        if hasattr(data, "dtype") and data.dtype.names and name in data.dtype.names:
+            return data[name]
+    except Exception:
+        return None
+    return None
+
+
+def _local_day_start_utc_ms(ts_ms: int) -> int:
+    dt_utc = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+    dt_local = dt_utc.astimezone(LOCAL_TZ)
+    start_local = datetime.combine(dt_local.date(), datetime.min.time(), tzinfo=LOCAL_TZ)
+    return int(start_local.astimezone(timezone.utc).timestamp() * 1000)
+
+
+def _intraday_change_pct_from_data(data: Any, i: int) -> float:
+    try:
+        t_arr = _candle_field(data, "t")
+        c_arr = _candle_field(data, "c")
+        o_arr = _candle_field(data, "o")
+        if t_arr is None or c_arr is None or i < 0 or i >= len(c_arr):
             return 0.0
         ts = int(t_arr[i])
-        day_start = (ts // 86_400_000) * 86_400_000
+        day_start = _local_day_start_utc_ms(ts)
         start_idx = 0
-        for j in range(i, -1, -1):
-            if int(t_arr[j]) < day_start:
-                start_idx = min(i, j + 1)
+        for j, raw_ts in enumerate(t_arr):
+            if int(raw_ts) >= day_start:
+                start_idx = min(i, j)
                 break
-        base = float(c_arr[start_idx])
+        base_arr = o_arr if o_arr is not None else c_arr
+        base = float(base_arr[start_idx])
         current = float(c_arr[i])
         if base <= 0 or not np.isfinite(base) or not np.isfinite(current):
             return 0.0
         return (current / base - 1.0) * 100.0
     except Exception:
         return 0.0
+
+
+def _forecast_proxy_pct(
+    *,
+    today_change_pct: float,
+    slope: float,
+    adx: float,
+    vol_x: float,
+    rsi: float,
+) -> float:
+    upside = (
+        max(0.0, today_change_pct) * 0.35
+        + max(0.0, slope) * 1.8
+        + max(0.0, adx - 18.0) * 0.06
+        + max(0.0, vol_x - 1.0) * 0.45
+    )
+    downside = max(0.0, rsi - 70.0) * 0.20
+    return max(-2.0, min(12.0, upside - downside))
+
+
+def _ensure_report_move_features(
+    report: CoinReport,
+    *,
+    data: Any,
+    i: int,
+    slope: float,
+    adx: float,
+    vol_x: float,
+    rsi: float,
+) -> tuple[float, float]:
+    today_change = float(getattr(report, "today_change_pct", 0.0) or 0.0)
+    if abs(today_change) < 1e-12:
+        today_change = _intraday_change_pct_from_data(data, i)
+        try:
+            setattr(report, "today_change_pct", today_change)
+        except Exception:
+            pass
+    forecast = float(getattr(report, "forecast_return_pct", 0.0) or 0.0)
+    if abs(forecast) < 1e-12:
+        forecast = _forecast_proxy_pct(
+            today_change_pct=today_change,
+            slope=slope,
+            adx=adx,
+            vol_x=vol_x,
+            rsi=rsi,
+        )
+        try:
+            setattr(report, "forecast_return_pct", forecast)
+        except Exception:
+            pass
+    return today_change, forecast
 
 
 def _top_gainer_objective_gate_reason(
@@ -4305,6 +4378,15 @@ async def _poll_coin(
             preview_rsi = float(feat["rsi"][i])
             preview_vol = float(feat["vol_x"][i])
             preview_range = float(feat["daily_range_pct"][i]) if np.isfinite(feat["daily_range_pct"][i]) else 0.0
+            report_today_change_pct, report_forecast_return_pct = _ensure_report_move_features(
+                report,
+                data=data,
+                i=i,
+                slope=preview_slope,
+                adx=preview_adx,
+                vol_x=preview_vol,
+                rsi=preview_rsi,
+            )
             signal_flags = _candidate_signal_flags(
                 entry_ok=entry_ok,
                 brk_ok=brk_ok,

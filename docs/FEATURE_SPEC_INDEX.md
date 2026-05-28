@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-28 15:15 Europe/Budapest
+Last updated: 2026-05-28 15:55 Europe/Budapest
 
 ## Objective
 
@@ -18,6 +18,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Exit-quality auditor | shipped measurement-only | `docs/specs/exit-quality-auditor.md` | `exit_efficiency`, `giveback_pct`, `top_mover_exit_failure_count`, `negative_after_mfe_count` | choose SELL hypotheses for replay; no live SELL change |
 | Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
 | Watchlist-filtered top-mover denominator | shipped measurement correction | `docs/specs/watchlist-filtered-top-mover-denominator.md` | `watchlist_top_capture_rate_pct`, `watchlist_top_early_capture_rate_pct`, `exchange_top_in_watchlist` | use filtered denominator for operator reports |
+| Main top-gainer intraday feature parity | shipped bugfix | `docs/specs/main-top-gainer-intraday-feature-parity.md` | `top_gainer_score`, `today_change_pct`, `forecast_return_pct`, false-positive pressure | monitor next daily report; thresholds unchanged |
 | Watchlist top lifecycle audit | research-only diagnostic | `docs/specs/watchlist-top-lifecycle-audit.md` | `early_failures`, `v2_to_buy_delay_min`, `exit_failures`, `exit_efficiency`, `giveback_pct` | use to choose replay-backed early/exit hypotheses |
 | Ranker training freshness | shipped operational fix | `docs/specs/ranker-training-freshness.md` | model freshness, learning-loop reliability | retrain on newer local dataset even after restored row-count rollback |
 | Blocked-winner focus audit | shipped diagnostic tooling | `docs/specs/blocked-winner-focus-audit.md` | blocked-winner explainability, operator answer latency | use for specific “why was/wasn't symbol bought?” checks |
