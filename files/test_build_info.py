@@ -11,10 +11,10 @@ class BuildInfoTests(unittest.TestCase):
         calls = {
             ("rev-parse", "--short", "HEAD"): "abc1234",
             ("show", "-s", "--format=%cI", "HEAD"): "2026-05-28T14:30:00+00:00",
-            ("status", "--porcelain"): "",
         }
 
-        with patch.object(build_info, "_run_git", side_effect=lambda _root, *args: calls[args]):
+        with patch.object(build_info, "_run_git", side_effect=lambda _root, *args: calls[args]), \
+             patch.object(build_info, "_git_status_porcelain", return_value=""):
             info = build_info.get_build_info(repo_root=Path("C:/repo"))
 
         self.assertEqual(info.version, "abc1234")
@@ -25,10 +25,10 @@ class BuildInfoTests(unittest.TestCase):
         calls = {
             ("rev-parse", "--short", "HEAD"): "abc1234",
             ("show", "-s", "--format=%cI", "HEAD"): "2026-05-28T14:30:00+00:00",
-            ("status", "--porcelain"): " M files/bot.py",
         }
 
-        with patch.object(build_info, "_run_git", side_effect=lambda _root, *args: calls[args]):
+        with patch.object(build_info, "_run_git", side_effect=lambda _root, *args: calls[args]), \
+             patch.object(build_info, "_git_status_porcelain", return_value=" M files/bot.py"):
             info = build_info.get_build_info(repo_root=Path("C:/repo"))
 
         self.assertEqual(info.version, "abc1234+dirty")
@@ -37,15 +37,16 @@ class BuildInfoTests(unittest.TestCase):
         calls = {
             ("rev-parse", "--short", "HEAD"): "abc1234",
             ("show", "-s", "--format=%cI", "HEAD"): "2026-05-28T14:30:00+00:00",
-            ("status", "--porcelain"): (
-                " M .runtime/reports/top_gainer_critic_history.jsonl\n"
-                " M files/.runtime/market_agent_status.json\n"
-                " M files/ml_candidate_ranker.json\n"
-                " M files/positions.json"
-            ),
         }
+        status = (
+            " M .runtime/reports/top_gainer_critic_history.jsonl\n"
+            " M files/.runtime/market_agent_status.json\n"
+            " M files/ml_candidate_ranker.json\n"
+            " M files/positions.json"
+        )
 
-        with patch.object(build_info, "_run_git", side_effect=lambda _root, *args: calls[args]):
+        with patch.object(build_info, "_run_git", side_effect=lambda _root, *args: calls[args]), \
+             patch.object(build_info, "_git_status_porcelain", return_value=status):
             info = build_info.get_build_info(repo_root=Path("C:/repo"))
 
         self.assertEqual(info.version, "abc1234")

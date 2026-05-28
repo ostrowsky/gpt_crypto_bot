@@ -32,6 +32,16 @@ def _run_git(repo_root: Path, *args: str) -> str:
     ).strip()
 
 
+def _git_status_porcelain(repo_root: Path) -> str:
+    return subprocess.check_output(
+        ["git", "status", "--porcelain"],
+        cwd=str(repo_root),
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=2.0,
+    )
+
+
 def _is_material_dirty(status_porcelain: str) -> bool:
     ignored_prefixes = (
         ".runtime/",
@@ -74,7 +84,7 @@ def get_build_info(repo_root: Path | None = None, fallback_file: Path | None = N
     try:
         commit = _run_git(repo_root, "rev-parse", "--short", "HEAD")
         commit_date = _run_git(repo_root, "show", "-s", "--format=%cI", "HEAD")
-        dirty = _is_material_dirty(_run_git(repo_root, "status", "--porcelain"))
+        dirty = _is_material_dirty(_git_status_porcelain(repo_root))
         version = f"{commit}{'+dirty' if dirty else ''}"
         return BuildInfo(
             version=version,
