@@ -13,9 +13,6 @@ Crypto Trend Bot — Telegram interface.
   ⚙️ Настройки             → текущие параметры стратегии
 """
 
-BUILD_ID = "menu_build_v30"
-BUILD_APPLIED_AT = "2026-05-16 13:29:11 +02:00"
-
 import os
 import atexit
 
@@ -83,6 +80,7 @@ from telegram.ext import (
     filters,
 )
 from runtime_executors import install_default_io_executor, run_cpu, run_telegram_io
+from build_info import build_badge as _runtime_build_badge
 
 import config
 from monitor import MonitorState, monitoring_loop, load_positions, save_positions
@@ -136,7 +134,7 @@ def _unified_portfolio_limit() -> int:
 
 
 def build_badge() -> str:
-    return f"`v:{BUILD_ID}`  `build:{BUILD_APPLIED_AT}`"
+    return _runtime_build_badge()
 
 
 def signal_mode_label(mode: str) -> str:
