@@ -86,6 +86,9 @@ class ReplayTrade:
     cooldown_blocked_count: int = 0
     cooldown_positive_blocked_count: int = 0
     cooldown_harm_pct: float = 0.0
+    protected_exit_active: bool = False
+    protected_exit_start_bar: int = -1
+    protected_exit_original_reason: str = ""
 
     @property
     def pnl_pct(self) -> float:
@@ -1094,6 +1097,39 @@ def _time_block_retest_bonus(
 
 def _is_weak_exit_reason(reason: Optional[str]) -> bool:
     return bool(reason) and "WEAK:" in str(reason)
+
+
+def _is_protected_trailing_exit_reason(reason: Optional[str]) -> bool:
+    if not reason:
+        return False
+    text = str(reason).lower()
+    return (
+        "weak:" in text
+        or "ema20" in text
+        or "ema" in text
+        or "atr trail" in text
+        or "stop" in text
+        or "ниже ema" in text
+    )
+
+
+def _protected_trailing_exit_should_hold(
+    *,
+    trade: "ReplayTrade",
+    reason: Optional[str],
+    current_pnl: float,
+) -> bool:
+    if not _is_protected_trailing_exit_reason(reason):
+        return False
+    if trade.protected_exit_active:
+        return True
+    if int(trade.bars_held) < int(getattr(config, "PROTECTED_EXIT_MIN_BARS", 1)):
+        return False
+    if float(trade.max_favorable_pct) < float(getattr(config, "PROTECTED_EXIT_MIN_MFE_PCT", 0.50)):
+        return False
+    if current_pnl < float(getattr(config, "PROTECTED_EXIT_MIN_CURRENT_PNL_PCT", -1.50)):
+        return False
+    return True
 
 
 def _min_weak_exit_bars(mode: Optional[str]) -> int:
@@ -2179,6 +2215,7 @@ def _update_trade_progress(
     *,
     ts_ms: int,
     micro_pack: Optional[Tuple[np.ndarray, dict]] = None,
+    protected_trailing_exit: bool = False,
 ) -> Optional[str]:
     close_now = float(data["c"][idx])
     _update_trade_extrema(trade, data, idx)
@@ -2243,7 +2280,8 @@ def _update_trade_progress(
     if atr_now > 0:
         trade.trail_stop = max(trade.trail_stop, close_now - effective_trail_k * atr_now)
     if trade.trail_stop > 0 and close_now < trade.trail_stop:
-        return f"ATR trail stop {trade.trail_stop:.6g}"
+        prefix = "protected trailing " if trade.protected_exit_active else ""
+        return f"{prefix}ATR trail stop {trade.trail_stop:.6g}"
     if trade.bars_held >= trade.max_hold_bars and not _time_exit_should_wait(feat, idx, close_now):
         return f"time ({trade.max_hold_bars} bars)"
 
@@ -2282,6 +2320,25 @@ def _update_trade_progress(
                 float(getattr(config, "TREND_HOLD_WEAK_EXIT_TIGHTEN_ATR_K", 1.4)),
             )
             trade.trail_stop = max(trade.trail_stop, close_now - tight_k * atr_now)
+        return None
+    if protected_trailing_exit and _protected_trailing_exit_should_hold(
+        trade=trade,
+        reason=exit_reason,
+        current_pnl=current_pnl,
+    ):
+        max_bars = int(getattr(config, "PROTECTED_EXIT_MAX_HOLD_BARS", 4))
+        if trade.protected_exit_active and trade.protected_exit_start_bar >= 0:
+            if trade.bars_held - trade.protected_exit_start_bar >= max_bars:
+                return f"protected trailing confirmed: {exit_reason}"
+        trade.protected_exit_active = True
+        trade.protected_exit_start_bar = trade.bars_held if trade.protected_exit_start_bar < 0 else trade.protected_exit_start_bar
+        trade.protected_exit_original_reason = trade.protected_exit_original_reason or str(exit_reason)
+        if atr_now > 0:
+            tight_k = float(getattr(config, "PROTECTED_EXIT_TRAIL_ATR_K", 0.9))
+            trade.trail_stop = max(trade.trail_stop, close_now - tight_k * atr_now)
+        floor_pct = float(getattr(config, "PROTECTED_EXIT_PROFIT_FLOOR_PCT", 0.05))
+        if trade.max_favorable_pct >= floor_pct:
+            trade.trail_stop = max(trade.trail_stop, trade.entry_price * (1.0 + floor_pct / 100.0))
         return None
     return exit_reason
 
@@ -2427,6 +2484,7 @@ async def simulate_portfolio(
                 idx,
                 ts_ms=ts_ms,
                 micro_pack=micro_pack,
+                protected_trailing_exit=variant == "protected_trailing_exit",
             )
             if not exit_reason:
                 continue
@@ -2457,6 +2515,7 @@ async def simulate_portfolio(
             "agent_allowed",
             "agent_mode_rescue",
             "agent_wakeup_rescue",
+            "protected_trailing_exit",
         }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
@@ -2805,7 +2864,7 @@ async def run_replay(
     cache_4h = {sym: cache[(sym, "4h")] for sym in symbols if (sym, "4h") in cache}
     market_ctx = _build_bull_day_context(cache.get(("BTCUSDT", "1h"), (None, None))[0] if ("BTCUSDT", "1h") in cache else None)
     final_top_symbols = _final_top_symbols(symbols, cache, top_n=objective_top_n)
-    enable_replacement = variant in {"score_replace", "score_replace_cluster"} or (
+    enable_replacement = variant in {"score_replace", "score_replace_cluster", "protected_trailing_exit"} or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
     portfolio_trades, portfolio_stats = await simulate_portfolio(
@@ -2984,6 +3043,7 @@ def parse_args() -> argparse.Namespace:
             "agent_allowed",
             "agent_mode_rescue",
             "agent_wakeup_rescue",
+            "protected_trailing_exit",
         ],
         default="score_replace",
     )
