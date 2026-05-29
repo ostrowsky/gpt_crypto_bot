@@ -30,6 +30,9 @@ monetization research.
      symbols, incomplete candle windows, duplicate/manual artifacts, or evaluator
      denominator issues.
    - Mark whether the partial coverage is metric-affecting or safe.
+   - If missing candle series correspond only to inactive exchange symbols
+     (`BREAK`, `HALT`, `END_OF_LIFE`, or otherwise non-`TRADING`), classify the
+     gap as safe/inactive rather than a data-pipeline failure.
 
 2. Blocked-winner audit
    - Inspect the latest final top-gainer critic report.
@@ -51,4 +54,3 @@ monetization research.
   unit tests.
 - Do not commit runtime artifacts.
 - Do not change production trading decisions in this package.
-

@@ -14,6 +14,7 @@ class SignalQualityCoverageReportTest(unittest.TestCase):
             root = Path(tmp)
             watchlist = root / "watchlist.json"
             cache = root / "cache"
+            exchange_status = root / "exchange_status.json"
             out_json = root / "out.json"
             out_txt = root / "out.txt"
             watchlist.write_text(json.dumps(["AAAUSDT", "BBBUSDT"]), encoding="utf-8")
@@ -36,11 +37,14 @@ class SignalQualityCoverageReportTest(unittest.TestCase):
             (cache / f"AAAUSDT_15m_{start}_{end}.json").write_text("[{\"t\":1}]", encoding="utf-8")
             (cache / f"AAAUSDT_1h_{start}_{end}.json").write_text("[{\"t\":1}]", encoding="utf-8")
             (cache / f"BBBUSDT_15m_{start}_{end}.json").write_text("[]", encoding="utf-8")
+            exchange_status.write_text(json.dumps({"BBBUSDT": "BREAK"}), encoding="utf-8")
 
             report = build_report(
                 signal_report=signal,
                 watchlist_path=watchlist,
                 cache_dir=cache,
+                exchange_status_cache=exchange_status,
+                check_exchange_status=False,
                 output_json=out_json,
                 output_txt=out_txt,
             )
@@ -50,7 +54,8 @@ class SignalQualityCoverageReportTest(unittest.TestCase):
             self.assertEqual(report["missing_series_count"], 2)
             self.assertEqual(report["by_timeframe"]["15m"]["missing"], 1)
             self.assertEqual(report["by_timeframe"]["1h"]["missing"], 1)
-            self.assertIn("metric_affecting_possible", report["assessment"])
+            self.assertEqual(report["missing_symbol_status_counts"], {"BREAK": 2})
+            self.assertEqual(report["assessment"], "partial_safe_inactive_symbols_only")
             self.assertTrue(out_json.exists())
             self.assertTrue(out_txt.exists())
 
