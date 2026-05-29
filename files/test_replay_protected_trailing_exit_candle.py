@@ -83,6 +83,45 @@ class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
                 elif value is not None:
                     setattr(config, name, value)
 
+    def test_protected_weak_only_does_not_hold_ema_exit(self) -> None:
+        data = np.zeros(3, dtype=[("t", "i8"), ("c", "f8"), ("h", "f8"), ("l", "f8")])
+        data["t"] = np.array([1, 2, 3], dtype=np.int64)
+        data["c"] = np.array([100.0, 102.0, 101.0], dtype=float)
+        data["h"] = np.array([100.0, 102.0, 101.0], dtype=float)
+        data["l"] = np.array([100.0, 102.0, 101.0], dtype=float)
+        feat = {
+            "atr": np.array([1.0, 1.0, 1.0], dtype=float),
+            "rsi": np.array([55.0, 60.0, 58.0], dtype=float),
+            "ema_fast": np.array([99.0, 100.0, 101.5], dtype=float),
+            "ema_slow": np.array([98.0, 99.0, 100.0], dtype=float),
+            "ema200": np.array([97.0, 98.0, 99.0], dtype=float),
+            "adx": np.array([25.0, 26.0, 27.0], dtype=float),
+            "slope": np.array([0.1, 0.2, 0.1], dtype=float),
+        }
+        trade = ReplayTrade(
+            sym="AAAUSDT",
+            tf="15m",
+            mode="strong_trend",
+            entry_ts=1,
+            entry_price=100.0,
+            entry_i=0,
+            trail_k=2.0,
+            max_hold_bars=20,
+            trail_stop=0.0,
+        )
+
+        reason = _update_trade_progress(
+            trade,
+            data,
+            feat,
+            2,
+            ts_ms=3,
+            protected_weak_only=True,
+        )
+        self.assertIsNotNone(reason)
+        self.assertFalse(trade.protected_exit_active)
+        self.assertNotIn("protected", str(reason).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

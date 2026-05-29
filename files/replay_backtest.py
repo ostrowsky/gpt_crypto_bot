@@ -1118,7 +1118,10 @@ def _protected_trailing_exit_should_hold(
     trade: "ReplayTrade",
     reason: Optional[str],
     current_pnl: float,
+    weak_only: bool = False,
 ) -> bool:
+    if weak_only and not _is_weak_exit_reason(reason):
+        return False
     if not _is_protected_trailing_exit_reason(reason):
         return False
     if trade.protected_exit_active:
@@ -2216,6 +2219,7 @@ def _update_trade_progress(
     ts_ms: int,
     micro_pack: Optional[Tuple[np.ndarray, dict]] = None,
     protected_trailing_exit: bool = False,
+    protected_weak_only: bool = False,
 ) -> Optional[str]:
     close_now = float(data["c"][idx])
     _update_trade_extrema(trade, data, idx)
@@ -2321,10 +2325,11 @@ def _update_trade_progress(
             )
             trade.trail_stop = max(trade.trail_stop, close_now - tight_k * atr_now)
         return None
-    if protected_trailing_exit and _protected_trailing_exit_should_hold(
+    if (protected_trailing_exit or protected_weak_only) and _protected_trailing_exit_should_hold(
         trade=trade,
         reason=exit_reason,
         current_pnl=current_pnl,
+        weak_only=protected_weak_only,
     ):
         max_bars = int(getattr(config, "PROTECTED_EXIT_MAX_HOLD_BARS", 4))
         if trade.protected_exit_active and trade.protected_exit_start_bar >= 0:
@@ -2485,6 +2490,7 @@ async def simulate_portfolio(
                 ts_ms=ts_ms,
                 micro_pack=micro_pack,
                 protected_trailing_exit=variant == "protected_trailing_exit",
+                protected_weak_only=variant == "protected_weak_only",
             )
             if not exit_reason:
                 continue
@@ -2516,6 +2522,7 @@ async def simulate_portfolio(
             "agent_mode_rescue",
             "agent_wakeup_rescue",
             "protected_trailing_exit",
+            "protected_weak_only",
         }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
@@ -2864,7 +2871,7 @@ async def run_replay(
     cache_4h = {sym: cache[(sym, "4h")] for sym in symbols if (sym, "4h") in cache}
     market_ctx = _build_bull_day_context(cache.get(("BTCUSDT", "1h"), (None, None))[0] if ("BTCUSDT", "1h") in cache else None)
     final_top_symbols = _final_top_symbols(symbols, cache, top_n=objective_top_n)
-    enable_replacement = variant in {"score_replace", "score_replace_cluster", "protected_trailing_exit"} or (
+    enable_replacement = variant in {"score_replace", "score_replace_cluster", "protected_trailing_exit", "protected_weak_only"} or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
     portfolio_trades, portfolio_stats = await simulate_portfolio(
@@ -3044,6 +3051,7 @@ def parse_args() -> argparse.Namespace:
             "agent_mode_rescue",
             "agent_wakeup_rescue",
             "protected_trailing_exit",
+            "protected_weak_only",
         ],
         default="score_replace",
     )
