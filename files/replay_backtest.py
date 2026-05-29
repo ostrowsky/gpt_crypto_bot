@@ -139,6 +139,8 @@ class ReplayRunStats:
     temporal_structural_events_loaded: int = 0
     temporal_wakeup_events_loaded: int = 0
     temporal_rescue_admitted: int = 0
+    suspicious_reentry_windows: int = 0
+    suspicious_reentry_admitted: int = 0
 
 
 def _load_ml_model_payload() -> dict:
@@ -1213,6 +1215,33 @@ def _exit_discriminator_shadow_should_hold(
     score = _exit_discriminator_shadow_score(trade=trade, reason=reason, current_pnl=current_pnl)
     trade.discriminator_exit_score = score
     return score >= float(getattr(config, "EXIT_DISCRIMINATOR_HOLD_SCORE_MIN", 0.68))
+
+
+def _suspicious_exit_reentry_score(trade: "ReplayTrade") -> float:
+    current_pnl = trade.pnl_pct if trade.exit_price > 0 else 0.0
+    return _exit_discriminator_shadow_score(
+        trade=trade,
+        reason=trade.exit_reason,
+        current_pnl=current_pnl,
+    )
+
+
+def _suspicious_exit_reentry_candidate_ok(
+    candidate: "ReplayCandidate",
+    *,
+    base_score_floor: float,
+) -> bool:
+    score_floor = max(
+        float(base_score_floor),
+        float(getattr(config, "SUSPICIOUS_REENTRY_TOP_GAINER_SCORE_MIN", 38.0)),
+    )
+    if float(candidate.top_gainer_score) < score_floor:
+        return False
+    if candidate.mode not in {"trend", "strong_trend", "impulse_speed", "alignment", "trend_start"}:
+        return False
+    if float(getattr(candidate, "adx", 0.0)) < float(getattr(config, "SUSPICIOUS_REENTRY_MIN_ADX", 18.0)):
+        return False
+    return True
 
 
 def _min_weak_exit_bars(mode: Optional[str]) -> int:
@@ -2574,6 +2603,7 @@ async def simulate_portfolio(
     open_positions: Dict[Tuple[str, str], ReplayTrade] = {}
     cooldown_until: Dict[str, int] = {}
     last_closed_by_symbol: Dict[str, ReplayTrade] = {}
+    suspicious_reentry_until: Dict[str, int] = {}
     trades: List[ReplayTrade] = []
 
     for ts_ms in ordered_ts:
@@ -2610,6 +2640,15 @@ async def simulate_portfolio(
             cooldown_bars = _cooldown_bars_after_exit(trade.mode, trade.exit_reason)
             cooldown_until[trade.sym] = trade.exit_ts + cooldown_bars * BAR_MS[trade.tf]
             last_closed_by_symbol[trade.sym] = trade
+            if variant == "suspicious_exit_reentry":
+                risk_score = _suspicious_exit_reentry_score(trade)
+                if (
+                    risk_score >= float(getattr(config, "SUSPICIOUS_REENTRY_EXIT_SCORE_MIN", 0.68))
+                    and trade.max_favorable_pct >= float(getattr(config, "SUSPICIOUS_REENTRY_MIN_EXIT_MFE_PCT", 1.0))
+                ):
+                    window_bars = int(getattr(config, "SUSPICIOUS_REENTRY_WINDOW_BARS", 8))
+                    suspicious_reentry_until[trade.sym] = trade.exit_ts + window_bars * BAR_MS[trade.tf]
+                    stats.suspicious_reentry_windows += 1
             open_positions.pop(key, None)
 
         ts_candidates = candidates_by_ts.get(ts_ms, [])
@@ -2627,6 +2666,7 @@ async def simulate_portfolio(
             "protected_trailing_exit",
             "protected_weak_only",
             "exit_discriminator_shadow_policy",
+            "suspicious_exit_reentry",
         }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
@@ -2665,8 +2705,20 @@ async def simulate_portfolio(
                 continue
             sym_cooldown = cooldown_until.get(candidate.sym, 0)
             if ts_ms < sym_cooldown:
-                _record_cooldown_skip(last_closed_by_symbol.get(candidate.sym), candidate, cache, stats)
-                continue
+                reentry_allowed = (
+                    variant == "suspicious_exit_reentry"
+                    and ts_ms <= suspicious_reentry_until.get(candidate.sym, 0)
+                    and _suspicious_exit_reentry_candidate_ok(
+                        candidate,
+                        base_score_floor=candidate_top_gainer_score_min,
+                    )
+                )
+                if not reentry_allowed:
+                    _record_cooldown_skip(last_closed_by_symbol.get(candidate.sym), candidate, cache, stats)
+                    continue
+                stats.suspicious_reentry_admitted += 1
+                cooldown_until[candidate.sym] = 0
+                suspicious_reentry_until.pop(candidate.sym, None)
             if any(trade.sym == candidate.sym for trade in open_positions.values()):
                 continue
             candidate_bucket = _signal_cluster_bucket_replay(candidate.tf, candidate.mode)
@@ -2909,6 +2961,8 @@ def _make_report(
             "temporal_structural_events_loaded": run_stats.temporal_structural_events_loaded,
             "temporal_wakeup_events_loaded": run_stats.temporal_wakeup_events_loaded,
             "temporal_rescue_admitted": run_stats.temporal_rescue_admitted,
+            "suspicious_reentry_windows": run_stats.suspicious_reentry_windows,
+            "suspicious_reentry_admitted": run_stats.suspicious_reentry_admitted,
         },
         "summary": summary,
         "objective": objective,
@@ -2981,6 +3035,7 @@ async def run_replay(
         "protected_trailing_exit",
         "protected_weak_only",
         "exit_discriminator_shadow_policy",
+        "suspicious_exit_reentry",
     } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
@@ -3163,6 +3218,7 @@ def parse_args() -> argparse.Namespace:
             "protected_trailing_exit",
             "protected_weak_only",
             "exit_discriminator_shadow_policy",
+            "suspicious_exit_reentry",
         ],
         default="score_replace",
     )

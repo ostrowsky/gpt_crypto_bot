@@ -5,7 +5,14 @@ import unittest
 import numpy as np
 
 import config
-from replay_backtest import ReplayTrade, _exit_discriminator_shadow_score, _update_trade_progress
+from replay_backtest import (
+    ReplayCandidate,
+    ReplayTrade,
+    _exit_discriminator_shadow_score,
+    _suspicious_exit_reentry_candidate_ok,
+    _suspicious_exit_reentry_score,
+    _update_trade_progress,
+)
 
 
 class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
@@ -212,6 +219,55 @@ class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
                     delattr(config, name)
                 elif value is not None:
                     setattr(config, name, value)
+
+    def test_suspicious_reentry_scores_exit_and_requires_strict_candidate(self) -> None:
+        trade = ReplayTrade(
+            sym="AAAUSDT",
+            tf="15m",
+            mode="trend",
+            entry_ts=1,
+            entry_price=100.0,
+            entry_i=0,
+            trail_k=2.0,
+            max_hold_bars=20,
+            trail_stop=0.0,
+            capture_ratio_at_entry=0.75,
+            max_favorable_pct=3.5,
+            exit_price=101.0,
+            exit_reason="WEAK: RSI divergence",
+            bars_held=3,
+        )
+        self.assertGreaterEqual(_suspicious_exit_reentry_score(trade), 0.68)
+
+        candidate = ReplayCandidate(
+            sym="AAAUSDT",
+            tf="15m",
+            mode="trend",
+            ts_ms=2,
+            i=2,
+            price=102.0,
+            trail_k=2.0,
+            max_hold_bars=20,
+            score=50.0,
+            top_gainer_score=39.0,
+            adx=22.0,
+        )
+        self.assertTrue(_suspicious_exit_reentry_candidate_ok(candidate, base_score_floor=34.0))
+
+        weak_candidate = ReplayCandidate(
+            sym="AAAUSDT",
+            tf="15m",
+            mode="trend",
+            ts_ms=2,
+            i=2,
+            price=102.0,
+            trail_k=2.0,
+            max_hold_bars=20,
+            score=50.0,
+            top_gainer_score=35.0,
+            adx=22.0,
+        )
+        self.assertFalse(_suspicious_exit_reentry_candidate_ok(weak_candidate, base_score_floor=34.0))
 
 
 if __name__ == "__main__":
