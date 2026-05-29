@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 import config
-from replay_backtest import ReplayTrade, _update_trade_progress
+from replay_backtest import ReplayTrade, _exit_discriminator_shadow_score, _update_trade_progress
 
 
 class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
@@ -121,6 +121,97 @@ class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
         self.assertIsNotNone(reason)
         self.assertFalse(trade.protected_exit_active)
         self.assertNotIn("protected", str(reason).lower())
+
+    def test_exit_discriminator_shadow_score_marks_high_risk_exit(self) -> None:
+        trade = ReplayTrade(
+            sym="AAAUSDT",
+            tf="15m",
+            mode="trend",
+            entry_ts=1,
+            entry_price=100.0,
+            entry_i=0,
+            trail_k=2.0,
+            max_hold_bars=20,
+            trail_stop=0.0,
+            capture_ratio_at_entry=0.75,
+            max_favorable_pct=3.5,
+            bars_held=3,
+        )
+
+        score = _exit_discriminator_shadow_score(
+            trade=trade,
+            reason="WEAK: RSI divergence",
+            current_pnl=1.0,
+        )
+
+        self.assertGreaterEqual(score, 0.68)
+
+    def test_exit_discriminator_shadow_policy_holds_high_risk_weak_exit(self) -> None:
+        old_values = {
+            name: getattr(config, name, None)
+            for name in (
+                "EXIT_DISCRIMINATOR_HOLD_SCORE_MIN",
+                "EXIT_DISCRIMINATOR_MIN_MFE_PCT",
+                "EXIT_DISCRIMINATOR_MIN_CURRENT_PNL_PCT",
+                "EXIT_DISCRIMINATOR_MAX_HOLD_BARS",
+                "EXIT_DISCRIMINATOR_TRAIL_ATR_K",
+                "EXIT_DISCRIMINATOR_PROFIT_FLOOR_PCT",
+            )
+        }
+        try:
+            config.EXIT_DISCRIMINATOR_HOLD_SCORE_MIN = 0.68
+            config.EXIT_DISCRIMINATOR_MIN_MFE_PCT = 1.0
+            config.EXIT_DISCRIMINATOR_MIN_CURRENT_PNL_PCT = -0.25
+            config.EXIT_DISCRIMINATOR_MAX_HOLD_BARS = 2
+            config.EXIT_DISCRIMINATOR_TRAIL_ATR_K = 0.75
+            config.EXIT_DISCRIMINATOR_PROFIT_FLOOR_PCT = 0.10
+
+            data = np.zeros(4, dtype=[("t", "i8"), ("c", "f8"), ("h", "f8"), ("l", "f8")])
+            data["t"] = np.array([1, 2, 3, 4], dtype=np.int64)
+            data["c"] = np.array([100.0, 103.5, 101.0, 100.0], dtype=float)
+            data["h"] = np.array([100.0, 103.5, 101.0, 100.0], dtype=float)
+            data["l"] = np.array([100.0, 103.5, 101.0, 100.0], dtype=float)
+            feat = {
+                "atr": np.array([1.0, 1.0, 1.0, 1.0], dtype=float),
+                "rsi": np.array([55.0, 70.0, 58.0, 50.0], dtype=float),
+                "ema_fast": np.array([99.0, 100.0, 100.0, 101.0], dtype=float),
+                "ema_slow": np.array([98.0, 99.0, 99.5, 100.5], dtype=float),
+                "ema200": np.array([97.0, 98.0, 99.0, 99.5], dtype=float),
+                "adx": np.array([25.0, 26.0, 27.0, 27.0], dtype=float),
+                "slope": np.array([0.1, 0.2, 0.1, -0.1], dtype=float),
+                "rsi_divergence": np.array([0.0, 0.0, 1.0, 0.0], dtype=float),
+            }
+            trade = ReplayTrade(
+                sym="AAAUSDT",
+                tf="15m",
+                mode="trend",
+                entry_ts=1,
+                entry_price=100.0,
+                entry_i=0,
+                trail_k=3.0,
+                max_hold_bars=20,
+                trail_stop=0.0,
+                capture_ratio_at_entry=0.75,
+            )
+
+            self.assertIsNone(
+                _update_trade_progress(
+                    trade,
+                    data,
+                    feat,
+                    2,
+                    ts_ms=3,
+                    exit_discriminator_shadow_policy=True,
+                )
+            )
+            self.assertTrue(trade.discriminator_exit_active)
+            self.assertGreaterEqual(trade.discriminator_exit_score, 0.68)
+        finally:
+            for name, value in old_values.items():
+                if value is None and hasattr(config, name):
+                    delattr(config, name)
+                elif value is not None:
+                    setattr(config, name, value)
 
 
 if __name__ == "__main__":

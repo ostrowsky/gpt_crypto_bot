@@ -89,6 +89,10 @@ class ReplayTrade:
     protected_exit_active: bool = False
     protected_exit_start_bar: int = -1
     protected_exit_original_reason: str = ""
+    discriminator_exit_active: bool = False
+    discriminator_exit_start_bar: int = -1
+    discriminator_exit_original_reason: str = ""
+    discriminator_exit_score: float = 0.0
 
     @property
     def pnl_pct(self) -> float:
@@ -1133,6 +1137,82 @@ def _protected_trailing_exit_should_hold(
     if current_pnl < float(getattr(config, "PROTECTED_EXIT_MIN_CURRENT_PNL_PCT", -1.50)):
         return False
     return True
+
+
+def _exit_reason_bucket(reason: Optional[str]) -> str:
+    text = str(reason or "").lower()
+    if not text:
+        return "unknown"
+    if "weak:" in text:
+        return "weak"
+    if "atr" in text and "trail" in text:
+        return "atr_trail"
+    if "ema20" in text or "ema" in text:
+        return "ema_break"
+    if "stop" in text or "стоп" in text:
+        return "stop_loss_or_trail"
+    if "rsi" in text:
+        return "rsi"
+    if "time" in text or "max hold" in text:
+        return "time_exit"
+    return "other"
+
+
+def _exit_discriminator_shadow_score(
+    *,
+    trade: "ReplayTrade",
+    reason: Optional[str],
+    current_pnl: float,
+) -> float:
+    score = 0.0
+    reason_bucket = _exit_reason_bucket(reason)
+    if reason_bucket in {"weak", "stop_loss_or_trail", "atr_trail"}:
+        score += 0.24
+    if reason_bucket == "weak":
+        score += 0.08
+    if trade.mode in {"trend", "strong_trend", "impulse_speed", "alignment"}:
+        score += 0.16
+    capture = trade.capture_ratio_at_entry
+    if capture is not None:
+        if capture >= 0.60:
+            score += 0.20
+        elif capture >= 0.40:
+            score += 0.12
+    if trade.max_favorable_pct >= 3.0:
+        score += 0.18
+    elif trade.max_favorable_pct >= 1.5:
+        score += 0.10
+    giveback_now = max(0.0, trade.max_favorable_pct - current_pnl)
+    if giveback_now >= 1.5:
+        score += 0.14
+    elif giveback_now >= 0.5:
+        score += 0.07
+    if current_pnl > 0.0:
+        score += 0.08
+    if trade.bars_held <= int(getattr(config, "EXIT_DISCRIMINATOR_EARLY_BARS", 6)):
+        score += 0.10
+    return round(min(score, 1.0), 4)
+
+
+def _exit_discriminator_shadow_should_hold(
+    *,
+    trade: "ReplayTrade",
+    reason: Optional[str],
+    current_pnl: float,
+) -> bool:
+    if not reason:
+        return False
+    if trade.discriminator_exit_active:
+        return True
+    if _exit_reason_bucket(reason) in {"ema_break", "time_exit"}:
+        return False
+    if current_pnl < float(getattr(config, "EXIT_DISCRIMINATOR_MIN_CURRENT_PNL_PCT", -0.25)):
+        return False
+    if trade.max_favorable_pct < float(getattr(config, "EXIT_DISCRIMINATOR_MIN_MFE_PCT", 1.0)):
+        return False
+    score = _exit_discriminator_shadow_score(trade=trade, reason=reason, current_pnl=current_pnl)
+    trade.discriminator_exit_score = score
+    return score >= float(getattr(config, "EXIT_DISCRIMINATOR_HOLD_SCORE_MIN", 0.68))
 
 
 def _min_weak_exit_bars(mode: Optional[str]) -> int:
@@ -2220,6 +2300,7 @@ def _update_trade_progress(
     micro_pack: Optional[Tuple[np.ndarray, dict]] = None,
     protected_trailing_exit: bool = False,
     protected_weak_only: bool = False,
+    exit_discriminator_shadow_policy: bool = False,
 ) -> Optional[str]:
     close_now = float(data["c"][idx])
     _update_trade_extrema(trade, data, idx)
@@ -2342,6 +2423,27 @@ def _update_trade_progress(
             tight_k = float(getattr(config, "PROTECTED_EXIT_TRAIL_ATR_K", 0.9))
             trade.trail_stop = max(trade.trail_stop, close_now - tight_k * atr_now)
         floor_pct = float(getattr(config, "PROTECTED_EXIT_PROFIT_FLOOR_PCT", 0.05))
+        if trade.max_favorable_pct >= floor_pct:
+            trade.trail_stop = max(trade.trail_stop, trade.entry_price * (1.0 + floor_pct / 100.0))
+        return None
+    if exit_discriminator_shadow_policy and _exit_discriminator_shadow_should_hold(
+        trade=trade,
+        reason=exit_reason,
+        current_pnl=current_pnl,
+    ):
+        max_bars = int(getattr(config, "EXIT_DISCRIMINATOR_MAX_HOLD_BARS", 2))
+        if trade.discriminator_exit_active and trade.discriminator_exit_start_bar >= 0:
+            if trade.bars_held - trade.discriminator_exit_start_bar >= max_bars:
+                return f"exit discriminator confirmed: {exit_reason}"
+        trade.discriminator_exit_active = True
+        trade.discriminator_exit_start_bar = (
+            trade.bars_held if trade.discriminator_exit_start_bar < 0 else trade.discriminator_exit_start_bar
+        )
+        trade.discriminator_exit_original_reason = trade.discriminator_exit_original_reason or str(exit_reason)
+        if atr_now > 0:
+            tight_k = float(getattr(config, "EXIT_DISCRIMINATOR_TRAIL_ATR_K", 0.75))
+            trade.trail_stop = max(trade.trail_stop, close_now - tight_k * atr_now)
+        floor_pct = float(getattr(config, "EXIT_DISCRIMINATOR_PROFIT_FLOOR_PCT", 0.10))
         if trade.max_favorable_pct >= floor_pct:
             trade.trail_stop = max(trade.trail_stop, trade.entry_price * (1.0 + floor_pct / 100.0))
         return None
@@ -2491,6 +2593,7 @@ async def simulate_portfolio(
                 micro_pack=micro_pack,
                 protected_trailing_exit=variant == "protected_trailing_exit",
                 protected_weak_only=variant == "protected_weak_only",
+                exit_discriminator_shadow_policy=variant == "exit_discriminator_shadow_policy",
             )
             if not exit_reason:
                 continue
@@ -2523,6 +2626,7 @@ async def simulate_portfolio(
             "agent_wakeup_rescue",
             "protected_trailing_exit",
             "protected_weak_only",
+            "exit_discriminator_shadow_policy",
         }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
@@ -2871,7 +2975,13 @@ async def run_replay(
     cache_4h = {sym: cache[(sym, "4h")] for sym in symbols if (sym, "4h") in cache}
     market_ctx = _build_bull_day_context(cache.get(("BTCUSDT", "1h"), (None, None))[0] if ("BTCUSDT", "1h") in cache else None)
     final_top_symbols = _final_top_symbols(symbols, cache, top_n=objective_top_n)
-    enable_replacement = variant in {"score_replace", "score_replace_cluster", "protected_trailing_exit", "protected_weak_only"} or (
+    enable_replacement = variant in {
+        "score_replace",
+        "score_replace_cluster",
+        "protected_trailing_exit",
+        "protected_weak_only",
+        "exit_discriminator_shadow_policy",
+    } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
     portfolio_trades, portfolio_stats = await simulate_portfolio(
@@ -3052,6 +3162,7 @@ def parse_args() -> argparse.Namespace:
             "agent_wakeup_rescue",
             "protected_trailing_exit",
             "protected_weak_only",
+            "exit_discriminator_shadow_policy",
         ],
         default="score_replace",
     )
