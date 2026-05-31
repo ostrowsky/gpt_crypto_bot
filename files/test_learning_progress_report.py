@@ -9,6 +9,32 @@ import learning_progress_report as lpr
 
 
 class LearningProgressReportTest(unittest.TestCase):
+    def test_safe_partial_coverage_does_not_override_developing_verdict(self) -> None:
+        latest = lpr.DayMetrics(
+            day="2026-05-30",
+            early_pct=100.0,
+            coverage_status="partial",
+            coverage_reasons=("partial candle coverage 186/206",),
+            coverage_assessment="partial_safe_inactive_symbols_only",
+            missing_series_count=20,
+            missing_symbol_status_counts={"BREAK": 20},
+        )
+        previous = [
+            lpr.DayMetrics(day=f"2026-05-2{i}", early_pct=40.0, coverage_status="complete")
+            for i in range(3, 10)
+        ]
+        older = [
+            lpr.DayMetrics(day=f"2026-05-1{i}", early_pct=20.0, coverage_status="complete")
+            for i in range(6, 23)
+        ]
+
+        verdict = lpr._verdict(latest, previous, older, {"training": {"last_finished_at": "2026-05-31T06:00:00Z"}})
+        alerts = lpr._alerts(latest, {}, {}, [])
+
+        self.assertEqual(verdict["label"], "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ")
+        self.assertEqual(alerts[0]["severity"], "warn")
+        self.assertIn("partial_safe_inactive_symbols_only", alerts[0]["text"])
+
     def test_build_report_flags_stale_training_and_low_early_capture(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -54,6 +80,18 @@ class LearningProgressReportTest(unittest.TestCase):
             self.assertTrue(any(a["severity"] == "serious" for a in report["alerts"]))
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
+
+    def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
+        components = lpr._learning_components(
+            {
+                "training": {"last_finished_at": "2026-05-31T06:00:00Z"},
+                "top_gainer_critic": {"last_target_day_local": "2026-05-31"},
+                "signal_quality_evaluator": {"last_target_day_local": "2026-05-30"},
+            },
+            {},
+            "2026-05-30",
+        )
+        self.assertEqual(components["measurement"]["status"], "ok")
 
 
 class LearningProgressWorkerIntegrationTest(unittest.TestCase):

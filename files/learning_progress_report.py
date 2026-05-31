@@ -3,11 +3,13 @@
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from statistics import mean, median
 from typing import Any, Iterable
+
+import report_signal_quality_coverage
 
 
 ROOT = Path(__file__).resolve().parent
@@ -39,6 +41,9 @@ class DayMetrics:
     median_giveback_pct: float | None = None
     coverage_status: str = "unknown"
     coverage_reasons: tuple[str, ...] = ()
+    coverage_assessment: str = "unknown"
+    missing_series_count: int = 0
+    missing_symbol_status_counts: dict[str, int] | None = None
 
 
 def build_report(
@@ -50,6 +55,7 @@ def build_report(
     output_txt: Path = DEFAULT_OUTPUT_TXT,
 ) -> dict[str, Any]:
     days = _load_day_metrics(reports_dir)
+    days = _apply_latest_coverage_triage(days, reports_dir)
     latest = days[-1] if days else DayMetrics(day="unknown")
     previous = days[-8:-1]
     older = days[-15:-8]
@@ -95,7 +101,7 @@ def render_text(report: dict[str, Any]) -> str:
     capture = _fmt(latest.get("capture_pct"), 1)
     early = _fmt(latest.get("early_pct"), 1)
     median_capture = latest.get("median_capture_ratio")
-    capture_piece = "нет данных" if median_capture is None else f"взял медианно {float(median_capture) * 100:.0f}% движения на входе"
+    capture_piece = "нет данных" if median_capture is None else f"оставалось медианно {float(median_capture) * 100:.0f}% дневного движения после входа"
     blocked = latest.get("blocked_winner_count") or 0
     miss_rate = latest.get("miss_rate")
     miss_piece = "miss-rate нет" if miss_rate is None else f"miss-rate {float(miss_rate) * 100:.0f}%"
@@ -172,6 +178,37 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
     return out
 
 
+def _apply_latest_coverage_triage(days: list[DayMetrics], reports_dir: Path) -> list[DayMetrics]:
+    if not days:
+        return days
+    latest = days[-1]
+    path = reports_dir / f"signal_quality_{latest.day}_final.json"
+    if not path.exists() or latest.coverage_status in {"ok", "complete"}:
+        return days
+    runtime_dir = reports_dir.parent
+    workspace_dir = runtime_dir.parent
+    watchlist_path = workspace_dir / "files" / "watchlist.json"
+    try:
+        triage = report_signal_quality_coverage.build_report(
+            signal_report=path,
+            watchlist_path=watchlist_path if watchlist_path.exists() else report_signal_quality_coverage.WATCHLIST,
+            cache_dir=runtime_dir / "signal_quality_cache",
+            exchange_status_cache=runtime_dir / "exchange_symbol_status.json",
+            output_json=reports_dir / "signal_quality_coverage_latest.json",
+            output_txt=reports_dir / "signal_quality_coverage_latest.txt",
+            save=True,
+        )
+    except Exception:
+        return days
+    updated = replace(
+        latest,
+        coverage_assessment=str(triage.get("assessment") or "unknown"),
+        missing_series_count=int(triage.get("missing_series_count") or 0),
+        missing_symbol_status_counts=dict(triage.get("missing_symbol_status_counts") or {}),
+    )
+    return [*days[:-1], updated]
+
+
 def _rolling_summary(days: list[DayMetrics]) -> dict[str, Any]:
     last7 = days[-7:]
     prev7 = days[-14:-7]
@@ -192,12 +229,12 @@ def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetr
     early_old = _avg([d.early_pct for d in older])
     training = (((status.get("training") or {}).get("last_finished_at")) or "")
     stale_training = bool(training and training[:10] < latest.day)
-    if latest.coverage_status not in {"ok", "complete"}:
+    if latest.coverage_status not in {"ok", "complete"} and not _coverage_is_safe_partial(latest):
         return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "сначала проверь покрытие данных"}
     if stale_training and early_recent <= early_old + 1.0:
         return {"label": "СТОИТ НА МЕСТЕ", "emoji": "🟠", "operator_hint": "нужно чинить обучение/гейты"}
     if early_recent >= early_old + 2.0:
-        return {"label": "РАЗВИВАЕТСЯ (медленно)", "emoji": "📈", "operator_hint": "от тебя ничего не требуется"}
+        return {"label": "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ", "emoji": "📈", "operator_hint": "фокус — монетизация выходов"}
     if early_recent + 2.0 < early_old:
         return {"label": "ДЕГРАДИРУЕТ", "emoji": "📉", "operator_hint": "нужно остановить авто-изменения"}
     return {"label": "СТОИТ НА МЕСТЕ", "emoji": "➡️", "operator_hint": "ждать нельзя, нужны узкие проверки"}
@@ -212,7 +249,7 @@ def _learning_components(status: dict[str, Any], feedback: dict[str, Any], lates
     return {
         "measurement": {
             "label": "measurement",
-            "status": "ok" if critic.get("last_target_day_local") == latest_day and sq.get("last_target_day_local") == latest_day else "stale/partial",
+            "status": "ok" if _day_not_older(critic.get("last_target_day_local"), latest_day) and _day_not_older(sq.get("last_target_day_local"), latest_day) else "stale/partial",
             "detail": f"critic={critic.get('last_target_day_local')}, signal_quality={sq.get('last_target_day_local')}",
         },
         "feedback": {
@@ -243,7 +280,17 @@ def _previous_decisions(feedback: dict[str, Any], status: dict[str, Any], latest
 def _alerts(latest: DayMetrics, status: dict[str, Any], feedback: dict[str, Any], focus_findings: list[dict[str, Any]]) -> list[dict[str, str]]:
     out = []
     if latest.coverage_status not in {"ok", "complete"}:
-        out.append({"severity": "serious", "text": f"coverage={latest.coverage_status}: {', '.join(latest.coverage_reasons[:2])}"})
+        if _coverage_is_safe_partial(latest):
+            counts = latest.missing_symbol_status_counts or {}
+            out.append({
+                "severity": "warn",
+                "text": (
+                    f"coverage={latest.coverage_status}, но triage={latest.coverage_assessment}; "
+                    f"missing={latest.missing_series_count}, statuses={counts}"
+                ),
+            })
+        else:
+            out.append({"severity": "serious", "text": f"coverage={latest.coverage_status}: {', '.join(latest.coverage_reasons[:2])}"})
     if latest.early_pct < 15.0:
         out.append({"severity": "serious", "text": f"early capture only {latest.early_pct:.1f}% vs 25%+ target"})
     if latest.miss_rate is not None and latest.miss_rate > 0.80:
@@ -268,9 +315,28 @@ def _next_actions(latest: DayMetrics, status: dict[str, Any], feedback: dict[str
         actions.append("▶️ Запустить blocked-winner audit по top_gainer_score_gate / agent_mode_disabled / cooldown, без production relax.")
     if latest.median_exit_efficiency is not None and latest.median_exit_efficiency < 0:
         actions.append("▶️ Продолжить exit-quality auditor: входы монетизируются плохо, менять SELL только через replay.")
+    if (
+        latest.early_pct >= 25.0
+        and latest.median_exit_efficiency is not None
+        and latest.median_giveback_pct is not None
+        and (latest.median_exit_efficiency < 0.25 or latest.median_giveback_pct >= 3.0)
+    ):
+        actions.append("▶️ Запустить exit monetization replay по вчерашним watchlist top movers: high-MFE/giveback, re-entry и partial-exit гипотезы без production SELL changes.")
     if not actions:
         actions.append("⏸️ Пока одобрять нечего — ждём следующего final report и replay evidence.")
     return actions
+
+
+def _coverage_is_safe_partial(day: DayMetrics) -> bool:
+    return (
+        day.coverage_status == "partial"
+        and day.coverage_assessment == "partial_safe_inactive_symbols_only"
+    )
+
+
+def _day_not_older(value: Any, reference: str) -> bool:
+    text = str(value or "")
+    return bool(text) and text[:10] >= str(reference)
 
 
 def _focus_findings(reports_dir: Path, latest_day: str, focus: list[str]) -> list[dict[str, Any]]:
