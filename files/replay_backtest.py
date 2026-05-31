@@ -1254,6 +1254,10 @@ def _suspicious_exit_reentry_candidate_ok(
     return True
 
 
+def _suspicious_reentry_enabled(variant: str) -> bool:
+    return variant in {"suspicious_exit_reentry", "baseline_suspicious_reentry"}
+
+
 def _maybe_mark_partial_profit_take(
     *,
     trade: "ReplayTrade",
@@ -2683,7 +2687,7 @@ async def simulate_portfolio(
             cooldown_bars = _cooldown_bars_after_exit(trade.mode, trade.exit_reason)
             cooldown_until[trade.sym] = trade.exit_ts + cooldown_bars * BAR_MS[trade.tf]
             last_closed_by_symbol[trade.sym] = trade
-            if variant == "suspicious_exit_reentry":
+            if _suspicious_reentry_enabled(variant):
                 risk_score = _suspicious_exit_reentry_score(trade)
                 if (
                     risk_score >= float(getattr(config, "SUSPICIOUS_REENTRY_EXIT_SCORE_MIN", 0.68))
@@ -2750,7 +2754,7 @@ async def simulate_portfolio(
             sym_cooldown = cooldown_until.get(candidate.sym, 0)
             if ts_ms < sym_cooldown:
                 reentry_allowed = (
-                    variant == "suspicious_exit_reentry"
+                    _suspicious_reentry_enabled(variant)
                     and ts_ms <= suspicious_reentry_until.get(candidate.sym, 0)
                     and _suspicious_exit_reentry_candidate_ok(
                         candidate,
@@ -3080,6 +3084,7 @@ async def run_replay(
         "protected_weak_only",
         "exit_discriminator_shadow_policy",
         "suspicious_exit_reentry",
+        "baseline_suspicious_reentry",
         "partial_profit_take",
     } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
@@ -3264,6 +3269,7 @@ def parse_args() -> argparse.Namespace:
             "protected_weak_only",
             "exit_discriminator_shadow_policy",
             "suspicious_exit_reentry",
+            "baseline_suspicious_reentry",
             "partial_profit_take",
         ],
         default="score_replace",

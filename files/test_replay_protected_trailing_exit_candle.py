@@ -10,6 +10,7 @@ from replay_backtest import (
     ReplayTrade,
     _exit_discriminator_shadow_score,
     _maybe_mark_partial_profit_take,
+    _suspicious_reentry_enabled,
     _suspicious_exit_reentry_candidate_ok,
     _suspicious_exit_reentry_score,
     _update_trade_progress,
@@ -269,6 +270,11 @@ class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
             adx=22.0,
         )
         self.assertFalse(_suspicious_exit_reentry_candidate_ok(weak_candidate, base_score_floor=34.0))
+
+    def test_suspicious_reentry_enabled_for_policy_and_isolated_variants(self) -> None:
+        self.assertTrue(_suspicious_reentry_enabled("suspicious_exit_reentry"))
+        self.assertTrue(_suspicious_reentry_enabled("baseline_suspicious_reentry"))
+        self.assertFalse(_suspicious_reentry_enabled("score_replace"))
 
     def test_partial_profit_take_blends_partial_and_final_pnl(self) -> None:
         old_values = {
