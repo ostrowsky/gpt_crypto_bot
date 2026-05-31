@@ -582,6 +582,17 @@ EARLY_WARN_VOLJUMP_MIN  = 1.20   # Р°Р»СЊС‚РµСЂРЅР°С‚РёР�
 # в”Ђв”Ђ Exit warnings dedup в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 EXIT_WARN_COOLDOWN_SEC  = 2700   # 45 РјРёРЅСѓС‚: РґРµРґСѓРї exit-warning СЃРѕРѕР±С‰РµРЅРёР№
 
+# Shadow-only suspicious re-entry alerts. These never open positions and never
+# bypass production cooldown; they only emit/log "would re-enter" telemetry.
+SUSPICIOUS_REENTRY_SHADOW_ENABLED: bool = True
+SUSPICIOUS_REENTRY_SHADOW_TELEGRAM_ENABLED: bool = True
+SUSPICIOUS_REENTRY_SHADOW_WINDOW_BARS: int = 8
+SUSPICIOUS_REENTRY_SHADOW_EXIT_SCORE_MIN: float = 0.68
+SUSPICIOUS_REENTRY_SHADOW_MIN_MFE_PCT: float = 1.0
+SUSPICIOUS_REENTRY_SHADOW_MIN_CANDIDATE_SCORE: float = 38.0
+SUSPICIOUS_REENTRY_SHADOW_MIN_ADX: float = 18.0
+SUSPICIOUS_REENTRY_SHADOW_DEDUP_BARS: int = 8
+
 
 # в”Ђв”Ђ Paper execution (entry quality) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 PAPER_FEE_BPS = 7.5  # approx taker fee in bps for simulation

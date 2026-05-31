@@ -2259,6 +2259,72 @@ def _cooldown_bars_after_exit(
     )
 
 
+def _exit_reason_bucket(reason: Optional[str]) -> str:
+    text = str(reason or "").lower()
+    if not text:
+        return "unknown"
+    if "weak:" in text:
+        return "weak"
+    if "atr" in text or "trail" in text or "трейл" in text:
+        return "atr_trail"
+    if "ema20" in text or "ema" in text:
+        return "ema_break"
+    if "stop" in text or "стоп" in text:
+        return "stop_loss_or_trail"
+    if "rsi" in text:
+        return "rsi"
+    if "time" in text or "время" in text:
+        return "time_exit"
+    return "other"
+
+
+def _suspicious_reentry_exit_score(
+    *,
+    mode: str,
+    reason: Optional[str],
+    current_pnl: float,
+    max_favorable_pct: float,
+    bars_held: int,
+) -> float:
+    score = 0.0
+    bucket = _exit_reason_bucket(reason)
+    if bucket in {"weak", "stop_loss_or_trail", "atr_trail"}:
+        score += 0.24
+    if bucket == "weak":
+        score += 0.08
+    if mode in {"trend", "strong_trend", "impulse_speed", "alignment"}:
+        score += 0.16
+    if max_favorable_pct >= 3.0:
+        score += 0.18
+    elif max_favorable_pct >= 1.5:
+        score += 0.10
+    giveback_now = max(0.0, max_favorable_pct - current_pnl)
+    if giveback_now >= 1.5:
+        score += 0.14
+    elif giveback_now >= 0.5:
+        score += 0.07
+    if current_pnl > 0.0:
+        score += 0.08
+    if bars_held <= int(getattr(config, "EXIT_DISCRIMINATOR_EARLY_BARS", 6)):
+        score += 0.10
+    return round(min(score, 1.0), 4)
+
+
+def _suspicious_reentry_candidate_ok(
+    *,
+    mode: str,
+    candidate_score: float,
+    adx: float,
+) -> bool:
+    if mode not in {"trend", "strong_trend", "impulse_speed", "alignment", "trend_start", "retest", "breakout"}:
+        return False
+    if candidate_score < float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_MIN_CANDIDATE_SCORE", 38.0)):
+        return False
+    if adx < float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_MIN_ADX", 18.0)):
+        return False
+    return True
+
+
 def _fast_loss_ema_exit_reason(
     *,
     tf: str,
@@ -3340,6 +3406,7 @@ def _pos_to_dict(pos: "OpenPosition") -> dict:
         ),
         "predictions": {str(k): v for k, v in pos.predictions.items()},
         "bars_elapsed": pos.bars_elapsed, "ml_record_id": pos.ml_record_id,
+        "max_price_since_entry": getattr(pos, "max_price_since_entry", 0.0),
         "critic_record_id": pos.critic_record_id,
         "signal_mode": pos.signal_mode, "trail_k": pos.trail_k,
         "max_hold_bars": pos.max_hold_bars, "trail_stop": pos.trail_stop,
@@ -3377,6 +3444,7 @@ def _pos_from_dict(d: dict) -> "OpenPosition":
         prediction_horizons=prediction_horizons,
         predictions={int(k): v for k, v in d.get("predictions", {}).items()},
         bars_elapsed=d.get("bars_elapsed", 0), ml_record_id=d.get("ml_record_id", ""),
+        max_price_since_entry=d.get("max_price_since_entry", d.get("entry_price", 0.0)),
         critic_record_id=d.get("critic_record_id", ""),
         signal_mode=signal_mode, trail_k=d.get("trail_k", 2.0),
         max_hold_bars=d.get("max_hold_bars", 16), trail_stop=d.get("trail_stop", 0.0),
@@ -3677,6 +3745,7 @@ class OpenPosition:
     prediction_horizons: tuple[int, ...] = field(default_factory=tuple)
     predictions: Dict[int, Optional[bool]] = field(default_factory=dict)
     bars_elapsed: int = 0
+    max_price_since_entry: float = 0.0
 
     # ML: id записи в ml_dataset.jsonl для обновления меток
     ml_record_id:  str   = ""
@@ -3736,6 +3805,8 @@ class MonitorState:
     watch_alert_logged: Dict[str, str] = field(default_factory=dict)
     scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
     wakeup_shadow_logged: Dict[str, int] = field(default_factory=dict)
+    suspicious_reentry_watch: Dict[str, dict] = field(default_factory=dict)
+    suspicious_reentry_shadow_logged: Dict[str, int] = field(default_factory=dict)
     time_block_recent: Dict[str, dict] = field(default_factory=dict)
     time_block_streaks: Dict[str, dict] = field(default_factory=dict)
     last_discovery_ts: int = 0
@@ -3881,6 +3952,161 @@ def _signal_snapshot(feat: dict, c: np.ndarray, idx: int, tf: str = "") -> Optio
         "mode": mode,
         "price": float(c[idx]),
     }
+
+
+def _candidate_score_snapshot(
+    *,
+    report: CoinReport,
+    feat: dict,
+    data: np.ndarray,
+    idx: int,
+    tf: str,
+    mode: str,
+) -> dict:
+    price = float(data["c"][idx])
+    ema20 = float(feat["ema_fast"][idx]) if np.isfinite(feat["ema_fast"][idx]) else 0.0
+    slope = float(feat["slope"][idx]) if np.isfinite(feat["slope"][idx]) else 0.0
+    adx = float(feat["adx"][idx]) if np.isfinite(feat["adx"][idx]) else 0.0
+    rsi = float(feat["rsi"][idx]) if np.isfinite(feat["rsi"][idx]) else 50.0
+    vol_x = float(feat["vol_x"][idx]) if np.isfinite(feat["vol_x"][idx]) else 0.0
+    daily_range = float(feat["daily_range_pct"][idx]) if np.isfinite(feat["daily_range_pct"][idx]) else 0.0
+    today_change, forecast = _ensure_report_move_features(report, data=data, i=idx, feat=feat)
+    base_score = _entry_signal_score(
+        mode=mode,
+        price=price,
+        ema20=ema20,
+        slope=slope,
+        adx=adx,
+        rsi=rsi,
+        vol_x=vol_x,
+        daily_range=daily_range,
+    )
+    candidate_score = (
+        base_score
+        + float(getattr(report, "wakeup_priority_bonus", 0.0))
+        + _top_mover_score_bonus(today_change)
+        + _forecast_return_score_bonus(forecast)
+    )
+    score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
+    return {
+        "price": price,
+        "ema20": ema20,
+        "slope": slope,
+        "adx": adx,
+        "rsi": rsi,
+        "vol_x": vol_x,
+        "daily_range": daily_range,
+        "today_change_pct": today_change,
+        "forecast_return_pct": forecast,
+        "base_score": base_score,
+        "candidate_score": candidate_score,
+        "score_floor": score_floor,
+    }
+
+
+def _register_suspicious_reentry_watch(
+    state: MonitorState,
+    pos: OpenPosition,
+    *,
+    exit_reason: str,
+    exit_price: float,
+    exit_ts: int,
+    pnl_pct: float,
+) -> None:
+    if not bool(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_ENABLED", False)):
+        return
+    max_price = max(float(getattr(pos, "max_price_since_entry", 0.0) or 0.0), float(getattr(pos, "entry_price", 0.0)), exit_price)
+    mfe_pct = (max_price / pos.entry_price - 1.0) * 100.0 if pos.entry_price > 0 else 0.0
+    score = _suspicious_reentry_exit_score(
+        mode=str(getattr(pos, "signal_mode", "trend")),
+        reason=exit_reason,
+        current_pnl=pnl_pct,
+        max_favorable_pct=mfe_pct,
+        bars_held=int(getattr(pos, "bars_elapsed", 0)),
+    )
+    if score < float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_EXIT_SCORE_MIN", 0.68)):
+        return
+    if mfe_pct < float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_MIN_MFE_PCT", 1.0)):
+        return
+    window_bars = int(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_WINDOW_BARS", 8))
+    state.suspicious_reentry_watch[pos.symbol] = {
+        "until_ts": int(exit_ts) + window_bars * _tf_bar_ms(str(getattr(pos, "tf", "15m"))),
+        "exit_ts": int(exit_ts),
+        "tf": str(getattr(pos, "tf", "15m")),
+        "mode": str(getattr(pos, "signal_mode", "trend")),
+        "exit_reason": str(exit_reason),
+        "exit_price": float(exit_price),
+        "exit_pnl_pct": float(pnl_pct),
+        "mfe_pct": float(mfe_pct),
+        "exit_score": float(score),
+    }
+
+
+async def _maybe_send_suspicious_reentry_shadow_alert(
+    *,
+    state: MonitorState,
+    send: SendFn,
+    report: CoinReport,
+    sym: str,
+    tf: str,
+    data: np.ndarray,
+    feat: dict,
+    idx: int,
+    cooldown_until_ms: int,
+) -> None:
+    if not bool(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_ENABLED", False)):
+        return
+    watch = state.suspicious_reentry_watch.get(sym)
+    if not watch:
+        return
+    current_ts_ms = int(data["t"][idx])
+    if current_ts_ms > int(watch.get("until_ts", 0)):
+        state.suspicious_reentry_watch.pop(sym, None)
+        return
+    snapshot = _signal_snapshot(feat, data["c"].astype(float), idx, tf=tf)
+    if snapshot is None:
+        return
+    mode = str(snapshot["mode"])
+    metrics = _candidate_score_snapshot(report=report, feat=feat, data=data, idx=idx, tf=tf, mode=mode)
+    if not _suspicious_reentry_candidate_ok(
+        mode=mode,
+        candidate_score=float(metrics["candidate_score"]),
+        adx=float(metrics["adx"]),
+    ):
+        return
+    dedup_bars = int(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_DEDUP_BARS", 8))
+    last_ts = int(state.suspicious_reentry_shadow_logged.get(sym, 0) or 0)
+    if current_ts_ms - last_ts < dedup_bars * _tf_bar_ms(tf):
+        return
+    state.suspicious_reentry_shadow_logged[sym] = current_ts_ms
+    bar_ms = _tf_bar_ms(tf)
+    bars_since_exit = max(0, (current_ts_ms - int(watch.get("exit_ts", 0))) // bar_ms)
+    cooldown_bars_left = max(0, (int(cooldown_until_ms) - current_ts_ms) // bar_ms)
+    botlog.log_suspicious_reentry_shadow(
+        sym=sym,
+        tf=tf,
+        mode=mode,
+        price=float(metrics["price"]),
+        candidate_score=float(metrics["candidate_score"]),
+        exit_score=float(watch.get("exit_score", 0.0)),
+        exit_reason=str(watch.get("exit_reason", "")),
+        exit_pnl_pct=float(watch.get("exit_pnl_pct", 0.0)),
+        mfe_pct=float(watch.get("mfe_pct", 0.0)),
+        bars_since_exit=int(bars_since_exit),
+        cooldown_bars_left=int(cooldown_bars_left),
+    )
+    if bool(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_TELEGRAM_ENABLED", True)):
+        await send(
+            "🔁 *SHADOW RE-ENTRY* — не BUY\n\n"
+            f"*{sym}*  `[{tf}]`  {mode}\n"
+            f"Цена: `{float(metrics['price']):.6g}`\n"
+            f"candidate score: `{float(metrics['candidate_score']):.1f}`  ADX: `{float(metrics['adx']):.1f}`\n"
+            f"exit risk: `{float(watch.get('exit_score', 0.0)):.2f}`  MFE: `{float(watch.get('mfe_pct', 0.0)):.2f}%`\n"
+            f"exit pnl: `{float(watch.get('exit_pnl_pct', 0.0)):+.2f}%`\n"
+            f"exit reason: {watch.get('exit_reason')}\n"
+            f"cooldown left: `{int(cooldown_bars_left)}` bars\n"
+            "Action: observe only; no position opened."
+        )
 
 
 def _coin_report_priority(report: CoinReport) -> tuple:
@@ -4170,6 +4396,7 @@ async def _poll_coin(
 
     state.__dict__.setdefault("last_prices", {})[sym] = float(c[i])
     if pos is not None:
+        metrics_changed = False
         try:
             live_report = await _analyze_coin_live(sym, tf, data)
         except Exception:
@@ -4187,8 +4414,14 @@ async def _poll_coin(
             )
             pos.forecast_return_pct = new_forecast_return
             pos.today_change_pct = new_today_change
-            if metrics_changed:
-                save_positions(state.positions)
+        old_peak = float(getattr(pos, "max_price_since_entry", 0.0) or 0.0)
+        if old_peak <= 0.0:
+            pos.max_price_since_entry = max(float(pos.entry_price), float(c[i]))
+        else:
+            pos.max_price_since_entry = max(old_peak, float(c[i]))
+        peak_changed = abs(float(pos.max_price_since_entry) - old_peak) > 1e-9
+        if metrics_changed or peak_changed:
+            save_positions(state.positions)
         _log_peak_risk_shadow_if_needed(pos, sym, tf, feat, i, float(c[i]))
 
 
@@ -4202,6 +4435,17 @@ async def _poll_coin(
         if current_ts_ms < cooldown_until_ms:
             bar_ms = 15 * 60 * 1000 if tf == "15m" else 60 * 60 * 1000
             bars_left = max(0, (cooldown_until_ms - current_ts_ms) // bar_ms)
+            await _maybe_send_suspicious_reentry_shadow_alert(
+                state=state,
+                send=send,
+                report=report,
+                sym=sym,
+                tf=tf,
+                data=data,
+                feat=feat,
+                idx=i,
+                cooldown_until_ms=cooldown_until_ms,
+            )
             # Логируем только начало cooldown (когда bars_left максимальное)
             if not state.cd_logged.get(sym):
                 botlog.log_cooldown(sym=sym, tf=tf, bars_remaining=int(bars_left), first=True)
@@ -5735,6 +5979,7 @@ async def _poll_coin(
                 signal_mode=sig_mode,
                 trail_k=trail_k,
                 max_hold_bars=max_hold,
+                max_price_since_entry=price,
             )
             # ── КРИТИЧНО: позиция сохраняется ПЕРВОЙ, до любых внешних вызовов.
             # Если ml_dataset или botlog выбросят исключение — позиция уже в state
@@ -5967,6 +6212,14 @@ async def _poll_coin(
                         exit_reason=micro_reason,
                         bars_held=pos.bars_elapsed,
                     )
+                    _register_suspicious_reentry_watch(
+                        state,
+                        pos,
+                        exit_reason=micro_reason,
+                        exit_price=micro_close,
+                        exit_ts=int(micro_data["t"][micro_idx]),
+                        pnl_pct=pnl,
+                    )
                     del state.positions[sym]
                     save_positions(state.positions)
                     bar_ms_cd = 15 * 60 * 1000 if tf == "15m" else 60 * 60 * 1000
@@ -6009,6 +6262,14 @@ async def _poll_coin(
             exit_pnl=pos.pnl_pct(close_now),
             exit_reason=_exit_reason_atr,
             bars_held=pos.bars_elapsed,
+        )
+        _register_suspicious_reentry_watch(
+            state,
+            pos,
+            exit_reason=_exit_reason_atr,
+            exit_price=close_now,
+            exit_ts=int(data["t"][i]),
+            pnl_pct=pnl,
         )
         del state.positions[sym]
         save_positions(state.positions)  # персистируем при выходе
@@ -6111,6 +6372,14 @@ async def _poll_coin(
             exit_reason=_exit_reason_time,
             bars_held=pos.bars_elapsed,
         )
+        _register_suspicious_reentry_watch(
+            state,
+            pos,
+            exit_reason=_exit_reason_time,
+            exit_price=price,
+            exit_ts=int(data["t"][i]),
+            pnl_pct=pnl,
+        )
         del state.positions[sym]
         save_positions(state.positions)  # персистируем при выходе
         # Cooldown: COOLDOWN_BARS * длина бара в мс
@@ -6162,6 +6431,14 @@ async def _poll_coin(
             exit_reason=fast_loss_reason,
             bars_held=pos.bars_elapsed,
         )
+        _register_suspicious_reentry_watch(
+            state,
+            pos,
+            exit_reason=fast_loss_reason,
+            exit_price=close_now,
+            exit_ts=int(data["t"][i]),
+            pnl_pct=pnl,
+        )
         del state.positions[sym]
         save_positions(state.positions)
         bar_ms = 15 * 60 * 1000 if tf == "15m" else 60 * 60 * 1000
@@ -6204,6 +6481,14 @@ async def _poll_coin(
             exit_reason=cleanup_reason,
             bars_held=pos.bars_elapsed,
         )
+        _register_suspicious_reentry_watch(
+            state,
+            pos,
+            exit_reason=cleanup_reason,
+            exit_price=close_now,
+            exit_ts=int(data["t"][i]),
+            pnl_pct=pnl,
+        )
         del state.positions[sym]
         save_positions(state.positions)
         bar_ms = 15 * 60 * 1000 if tf == "15m" else 60 * 60 * 1000
@@ -6245,6 +6530,14 @@ async def _poll_coin(
             exit_pnl=pos.pnl_pct(close_now),
             exit_reason=quality_recheck_reason,
             bars_held=pos.bars_elapsed,
+        )
+        _register_suspicious_reentry_watch(
+            state,
+            pos,
+            exit_reason=quality_recheck_reason,
+            exit_price=close_now,
+            exit_ts=int(data["t"][i]),
+            pnl_pct=pnl,
         )
         del state.positions[sym]
         save_positions(state.positions)
@@ -6324,6 +6617,14 @@ async def _poll_coin(
             exit_pnl=pos.pnl_pct(price),
             exit_reason=reason,
             bars_held=pos.bars_elapsed,
+        )
+        _register_suspicious_reentry_watch(
+            state,
+            pos,
+            exit_reason=reason,
+            exit_price=price,
+            exit_ts=int(data["t"][i]),
+            pnl_pct=pnl,
         )
         del state.positions[sym]
         save_positions(state.positions)  # персистируем при выходе

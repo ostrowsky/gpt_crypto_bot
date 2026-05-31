@@ -292,6 +292,37 @@ def log_peak_risk_shadow(
     })
 
 
+def log_suspicious_reentry_shadow(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    candidate_score: float,
+    exit_score: float,
+    exit_reason: str,
+    exit_pnl_pct: float,
+    mfe_pct: float,
+    bars_since_exit: int,
+    cooldown_bars_left: int,
+) -> None:
+    """Shadow-only telemetry for replay-confirmed suspicious re-entry candidates."""
+    _write({
+        "event": "suspicious_reentry_shadow",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "price": round(float(price), 8),
+        "candidate_score": round(float(candidate_score), 4),
+        "exit_score": round(float(exit_score), 4),
+        "exit_reason": str(exit_reason),
+        "exit_pnl_pct": round(float(exit_pnl_pct), 4),
+        "mfe_pct": round(float(mfe_pct), 4),
+        "bars_since_exit": int(bars_since_exit),
+        "cooldown_bars_left": int(cooldown_bars_left),
+    })
+
+
 def log_cooldown(sym: str, tf: str, bars_remaining: int, first: bool = False) -> None:
     """
     Вход заблокирован кулдауном. Логируется только при first=True
