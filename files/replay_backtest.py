@@ -93,12 +93,22 @@ class ReplayTrade:
     discriminator_exit_start_bar: int = -1
     discriminator_exit_original_reason: str = ""
     discriminator_exit_score: float = 0.0
+    partial_exit_taken: bool = False
+    partial_exit_fraction: float = 0.0
+    partial_exit_price: float = 0.0
+    partial_exit_ts: int = 0
+    partial_exit_reason: str = ""
 
     @property
     def pnl_pct(self) -> float:
         if self.entry_price <= 0 or self.exit_price <= 0:
             return 0.0
-        return (self.exit_price / self.entry_price - 1.0) * 100.0
+        final_pnl = (self.exit_price / self.entry_price - 1.0) * 100.0
+        if self.partial_exit_taken and self.partial_exit_price > 0 and self.partial_exit_fraction > 0:
+            fraction = max(0.0, min(float(self.partial_exit_fraction), 1.0))
+            partial_pnl = (self.partial_exit_price / self.entry_price - 1.0) * 100.0
+            return partial_pnl * fraction + final_pnl * (1.0 - fraction)
+        return final_pnl
 
 
 @dataclass
@@ -1244,6 +1254,30 @@ def _suspicious_exit_reentry_candidate_ok(
     return True
 
 
+def _maybe_mark_partial_profit_take(
+    *,
+    trade: "ReplayTrade",
+    close_now: float,
+    ts_ms: int,
+    current_pnl: float,
+) -> None:
+    if trade.partial_exit_taken:
+        return
+    trigger_pct = float(getattr(config, "PARTIAL_PROFIT_TAKE_TRIGGER_PCT", 3.0))
+    min_mfe_pct = float(getattr(config, "PARTIAL_PROFIT_TAKE_MIN_MFE_PCT", trigger_pct))
+    if current_pnl < trigger_pct or trade.max_favorable_pct < min_mfe_pct:
+        return
+    fraction = float(getattr(config, "PARTIAL_PROFIT_TAKE_FRACTION", 0.50))
+    fraction = max(0.0, min(fraction, 1.0))
+    if fraction <= 0.0:
+        return
+    trade.partial_exit_taken = True
+    trade.partial_exit_fraction = fraction
+    trade.partial_exit_price = close_now
+    trade.partial_exit_ts = ts_ms
+    trade.partial_exit_reason = f"partial_profit_take_{fraction:.2f}_at_{current_pnl:.2f}%"
+
+
 def _min_weak_exit_bars(mode: Optional[str]) -> int:
     mode_name = str(mode or "")
     if mode_name == "impulse_speed":
@@ -2330,6 +2364,7 @@ def _update_trade_progress(
     protected_trailing_exit: bool = False,
     protected_weak_only: bool = False,
     exit_discriminator_shadow_policy: bool = False,
+    partial_profit_take: bool = False,
 ) -> Optional[str]:
     close_now = float(data["c"][idx])
     _update_trade_extrema(trade, data, idx)
@@ -2348,6 +2383,13 @@ def _update_trade_progress(
     if trade.bars_held <= 0:
         return None
     current_pnl = (close_now / trade.entry_price - 1.0) * 100.0 if trade.entry_price > 0 else 0.0
+    if partial_profit_take:
+        _maybe_mark_partial_profit_take(
+            trade=trade,
+            close_now=close_now,
+            ts_ms=ts_ms,
+            current_pnl=current_pnl,
+        )
     entry_rsi = float(feat["rsi"][trade.entry_i]) if np.isfinite(feat["rsi"][trade.entry_i]) else 50.0
     effective_trail_k = trade.trail_k
     continuation_profit_lock_active = _continuation_profit_lock_active(
@@ -2624,6 +2666,7 @@ async def simulate_portfolio(
                 protected_trailing_exit=variant == "protected_trailing_exit",
                 protected_weak_only=variant == "protected_weak_only",
                 exit_discriminator_shadow_policy=variant == "exit_discriminator_shadow_policy",
+                partial_profit_take=variant == "partial_profit_take",
             )
             if not exit_reason:
                 continue
@@ -2667,6 +2710,7 @@ async def simulate_portfolio(
             "protected_weak_only",
             "exit_discriminator_shadow_policy",
             "suspicious_exit_reentry",
+            "partial_profit_take",
         }
         use_cluster_cap = variant == "score_replace_cluster"
         ts_candidates.sort(
@@ -3036,6 +3080,7 @@ async def run_replay(
         "protected_weak_only",
         "exit_discriminator_shadow_policy",
         "suspicious_exit_reentry",
+        "partial_profit_take",
     } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
@@ -3219,6 +3264,7 @@ def parse_args() -> argparse.Namespace:
             "protected_weak_only",
             "exit_discriminator_shadow_policy",
             "suspicious_exit_reentry",
+            "partial_profit_take",
         ],
         default="score_replace",
     )

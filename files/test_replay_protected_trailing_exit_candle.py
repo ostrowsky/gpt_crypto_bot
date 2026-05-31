@@ -9,6 +9,7 @@ from replay_backtest import (
     ReplayCandidate,
     ReplayTrade,
     _exit_discriminator_shadow_score,
+    _maybe_mark_partial_profit_take,
     _suspicious_exit_reentry_candidate_ok,
     _suspicious_exit_reentry_score,
     _update_trade_progress,
@@ -268,6 +269,49 @@ class ProtectedTrailingExitCandleReplayTest(unittest.TestCase):
             adx=22.0,
         )
         self.assertFalse(_suspicious_exit_reentry_candidate_ok(weak_candidate, base_score_floor=34.0))
+
+    def test_partial_profit_take_blends_partial_and_final_pnl(self) -> None:
+        old_values = {
+            name: getattr(config, name, None)
+            for name in (
+                "PARTIAL_PROFIT_TAKE_TRIGGER_PCT",
+                "PARTIAL_PROFIT_TAKE_MIN_MFE_PCT",
+                "PARTIAL_PROFIT_TAKE_FRACTION",
+            )
+        }
+        try:
+            config.PARTIAL_PROFIT_TAKE_TRIGGER_PCT = 3.0
+            config.PARTIAL_PROFIT_TAKE_MIN_MFE_PCT = 3.0
+            config.PARTIAL_PROFIT_TAKE_FRACTION = 0.5
+            trade = ReplayTrade(
+                sym="AAAUSDT",
+                tf="15m",
+                mode="trend",
+                entry_ts=1,
+                entry_price=100.0,
+                entry_i=0,
+                trail_k=2.0,
+                max_hold_bars=20,
+                trail_stop=0.0,
+                max_favorable_pct=4.0,
+            )
+
+            _maybe_mark_partial_profit_take(
+                trade=trade,
+                close_now=104.0,
+                ts_ms=2,
+                current_pnl=4.0,
+            )
+            trade.exit_price = 98.0
+
+            self.assertTrue(trade.partial_exit_taken)
+            self.assertAlmostEqual(trade.pnl_pct, 1.0)
+        finally:
+            for name, value in old_values.items():
+                if value is None and hasattr(config, name):
+                    delattr(config, name)
+                elif value is not None:
+                    setattr(config, name, value)
 
 
 if __name__ == "__main__":
