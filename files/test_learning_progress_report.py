@@ -29,7 +29,7 @@ class LearningProgressReportTest(unittest.TestCase):
         ]
 
         verdict = lpr._verdict(latest, previous, older, {"training": {"last_finished_at": "2026-05-31T06:00:00Z"}})
-        alerts = lpr._alerts(latest, {}, {}, [])
+        alerts = lpr._alerts(latest, {}, {}, [], {})
 
         self.assertEqual(verdict["label"], "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ")
         self.assertEqual(alerts[0]["severity"], "warn")
@@ -77,9 +77,34 @@ class LearningProgressReportTest(unittest.TestCase):
             report = lpr.build_report(reports, status, feedback, ["AR/USDT"], root / "out.json", root / "out.txt")
             text = lpr.render_text(report)
             self.assertIn("Бот — 2026-05-19", text)
+            self.assertIn("shadow re-entry", text)
             self.assertTrue(any(a["severity"] == "serious" for a in report["alerts"]))
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
+
+    def test_shadow_reentry_summary_is_rendered_and_actionable(self) -> None:
+        scorecard = {
+            "status": "complete",
+            "summary": {
+                "alerts_total": 12,
+                "labeled_ret5": 10,
+                "pending": 2,
+                "avg_ret5": 0.42,
+                "ret5_positive_rate": 0.6,
+            },
+        }
+        summary = lpr._shadow_reentry_summary(scorecard)
+        self.assertEqual(summary["status"], "complete")
+        self.assertIn("avg_ret5=+0.42%", summary["detail"])
+
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-05-31", early_pct=30.0, coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-01T00:00:00Z"}},
+            {},
+            [],
+            scorecard,
+        )
+        self.assertTrue(any("Shadow re-entry выглядит promising" in x for x in actions))
 
     def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
         components = lpr._learning_components(

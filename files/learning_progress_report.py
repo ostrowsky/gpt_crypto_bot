@@ -19,6 +19,7 @@ STATUS_FILE = WORKSPACE_ROOT / ".runtime" / "rl_worker_status.json"
 FEEDBACK_FILE = WORKSPACE_ROOT / ".runtime" / "signal_quality_feedback.json"
 DEFAULT_OUTPUT_JSON = REPORT_DIR / "learning_progress_latest.json"
 DEFAULT_OUTPUT_TXT = REPORT_DIR / "learning_progress_latest.txt"
+SHADOW_REENTRY_SCORECARD_LATEST = REPORT_DIR / "suspicious_reentry_scorecard_latest.json"
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ def build_report(
     older = days[-15:-8]
     status = _load_json(status_file)
     feedback = _load_json(feedback_file)
+    shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
     focus = sorted({str(s).upper().replace("/", "").replace("USDT", "") + "USDT" for s in focus_symbols if str(s).strip()})
     focus_findings = _focus_findings(reports_dir, latest.day, focus)
     payload = {
@@ -71,10 +73,11 @@ def build_report(
         "latest": latest.__dict__,
         "rolling": _rolling_summary(days),
         "learning_components": _learning_components(status, feedback, latest.day),
+        "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
-        "alerts": _alerts(latest, status, feedback, focus_findings),
+        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry),
         "focus_symbols": focus_findings,
-        "next_actions": _next_actions(latest, status, feedback, focus_findings),
+        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry),
     }
     text = render_text(payload)
     output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +95,7 @@ def render_text(report: dict[str, Any]) -> str:
     decisions = report.get("previous_decisions") or []
     actions = report.get("next_actions") or []
     components = report.get("learning_components") or {}
+    shadow_reentry = report.get("shadow_reentry") or {}
     day = report.get("latest_day") or "unknown"
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
@@ -126,6 +130,11 @@ def render_text(report: dict[str, Any]) -> str:
     lines.extend(["", "🧠 Контур обучения:"])
     for name, comp in components.items():
         lines.append(f"  • {comp['label']}: {comp['status']} — {comp['detail']}")
+    lines.append(
+        "  • shadow re-entry: "
+        f"{shadow_reentry.get('status', 'unknown')} — "
+        f"{shadow_reentry.get('detail', 'нет отчёта')}"
+    )
     lines.extend(["", "🎯 ЧТО ДАЛЬШЕ"])
     for action in actions[:4]:
         lines.append(f"{action}")
@@ -277,7 +286,13 @@ def _previous_decisions(feedback: dict[str, Any], status: dict[str, Any], latest
     return out
 
 
-def _alerts(latest: DayMetrics, status: dict[str, Any], feedback: dict[str, Any], focus_findings: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _alerts(
+    latest: DayMetrics,
+    status: dict[str, Any],
+    feedback: dict[str, Any],
+    focus_findings: list[dict[str, Any]],
+    shadow_reentry: dict[str, Any],
+) -> list[dict[str, str]]:
     out = []
     if latest.coverage_status not in {"ok", "complete"}:
         if _coverage_is_safe_partial(latest):
@@ -303,10 +318,21 @@ def _alerts(latest: DayMetrics, status: dict[str, Any], feedback: dict[str, Any]
     blocked_focus = [x["symbol"] for x in focus_findings if x.get("status") in {"blocked_rule", "missed", "not_bought"}]
     if blocked_focus:
         out.append({"severity": "warn", "text": "focus top movers blocked/missed: " + ", ".join(blocked_focus[:8])})
+    reentry_summary = shadow_reentry.get("summary") or {}
+    reentry_labeled = int(reentry_summary.get("labeled_ret5") or 0)
+    reentry_avg = _maybe_float(reentry_summary.get("avg_ret5"))
+    if reentry_labeled >= 5 and reentry_avg is not None and reentry_avg < 0:
+        out.append({"severity": "warn", "text": f"shadow re-entry noisy: labeled={reentry_labeled}, avg_ret5={reentry_avg:+.2f}%"})
     return out
 
 
-def _next_actions(latest: DayMetrics, status: dict[str, Any], feedback: dict[str, Any], focus_findings: list[dict[str, Any]]) -> list[str]:
+def _next_actions(
+    latest: DayMetrics,
+    status: dict[str, Any],
+    feedback: dict[str, Any],
+    focus_findings: list[dict[str, Any]],
+    shadow_reentry: dict[str, Any],
+) -> list[str]:
     actions = []
     training = status.get("training") or {}
     if str(training.get("last_finished_at") or "")[:10] < latest.day:
@@ -322,9 +348,40 @@ def _next_actions(latest: DayMetrics, status: dict[str, Any], feedback: dict[str
         and (latest.median_exit_efficiency < 0.25 or latest.median_giveback_pct >= 3.0)
     ):
         actions.append("▶️ Запустить exit monetization replay по вчерашним watchlist top movers: high-MFE/giveback, re-entry и partial-exit гипотезы без production SELL changes.")
+    reentry_summary = shadow_reentry.get("summary") or {}
+    reentry_labeled = int(reentry_summary.get("labeled_ret5") or 0)
+    reentry_avg = _maybe_float(reentry_summary.get("avg_ret5"))
+    reentry_positive = _maybe_float(reentry_summary.get("ret5_positive_rate"))
+    if reentry_labeled < 10:
+        actions.append("⏳ Shadow re-entry: продолжать сбор labels; production re-entry не включать.")
+    elif reentry_avg is not None and reentry_positive is not None and reentry_avg > 0.25 and reentry_positive >= 0.55:
+        actions.append("▶️ Shadow re-entry выглядит promising: подготовить replay-gated production spec, но не включать напрямую.")
+    elif reentry_avg is not None and reentry_avg < 0:
+        actions.append("⏸️ Shadow re-entry шумит: разобрать false re-entry before any production policy.")
     if not actions:
         actions.append("⏸️ Пока одобрять нечего — ждём следующего final report и replay evidence.")
     return actions
+
+
+def _shadow_reentry_summary(scorecard: dict[str, Any]) -> dict[str, str]:
+    if not scorecard:
+        return {"status": "missing", "detail": "scorecard ещё не создан"}
+    summary = scorecard.get("summary") or {}
+    alerts = int(summary.get("alerts_total") or 0)
+    labeled = int(summary.get("labeled_ret5") or 0)
+    pending = int(summary.get("pending") or 0)
+    avg_ret5 = _maybe_float(summary.get("avg_ret5"))
+    pos_rate = _maybe_float(summary.get("ret5_positive_rate"))
+    status = str(scorecard.get("status") or "unknown")
+    if alerts == 0:
+        detail = "alerts=0; данных для оценки re-entry пока нет"
+    elif labeled == 0:
+        detail = f"alerts={alerts}, pending={pending}; ждём mature T+5/T+10 labels"
+    else:
+        pos_piece = "н/д" if pos_rate is None else f"{pos_rate * 100:.1f}%"
+        ret_piece = "н/д" if avg_ret5 is None else f"{avg_ret5:+.2f}%"
+        detail = f"alerts={alerts}, labeled={labeled}, avg_ret5={ret_piece}, positive={pos_piece}"
+    return {"status": status, "detail": detail}
 
 
 def _coverage_is_safe_partial(day: DayMetrics) -> bool:
