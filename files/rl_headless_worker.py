@@ -23,6 +23,7 @@ import ml_candidate_ranker
 import ml_dataset
 import report_candidate_ranker_shadow
 import report_critic_dataset
+import report_suspicious_reentry_scorecard
 import report_v2_daily_scorecard
 import learning_progress_report
 import signal_quality_feedback
@@ -1363,6 +1364,15 @@ async def _signal_quality_loop(state: WorkerState) -> None:
                 )
                 if bool(getattr(config, "V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED", True)):
                     await _send_telegram_text(report_v2_daily_scorecard.render_text(v2_scorecard))
+            if bool(getattr(config, "SUSPICIOUS_REENTRY_SCORECARD_ENABLED", True)):
+                reentry_scorecard = await asyncio.to_thread(
+                    report_suspicious_reentry_scorecard.build_scorecard,
+                    target_day,
+                    reports_dir=REPORT_DIR,
+                    timezone_name=tz_name,
+                )
+                if bool(getattr(config, "SUSPICIOUS_REENTRY_SCORECARD_TELEGRAM_ENABLED", True)):
+                    await _send_telegram_text(report_suspicious_reentry_scorecard.render_text(reentry_scorecard))
             await _write_status_now(state)
         except asyncio.CancelledError:
             raise
