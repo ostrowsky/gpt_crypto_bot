@@ -84,6 +84,7 @@ class LearningProgressReportTest(unittest.TestCase):
             self.assertIn("shadow_tail_selector", report)
             self.assertIn("shadow_entry_admission", report)
             self.assertIn("blocker_reward", report)
+            self.assertIn("portfolio_replacement", report)
             self.assertTrue(any(a["severity"] == "serious" for a in report["alerts"]))
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
@@ -228,6 +229,44 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertTrue(any("Blocker reward нашёл вредный blocker" in x for x in actions))
 
+    def test_portfolio_replacement_summary_and_actions(self) -> None:
+        class FakeReplacement:
+            @staticmethod
+            def build_report(**_kwargs):
+                return {
+                    "decision": "advance_replacement_policy_to_counterfactual_replay",
+                    "summary": {
+                        "replacement_count": 12,
+                        "closed_incoming_count": 10,
+                        "avg_replacement_delta_pct": 0.42,
+                        "median_replacement_delta_pct": 0.0,
+                        "positive_delta_rate_pct": 60.0,
+                    },
+                    "files": {"json": "x.json"},
+                }
+
+        original = lpr.report_portfolio_replacement_shadow_reward
+        try:
+            lpr.report_portfolio_replacement_shadow_reward = FakeReplacement
+            summary = lpr._build_portfolio_replacement_summary(Path("."))
+        finally:
+            lpr.report_portfolio_replacement_shadow_reward = original
+
+        self.assertEqual(summary["status"], "passed_shadow_gate")
+        self.assertIn("avg_delta=0.42%", summary["detail"])
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-05-31", coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-01T00:00:00Z"}},
+            {},
+            [],
+            {"summary": {"alerts_total": 10, "labeled_ret5": 10, "avg_ret5": 0.0}},
+            {"status": "failed_gate"},
+            {"status": "no_positive_reward"},
+            {"status": "monitor"},
+            summary,
+        )
+        self.assertTrue(any("Portfolio replacement shadow reward положительный" in x for x in actions))
+
     def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
         components = lpr._learning_components(
             {
@@ -261,6 +300,7 @@ class LearningProgressReportTest(unittest.TestCase):
             "shadow_tail_selector": {"status": "missing", "detail": "нет отчёта"},
             "shadow_entry_admission": {"status": "missing", "detail": "нет отчёта"},
             "blocker_reward": {"status": "missing", "detail": "нет отчёта"},
+            "portfolio_replacement": {"status": "missing", "detail": "нет отчёта"},
             "next_actions": [],
         }
         self.assertIn("метрика дня не применима", lpr.render_text(report))

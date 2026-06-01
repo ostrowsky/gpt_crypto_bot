@@ -12,6 +12,7 @@ from typing import Any, Iterable
 import report_signal_quality_coverage
 import report_entry_admission_shadow_reward
 import report_blocked_winner_causal_reward
+import report_portfolio_replacement_shadow_reward
 import replay_observable_tail_selector
 
 
@@ -69,6 +70,7 @@ def build_report(
     shadow_tail_selector = _build_shadow_tail_selector_summary(reports_dir)
     shadow_entry_admission = _build_shadow_entry_admission_summary(reports_dir)
     blocker_reward = _build_blocker_reward_summary(reports_dir)
+    portfolio_replacement = _build_portfolio_replacement_summary(reports_dir)
     focus = sorted({str(s).upper().replace("/", "").replace("USDT", "") + "USDT" for s in focus_symbols if str(s).strip()})
     focus_findings = _focus_findings(reports_dir, latest.day, focus)
     payload = {
@@ -83,10 +85,11 @@ def build_report(
         "shadow_tail_selector": shadow_tail_selector,
         "shadow_entry_admission": shadow_entry_admission,
         "blocker_reward": blocker_reward,
+        "portfolio_replacement": portfolio_replacement,
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
-        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward),
+        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward, portfolio_replacement),
         "focus_symbols": focus_findings,
-        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward),
+        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward, portfolio_replacement),
     }
     text = render_text(payload)
     output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +111,7 @@ def render_text(report: dict[str, Any]) -> str:
     shadow_tail_selector = report.get("shadow_tail_selector") or {}
     shadow_entry_admission = report.get("shadow_entry_admission") or {}
     blocker_reward = report.get("blocker_reward") or {}
+    portfolio_replacement = report.get("portfolio_replacement") or {}
     day = report.get("latest_day") or "unknown"
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
@@ -168,8 +172,13 @@ def render_text(report: dict[str, Any]) -> str:
         f"{blocker_reward.get('status', 'unknown')} — "
         f"{blocker_reward.get('detail', 'нет отчёта')}"
     )
+    lines.append(
+        "  • portfolio replacement: "
+        f"{portfolio_replacement.get('status', 'unknown')} — "
+        f"{portfolio_replacement.get('detail', 'нет отчёта')}"
+    )
     lines.extend(["", "🎯 ЧТО ДАЛЬШЕ"])
-    for action in actions[:5]:
+    for action in actions[:6]:
         lines.append(f"{action}")
     return "\n".join(lines).strip()
 
@@ -340,6 +349,7 @@ def _alerts(
     shadow_tail_selector: dict[str, Any] | None = None,
     shadow_entry_admission: dict[str, Any] | None = None,
     blocker_reward: dict[str, Any] | None = None,
+    portfolio_replacement: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     out = []
     if latest.coverage_status not in {"ok", "complete"}:
@@ -380,6 +390,9 @@ def _alerts(
     blocker = blocker_reward or {}
     if blocker.get("status") == "error":
         out.append({"severity": "warn", "text": f"blocker reward report failed: {blocker.get('detail', 'unknown error')}"})
+    replacement = portfolio_replacement or {}
+    if replacement.get("status") == "error":
+        out.append({"severity": "warn", "text": f"portfolio replacement report failed: {replacement.get('detail', 'unknown error')}"})
     return out
 
 
@@ -392,6 +405,7 @@ def _next_actions(
     shadow_tail_selector: dict[str, Any] | None = None,
     shadow_entry_admission: dict[str, Any] | None = None,
     blocker_reward: dict[str, Any] | None = None,
+    portfolio_replacement: dict[str, Any] | None = None,
 ) -> list[str]:
     actions = []
     training = status.get("training") or {}
@@ -439,6 +453,15 @@ def _next_actions(
         actions.append("⏸️ Blocker reward: явного вредного blocker-а нет; не расслаблять blockers без targeted replay.")
     elif blocker.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить blocker reward report: blocker-learning контур неполный.")
+    replacement = portfolio_replacement or {}
+    if replacement.get("status") == "passed_shadow_gate":
+        actions.append("▶️ Portfolio replacement shadow reward положительный: готовить counterfactual replay, live rotation не менять.")
+    elif replacement.get("status") == "hurting":
+        actions.append("⚠️ Portfolio replacement выглядит вредным: разобрать rotation outcomes перед любыми новыми заменами.")
+    elif replacement.get("status") == "collecting":
+        actions.append("⏳ Portfolio replacement: мало закрытых replacement outcomes; продолжить сбор без изменения live rotation.")
+    elif replacement.get("status") in {"missing", "error"}:
+        actions.append("▶️ Починить portfolio replacement report: rotation-learning контур неполный.")
     if not actions:
         actions.append("⏸️ Пока одобрять нечего — ждём следующего final report и replay evidence.")
     return actions
@@ -547,6 +570,46 @@ def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
         "decision": decision,
         "top_reason": top.get("reason_code"),
         "top": top,
+        "files": report.get("files") or {},
+    }
+
+
+def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
+    workspace_dir = reports_dir.parent.parent
+    try:
+        report = report_portfolio_replacement_shadow_reward.build_report(
+            files_dir=workspace_dir / "files",
+            reports_dir=reports_dir,
+            output_json=reports_dir / "portfolio_replacement_shadow_reward_latest.json",
+            output_txt=reports_dir / "portfolio_replacement_shadow_reward_latest.txt",
+            save=True,
+        )
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+    summary = report.get("summary") or {}
+    decision = str(report.get("decision") or "")
+    replacements = int(summary.get("replacement_count") or 0)
+    closed = int(summary.get("closed_incoming_count") or 0)
+    if replacements <= 0:
+        return {"status": "missing", "detail": "нет replacement events", "decision": decision}
+    if decision.startswith("advance_"):
+        status = "passed_shadow_gate"
+    elif "hurting" in decision:
+        status = "hurting"
+    elif "collect_more" in decision:
+        status = "collecting"
+    else:
+        status = "monitor"
+    detail = (
+        f"closed={closed}/{replacements}, avg_delta={_fmt(summary.get('avg_replacement_delta_pct'), 2)}%, "
+        f"med_delta={_fmt(summary.get('median_replacement_delta_pct'), 2)}%, "
+        f"positive={_fmt(summary.get('positive_delta_rate_pct'), 1)}%"
+    )
+    return {
+        "status": status,
+        "detail": detail,
+        "decision": decision,
+        "summary": summary,
         "files": report.get("files") or {},
     }
 
