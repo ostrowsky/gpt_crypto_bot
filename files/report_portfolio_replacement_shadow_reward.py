@@ -46,6 +46,7 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
             "positive_delta_rate_pct": round(sum(1 for d in deltas if d > 0) / len(deltas) * 100, 2) if deltas else 0.0,
             "incoming_watchlist_top_count": sum(1 for r in replacements if r.get("incoming_watchlist_top")),
         },
+        "segments": _segment_table(closed),
         "top_positive": sorted(closed, key=lambda r: r.get("replacement_delta_pct") or 0.0, reverse=True)[:12],
         "top_negative": sorted(closed, key=lambda r: r.get("replacement_delta_pct") or 0.0)[:12],
         "decision": "",
@@ -62,6 +63,7 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
 
 def render_text(report: dict[str, Any]) -> str:
     c = report.get("coverage") or {}; s = report.get("summary") or {}
+    segments = report.get("segments") or []
     lines = [
         "Portfolio replacement shadow reward (research-only)",
         f"coverage: events={c.get('events_loaded')} replacements={c.get('replacement_events')} closed={c.get('closed_incoming')}",
@@ -70,6 +72,14 @@ def render_text(report: dict[str, Any]) -> str:
         f"avg_delta={s.get('avg_replacement_delta_pct')}% median_delta={s.get('median_replacement_delta_pct')}% positive={s.get('positive_delta_rate_pct')}%",
         f"avg_replaced_exit={s.get('avg_replaced_exit_pnl_pct')}% avg_incoming_exit={s.get('avg_incoming_exit_pnl_pct')}% watchlist_top_incoming={s.get('incoming_watchlist_top_count')}",
     ]
+    if segments:
+        lines.extend(["", "segments:"])
+        for row in segments[:8]:
+            lines.append(
+                f"- {row.get('segment')}: n={row.get('closed_count')} "
+                f"avg_delta={row.get('avg_delta_pct')}% med={row.get('median_delta_pct')}% "
+                f"positive={row.get('positive_delta_rate_pct')}%"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -162,6 +172,36 @@ def _decision(summary: dict[str, Any], cfg: ReplacementConfig) -> str:
     if avg >= cfg.min_avg_delta_pct and med >= 0: return "advance_replacement_policy_to_counterfactual_replay"
     if avg < 0: return "replacement_policy_hurting_in_shadow_monitor"
     return "replacement_policy_neutral_keep_collecting"
+
+
+def _segment_table(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs = [
+        ("all", lambda r: True),
+        ("incoming_watchlist_top", lambda r: bool(r.get("incoming_watchlist_top"))),
+        ("incoming_not_watchlist_top", lambda r: not bool(r.get("incoming_watchlist_top"))),
+        ("replaced_losing_at_rotation", lambda r: (_num(r.get("replaced_exit_pnl_pct"), 0.0) or 0.0) < 0.0),
+        ("replaced_non_losing_at_rotation", lambda r: (_num(r.get("replaced_exit_pnl_pct"), 0.0) or 0.0) >= 0.0),
+        ("leader_delta_lt_10", lambda r: (_num(r.get("leader_delta"), 0.0) or 0.0) < 10.0),
+        ("leader_delta_10_to_20", lambda r: 10.0 <= (_num(r.get("leader_delta"), 0.0) or 0.0) < 20.0),
+        ("leader_delta_ge_20", lambda r: (_num(r.get("leader_delta"), 0.0) or 0.0) >= 20.0),
+        ("leader_delta_ge_15", lambda r: (_num(r.get("leader_delta"), 0.0) or 0.0) >= 15.0),
+    ]
+    out = []
+    for name, pred in specs:
+        selected = [r for r in rows if pred(r) and r.get("replacement_delta_pct") is not None]
+        if not selected:
+            continue
+        deltas = [r["replacement_delta_pct"] for r in selected]
+        out.append({
+            "segment": name,
+            "closed_count": len(selected),
+            "avg_delta_pct": _avg(deltas),
+            "median_delta_pct": _median(deltas),
+            "positive_delta_rate_pct": round(sum(1 for d in deltas if d > 0) / len(deltas) * 100, 2),
+            "avg_replaced_exit_pnl_pct": _avg([r.get("replaced_exit_pnl_pct") for r in selected]),
+            "avg_incoming_exit_pnl_pct": _avg([r.get("incoming_exit_pnl_pct") for r in selected]),
+        })
+    return out
 
 
 def _parse_ts(v: Any) -> datetime | None:

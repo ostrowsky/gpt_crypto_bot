@@ -57,6 +57,8 @@ class PortfolioReplacementShadowRewardTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["closed_incoming"], 1)
         self.assertEqual(report["summary"]["avg_replacement_delta_pct"], 1.6)
         self.assertEqual(report["summary"]["incoming_watchlist_top_count"], 1)
+        self.assertEqual(report["segments"][0]["segment"], "all")
+        self.assertEqual(report["segments"][0]["avg_delta_pct"], 1.6)
         self.assertEqual(report["decision"], "advance_replacement_policy_to_counterfactual_replay")
 
     def test_collects_more_when_closed_cases_are_insufficient(self) -> None:
@@ -90,10 +92,41 @@ class PortfolioReplacementShadowRewardTests(unittest.TestCase):
                     "avg_incoming_exit_pnl_pct": 0.0,
                     "incoming_watchlist_top_count": 1,
                 },
+                "segments": [
+                    {
+                        "segment": "all",
+                        "closed_count": 1,
+                        "avg_delta_pct": 0.1,
+                        "median_delta_pct": 0.0,
+                        "positive_delta_rate_pct": 100.0,
+                    }
+                ],
             }
         )
         self.assertIn("Portfolio replacement shadow reward", text)
         self.assertIn("avg_delta=0.1%", text)
+        self.assertIn("segments:", text)
+
+    def test_segment_table_surfaces_harmful_non_losing_replacements(self) -> None:
+        rows = [
+            {
+                "replacement_delta_pct": -2.0,
+                "replaced_exit_pnl_pct": 0.5,
+                "incoming_exit_pnl_pct": -1.5,
+                "leader_delta": 8.0,
+                "incoming_watchlist_top": False,
+            },
+            {
+                "replacement_delta_pct": 1.0,
+                "replaced_exit_pnl_pct": -0.5,
+                "incoming_exit_pnl_pct": 0.5,
+                "leader_delta": 22.0,
+                "incoming_watchlist_top": True,
+            },
+        ]
+        segments = {row["segment"]: row for row in rpr._segment_table(rows)}
+        self.assertEqual(segments["replaced_non_losing_at_rotation"]["avg_delta_pct"], -2.0)
+        self.assertEqual(segments["incoming_watchlist_top"]["avg_delta_pct"], 1.0)
 
 
 if __name__ == "__main__":

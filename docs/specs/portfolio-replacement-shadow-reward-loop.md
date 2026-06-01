@@ -32,6 +32,10 @@ Create a daily/rolling shadow report for executed portfolio replacements:
 - average delta: incoming PnL - replaced exit PnL;
 - win-rate of replacement delta;
 - top/watchlist label coverage when available.
+- segment table for causal debugging:
+  - incoming candidate was watchlist top vs not;
+  - replaced position was losing vs non-losing;
+  - leader-score delta buckets.
 
 ## Non-goals
 
@@ -42,3 +46,11 @@ Create a daily/rolling shadow report for executed portfolio replacements:
 ## Acceptance Gate
 
 A replacement policy may advance to deeper counterfactual replay only if the executed replacement shadow report shows repeated positive replacement delta with enough closed cases and no obvious false-candidate concentration.
+
+## Interpretation Guardrail
+
+This report is not a full hold-vs-replace counterfactual unless post-replacement candle paths are available. When candle paths are not available, the report must mark itself as an event-log shadow measurement and focus on:
+
+- whether executed replacements were followed by better or worse incoming outcomes;
+- which replacement segments look harmful;
+- whether any segment is promising enough to justify candle-level counterfactual replay.
