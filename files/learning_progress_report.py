@@ -10,6 +10,7 @@ from statistics import mean, median
 from typing import Any, Iterable
 
 import report_signal_quality_coverage
+import replay_observable_tail_selector
 
 
 ROOT = Path(__file__).resolve().parent
@@ -63,6 +64,7 @@ def build_report(
     status = _load_json(status_file)
     feedback = _load_json(feedback_file)
     shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
+    shadow_tail_selector = _build_shadow_tail_selector_summary(reports_dir)
     focus = sorted({str(s).upper().replace("/", "").replace("USDT", "") + "USDT" for s in focus_symbols if str(s).strip()})
     focus_findings = _focus_findings(reports_dir, latest.day, focus)
     payload = {
@@ -74,10 +76,11 @@ def build_report(
         "rolling": _rolling_summary(days),
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
+        "shadow_tail_selector": shadow_tail_selector,
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
-        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry),
+        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector),
         "focus_symbols": focus_findings,
-        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry),
+        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector),
     }
     text = render_text(payload)
     output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -96,6 +99,7 @@ def render_text(report: dict[str, Any]) -> str:
     actions = report.get("next_actions") or []
     components = report.get("learning_components") or {}
     shadow_reentry = report.get("shadow_reentry") or {}
+    shadow_tail_selector = report.get("shadow_tail_selector") or {}
     day = report.get("latest_day") or "unknown"
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
@@ -140,6 +144,11 @@ def render_text(report: dict[str, Any]) -> str:
         "  • shadow re-entry: "
         f"{shadow_reentry.get('status', 'unknown')} — "
         f"{shadow_reentry.get('detail', 'нет отчёта')}"
+    )
+    lines.append(
+        "  • shadow tail selector: "
+        f"{shadow_tail_selector.get('status', 'unknown')} — "
+        f"{shadow_tail_selector.get('detail', 'нет отчёта')}"
     )
     lines.extend(["", "🎯 ЧТО ДАЛЬШЕ"])
     for action in actions[:4]:
@@ -310,6 +319,7 @@ def _alerts(
     feedback: dict[str, Any],
     focus_findings: list[dict[str, Any]],
     shadow_reentry: dict[str, Any],
+    shadow_tail_selector: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     out = []
     if latest.coverage_status not in {"ok", "complete"}:
@@ -341,6 +351,9 @@ def _alerts(
     reentry_avg = _maybe_float(reentry_summary.get("avg_ret5"))
     if reentry_labeled >= 5 and reentry_avg is not None and reentry_avg < 0:
         out.append({"severity": "warn", "text": f"shadow re-entry noisy: labeled={reentry_labeled}, avg_ret5={reentry_avg:+.2f}%"})
+    tail = shadow_tail_selector or {}
+    if tail.get("status") == "error":
+        out.append({"severity": "warn", "text": f"shadow tail selector report failed: {tail.get('detail', 'unknown error')}"})
     return out
 
 
@@ -350,6 +363,7 @@ def _next_actions(
     feedback: dict[str, Any],
     focus_findings: list[dict[str, Any]],
     shadow_reentry: dict[str, Any],
+    shadow_tail_selector: dict[str, Any] | None = None,
 ) -> list[str]:
     actions = []
     training = status.get("training") or {}
@@ -376,9 +390,55 @@ def _next_actions(
         actions.append("▶️ Shadow re-entry выглядит promising: подготовить replay-gated production spec, но не включать напрямую.")
     elif reentry_avg is not None and reentry_avg < 0:
         actions.append("⏸️ Shadow re-entry шумит: разобрать false re-entry before any production policy.")
+    tail = shadow_tail_selector or {}
+    if tail.get("status") == "passed_shadow_gate":
+        actions.append("⏳ Shadow tail selector прошёл replay-gate: собирать daily labels, production SELL не менять.")
+    elif tail.get("status") == "failed_gate":
+        actions.append("▶️ Shadow tail selector пока не проходит gate: продолжить observable feature search для exit monetization.")
+    elif tail.get("status") in {"missing", "error"}:
+        actions.append("▶️ Починить shadow tail selector report: exit-learning контур неполный.")
     if not actions:
         actions.append("⏸️ Пока одобрять нечего — ждём следующего final report и replay evidence.")
     return actions
+
+
+def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
+    try:
+        report = replay_observable_tail_selector.build_replay(
+            reports_dir=reports_dir,
+            cache_dir=reports_dir.parent / "signal_quality_cache",
+            output=reports_dir / "observable_tail_selector_replay_latest.json",
+            text_output=reports_dir / "observable_tail_selector_replay_latest.txt",
+            save=True,
+        )
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+    ranked = report.get("ranked_selectors") or []
+    if not ranked:
+        return {"status": "missing", "detail": "нет selector candidates"}
+    top = ranked[0]
+    test = top.get("test") or {}
+    decision = str(report.get("decision") or "")
+    passed = decision.startswith("advance_")
+    avg = _maybe_float(test.get("avg_delta_pct"))
+    med = _maybe_float(test.get("median_delta_pct"))
+    worse = _maybe_float(test.get("worse_rate_pct"))
+    allow = _maybe_float(test.get("allowed_rate_pct"))
+    fp_allow = _maybe_float(test.get("false_positive_allowed_rate_pct"))
+    def pct(value: float | None, digits: int = 2) -> str:
+        return "н/д" if value is None else f"{value:.{digits}f}"
+    detail = (
+        f"top={top.get('name')}, test_avg={pct(avg)}%, med={pct(med)}%, "
+        f"worse={pct(worse, 1)}%, allow={pct(allow, 1)}%, fp_allow={pct(fp_allow, 1)}%"
+    )
+    return {
+        "status": "passed_shadow_gate" if passed else "failed_gate",
+        "detail": detail,
+        "decision": decision,
+        "top_selector": top.get("name"),
+        "test": test,
+        "files": report.get("files") or {},
+    }
 
 
 def _shadow_reentry_summary(scorecard: dict[str, Any]) -> dict[str, str]:

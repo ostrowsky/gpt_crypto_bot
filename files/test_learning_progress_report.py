@@ -78,6 +78,8 @@ class LearningProgressReportTest(unittest.TestCase):
             text = lpr.render_text(report)
             self.assertIn("Бот — 2026-05-19", text)
             self.assertIn("shadow re-entry", text)
+            self.assertIn("shadow tail selector", text)
+            self.assertIn("shadow_tail_selector", report)
             self.assertTrue(any(a["severity"] == "serious" for a in report["alerts"]))
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
@@ -105,6 +107,46 @@ class LearningProgressReportTest(unittest.TestCase):
             scorecard,
         )
         self.assertTrue(any("Shadow re-entry выглядит promising" in x for x in actions))
+
+    def test_shadow_tail_selector_summary_and_actions(self) -> None:
+        class FakeReplay:
+            @staticmethod
+            def build_replay(**_kwargs):
+                return {
+                    "decision": "advance_selector_to_shadow_observable_tail_selector",
+                    "ranked_selectors": [
+                        {
+                            "name": "selector",
+                            "test": {
+                                "avg_delta_pct": 0.25,
+                                "median_delta_pct": 0.0,
+                                "worse_rate_pct": 10.0,
+                                "allowed_rate_pct": 20.0,
+                                "false_positive_allowed_rate_pct": 0.0,
+                            },
+                        }
+                    ],
+                    "files": {"json": "x.json"},
+                }
+
+        original = lpr.replay_observable_tail_selector
+        try:
+            lpr.replay_observable_tail_selector = FakeReplay
+            summary = lpr._build_shadow_tail_selector_summary(Path("."))
+        finally:
+            lpr.replay_observable_tail_selector = original
+
+        self.assertEqual(summary["status"], "passed_shadow_gate")
+        self.assertIn("selector", summary["detail"])
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-05-31", coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-01T00:00:00Z"}},
+            {},
+            [],
+            {"summary": {"alerts_total": 10, "labeled_ret5": 10, "avg_ret5": 0.0}},
+            summary,
+        )
+        self.assertTrue(any("Shadow tail selector прошёл replay-gate" in x for x in actions))
 
     def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
         components = lpr._learning_components(
@@ -136,6 +178,7 @@ class LearningProgressReportTest(unittest.TestCase):
             "alerts": alerts,
             "learning_components": {},
             "shadow_reentry": {"status": "complete", "detail": "alerts=0"},
+            "shadow_tail_selector": {"status": "missing", "detail": "нет отчёта"},
             "next_actions": [],
         }
         self.assertIn("метрика дня не применима", lpr.render_text(report))
