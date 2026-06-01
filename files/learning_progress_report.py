@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 import report_signal_quality_coverage
 import report_entry_admission_shadow_reward
+import report_blocked_winner_causal_reward
 import replay_observable_tail_selector
 
 
@@ -67,6 +68,7 @@ def build_report(
     shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
     shadow_tail_selector = _build_shadow_tail_selector_summary(reports_dir)
     shadow_entry_admission = _build_shadow_entry_admission_summary(reports_dir)
+    blocker_reward = _build_blocker_reward_summary(reports_dir)
     focus = sorted({str(s).upper().replace("/", "").replace("USDT", "") + "USDT" for s in focus_symbols if str(s).strip()})
     focus_findings = _focus_findings(reports_dir, latest.day, focus)
     payload = {
@@ -80,10 +82,11 @@ def build_report(
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "shadow_tail_selector": shadow_tail_selector,
         "shadow_entry_admission": shadow_entry_admission,
+        "blocker_reward": blocker_reward,
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
-        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission),
+        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward),
         "focus_symbols": focus_findings,
-        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission),
+        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward),
     }
     text = render_text(payload)
     output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -104,6 +107,7 @@ def render_text(report: dict[str, Any]) -> str:
     shadow_reentry = report.get("shadow_reentry") or {}
     shadow_tail_selector = report.get("shadow_tail_selector") or {}
     shadow_entry_admission = report.get("shadow_entry_admission") or {}
+    blocker_reward = report.get("blocker_reward") or {}
     day = report.get("latest_day") or "unknown"
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
@@ -159,8 +163,13 @@ def render_text(report: dict[str, Any]) -> str:
         f"{shadow_entry_admission.get('status', 'unknown')} — "
         f"{shadow_entry_admission.get('detail', 'нет отчёта')}"
     )
+    lines.append(
+        "  • blocker reward: "
+        f"{blocker_reward.get('status', 'unknown')} — "
+        f"{blocker_reward.get('detail', 'нет отчёта')}"
+    )
     lines.extend(["", "🎯 ЧТО ДАЛЬШЕ"])
-    for action in actions[:4]:
+    for action in actions[:5]:
         lines.append(f"{action}")
     return "\n".join(lines).strip()
 
@@ -330,6 +339,7 @@ def _alerts(
     shadow_reentry: dict[str, Any],
     shadow_tail_selector: dict[str, Any] | None = None,
     shadow_entry_admission: dict[str, Any] | None = None,
+    blocker_reward: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     out = []
     if latest.coverage_status not in {"ok", "complete"}:
@@ -367,6 +377,9 @@ def _alerts(
     entry = shadow_entry_admission or {}
     if entry.get("status") == "error":
         out.append({"severity": "warn", "text": f"shadow entry admission report failed: {entry.get('detail', 'unknown error')}"})
+    blocker = blocker_reward or {}
+    if blocker.get("status") == "error":
+        out.append({"severity": "warn", "text": f"blocker reward report failed: {blocker.get('detail', 'unknown error')}"})
     return out
 
 
@@ -378,6 +391,7 @@ def _next_actions(
     shadow_reentry: dict[str, Any],
     shadow_tail_selector: dict[str, Any] | None = None,
     shadow_entry_admission: dict[str, Any] | None = None,
+    blocker_reward: dict[str, Any] | None = None,
 ) -> list[str]:
     actions = []
     training = status.get("training") or {}
@@ -418,6 +432,13 @@ def _next_actions(
         actions.append("⏸️ Entry admission: текущие rescue-гипотезы не дают positive reward; BUY-гейты не расширять.")
     elif entry.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить entry admission shadow reward report: admission-learning контур неполный.")
+    blocker = blocker_reward or {}
+    if blocker.get("status") == "passed_harm_gate":
+        actions.append("▶️ Blocker reward нашёл вредный blocker: готовить targeted behavior replay, гейты не расслаблять напрямую.")
+    elif blocker.get("status") == "monitor":
+        actions.append("⏸️ Blocker reward: явного вредного blocker-а нет; не расслаблять blockers без targeted replay.")
+    elif blocker.get("status") in {"missing", "error"}:
+        actions.append("▶️ Починить blocker reward report: blocker-learning контур неполный.")
     if not actions:
         actions.append("⏸️ Пока одобрять нечего — ждём следующего final report и replay evidence.")
     return actions
@@ -493,6 +514,39 @@ def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
         "detail": detail,
         "decision": decision,
         "best_variant": best,
+        "files": report.get("files") or {},
+    }
+
+
+def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
+    workspace_dir = reports_dir.parent.parent
+    try:
+        report = report_blocked_winner_causal_reward.build_report(
+            reports_dir=reports_dir,
+            files_dir=workspace_dir / "files",
+            output_json=reports_dir / "blocked_winner_causal_reward_latest.json",
+            output_txt=reports_dir / "blocked_winner_causal_reward_latest.txt",
+            save=True,
+        )
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+    table = report.get("reason_table") or []
+    if not table:
+        return {"status": "missing", "detail": "нет blocker rows"}
+    top = table[0]
+    decision = str(report.get("decision") or "")
+    status = "passed_harm_gate" if decision.startswith("advance_") else "monitor"
+    detail = (
+        f"top={top.get('reason_code')}, net_harm={_fmt(top.get('net_harm_pct'), 2)}%, "
+        f"harm={_fmt(top.get('harm_pct'), 2)}%, protect={_fmt(top.get('protection_credit_pct'), 2)}%, "
+        f"decision={top.get('decision')}"
+    )
+    return {
+        "status": status,
+        "detail": detail,
+        "decision": decision,
+        "top_reason": top.get("reason_code"),
+        "top": top,
         "files": report.get("files") or {},
     }
 

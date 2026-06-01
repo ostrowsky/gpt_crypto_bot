@@ -80,8 +80,10 @@ class LearningProgressReportTest(unittest.TestCase):
             self.assertIn("shadow re-entry", text)
             self.assertIn("shadow tail selector", text)
             self.assertIn("shadow entry admission", text)
+            self.assertIn("blocker reward", text)
             self.assertIn("shadow_tail_selector", report)
             self.assertIn("shadow_entry_admission", report)
+            self.assertIn("blocker_reward", report)
             self.assertTrue(any(a["severity"] == "serious" for a in report["alerts"]))
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
@@ -187,6 +189,45 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertTrue(any("Entry admission shadow reward положительный" in x for x in actions))
 
+    def test_blocker_reward_summary_and_actions(self) -> None:
+        class FakeBlocker:
+            @staticmethod
+            def build_report(**_kwargs):
+                return {
+                    "decision": "advance_top_harmful_blockers_to_behavior_replay",
+                    "reason_table": [
+                        {
+                            "reason_code": "score_gate",
+                            "net_harm_pct": 12.0,
+                            "harm_pct": 14.0,
+                            "protection_credit_pct": 2.0,
+                            "decision": "advance_to_behavior_replay",
+                        }
+                    ],
+                    "files": {"json": "x.json"},
+                }
+
+        original = lpr.report_blocked_winner_causal_reward
+        try:
+            lpr.report_blocked_winner_causal_reward = FakeBlocker
+            summary = lpr._build_blocker_reward_summary(Path("."))
+        finally:
+            lpr.report_blocked_winner_causal_reward = original
+
+        self.assertEqual(summary["status"], "passed_harm_gate")
+        self.assertIn("score_gate", summary["detail"])
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-05-31", coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-01T00:00:00Z"}},
+            {},
+            [],
+            {"summary": {"alerts_total": 10, "labeled_ret5": 10, "avg_ret5": 0.0}},
+            {"status": "failed_gate"},
+            {"status": "no_positive_reward"},
+            summary,
+        )
+        self.assertTrue(any("Blocker reward нашёл вредный blocker" in x for x in actions))
+
     def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
         components = lpr._learning_components(
             {
@@ -219,6 +260,7 @@ class LearningProgressReportTest(unittest.TestCase):
             "shadow_reentry": {"status": "complete", "detail": "alerts=0"},
             "shadow_tail_selector": {"status": "missing", "detail": "нет отчёта"},
             "shadow_entry_admission": {"status": "missing", "detail": "нет отчёта"},
+            "blocker_reward": {"status": "missing", "detail": "нет отчёта"},
             "next_actions": [],
         }
         self.assertIn("метрика дня не применима", lpr.render_text(report))

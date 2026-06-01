@@ -29,6 +29,7 @@ $releaseSuite = @(
     "test_replay_early_exit_gated_tail_selector",
     "test_replay_observable_tail_selector",
     "test_report_entry_admission_shadow_reward",
+    "test_report_blocked_winner_causal_reward",
     "test_learning_progress_report",
     "test_replay_protected_trailing_exit_candle",
     "test_recompute_watchlist_filtered_top_metrics"
