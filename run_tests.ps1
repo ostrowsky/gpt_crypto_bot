@@ -25,6 +25,7 @@ $releaseSuite = @(
     "test_suspicious_reentry_scorecard",
     "test_replay_hold_after_weak_sell",
     "test_replay_partial_exit_after_weak_sell",
+    "test_replay_trailing_tail_after_partial_exit",
     "test_learning_progress_report",
     "test_replay_protected_trailing_exit_candle",
     "test_recompute_watchlist_filtered_top_metrics"
