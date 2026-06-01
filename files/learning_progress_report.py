@@ -72,7 +72,7 @@ def build_report(
         "verdict": _verdict(latest, previous, older, status),
         "latest": latest.__dict__,
         "rolling": _rolling_summary(days),
-        "learning_components": _learning_components(status, feedback, latest.day),
+        "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
         "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry),
@@ -109,13 +109,19 @@ def render_text(report: dict[str, Any]) -> str:
     blocked = latest.get("blocked_winner_count") or 0
     miss_rate = latest.get("miss_rate")
     miss_piece = "miss-rate нет" if miss_rate is None else f"miss-rate {float(miss_rate) * 100:.0f}%"
+    yesterday_line = (
+        "Вчера: watchlist top movers: 0 — метрика дня не применима; "
+        f"{capture_piece}."
+        if int(latest.get("watchlist_top_count") or 0) == 0
+        else f"Вчера: поймал {capture}% top movers, вовремя {early}%; {capture_piece}."
+    )
     lines = [
         f"Бот — {day}",
         "",
         f"{emoji} {title}   ·   👉 {ask}",
         "",
         f"Главное: early-capture ~{early_now}% за 7д ({early_prev}% → {early_now}%). Цель — 25%+.",
-        f"Вчера: поймал {capture}% top movers, вовремя {early}%; {capture_piece}.",
+        yesterday_line,
         f"Где теряем: blocked winners {blocked}; {miss_piece}; exit efficiency median {_fmt(latest.get('median_exit_efficiency'), 2)}.",
         "",
         "📋 Прошлые решения:",
@@ -249,17 +255,29 @@ def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetr
     return {"label": "СТОИТ НА МЕСТЕ", "emoji": "➡️", "operator_hint": "ждать нельзя, нужны узкие проверки"}
 
 
-def _learning_components(status: dict[str, Any], feedback: dict[str, Any], latest_day: str) -> dict[str, dict[str, str]]:
+def _learning_components(
+    status: dict[str, Any],
+    feedback: dict[str, Any],
+    latest_day: str,
+    reports_dir: Path | None = None,
+) -> dict[str, dict[str, str]]:
     training = status.get("training") or {}
     critic = status.get("top_gainer_critic") or {}
     sq = status.get("signal_quality_evaluator") or {}
     fb_policy = feedback.get("policy") or feedback
     last_train = str(training.get("last_finished_at") or "")
+    critic_day = str(critic.get("last_target_day_local") or "")
+    sq_day = str(sq.get("last_target_day_local") or "")
+    if reports_dir is not None:
+        if not critic_day and (reports_dir / f"top_gainer_critic_{latest_day}_final.json").exists():
+            critic_day = latest_day
+        if not sq_day and (reports_dir / f"signal_quality_{latest_day}_final.json").exists():
+            sq_day = latest_day
     return {
         "measurement": {
             "label": "measurement",
-            "status": "ok" if _day_not_older(critic.get("last_target_day_local"), latest_day) and _day_not_older(sq.get("last_target_day_local"), latest_day) else "stale/partial",
-            "detail": f"critic={critic.get('last_target_day_local')}, signal_quality={sq.get('last_target_day_local')}",
+            "status": "ok" if _day_not_older(critic_day, latest_day) and _day_not_older(sq_day, latest_day) else "stale/partial",
+            "detail": f"critic={critic_day}, signal_quality={sq_day}",
         },
         "feedback": {
             "label": "feedback",
@@ -306,7 +324,7 @@ def _alerts(
             })
         else:
             out.append({"severity": "serious", "text": f"coverage={latest.coverage_status}: {', '.join(latest.coverage_reasons[:2])}"})
-    if latest.early_pct < 15.0:
+    if latest.watchlist_top_count > 0 and latest.early_pct < 15.0:
         out.append({"severity": "serious", "text": f"early capture only {latest.early_pct:.1f}% vs 25%+ target"})
     if latest.miss_rate is not None and latest.miss_rate > 0.80:
         out.append({"severity": "serious", "text": f"trend miss-rate {latest.miss_rate * 100:.1f}%"})

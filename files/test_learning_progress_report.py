@@ -118,6 +118,42 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertEqual(components["measurement"]["status"], "ok")
 
+    def test_zero_watchlist_denominator_is_not_serious_early_failure(self) -> None:
+        latest = lpr.DayMetrics(
+            day="2026-05-31",
+            watchlist_top_count=0,
+            early_pct=0.0,
+            coverage_status="complete",
+        )
+        alerts = lpr._alerts(latest, {}, {}, [], {})
+        self.assertFalse(any("early capture only" in item["text"] for item in alerts))
+        report = {
+            "latest_day": latest.day,
+            "latest": latest.__dict__,
+            "rolling": {"early_last7_pct": 44.8, "early_prev7_pct": 17.1},
+            "verdict": {"emoji": "📈", "label": "РАЗВИВАЕТСЯ", "operator_hint": "наблюдать"},
+            "previous_decisions": [],
+            "alerts": alerts,
+            "learning_components": {},
+            "shadow_reentry": {"status": "complete", "detail": "alerts=0"},
+            "next_actions": [],
+        }
+        self.assertIn("метрика дня не применима", lpr.render_text(report))
+
+    def test_measurement_freshness_falls_back_to_report_files_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            reports = Path(td)
+            (reports / "top_gainer_critic_2026-05-31_final.json").write_text("{}", encoding="utf-8")
+            (reports / "signal_quality_2026-05-31_final.json").write_text("{}", encoding="utf-8")
+            components = lpr._learning_components(
+                {"training": {"last_finished_at": "2026-06-01T06:00:00Z"}},
+                {},
+                "2026-05-31",
+                reports,
+            )
+            self.assertEqual(components["measurement"]["status"], "ok")
+            self.assertIn("critic=2026-05-31", components["measurement"]["detail"])
+
 
 class LearningProgressWorkerIntegrationTest(unittest.TestCase):
     def test_rl_worker_has_0900_learning_progress_task(self) -> None:
