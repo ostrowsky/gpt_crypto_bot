@@ -10,6 +10,7 @@ from statistics import mean, median
 from typing import Any, Iterable
 
 import report_signal_quality_coverage
+import report_entry_admission_shadow_reward
 import replay_observable_tail_selector
 
 
@@ -65,6 +66,7 @@ def build_report(
     feedback = _load_json(feedback_file)
     shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
     shadow_tail_selector = _build_shadow_tail_selector_summary(reports_dir)
+    shadow_entry_admission = _build_shadow_entry_admission_summary(reports_dir)
     focus = sorted({str(s).upper().replace("/", "").replace("USDT", "") + "USDT" for s in focus_symbols if str(s).strip()})
     focus_findings = _focus_findings(reports_dir, latest.day, focus)
     payload = {
@@ -77,10 +79,11 @@ def build_report(
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "shadow_tail_selector": shadow_tail_selector,
+        "shadow_entry_admission": shadow_entry_admission,
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
-        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector),
+        "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission),
         "focus_symbols": focus_findings,
-        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector),
+        "next_actions": _next_actions(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission),
     }
     text = render_text(payload)
     output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +103,7 @@ def render_text(report: dict[str, Any]) -> str:
     components = report.get("learning_components") or {}
     shadow_reentry = report.get("shadow_reentry") or {}
     shadow_tail_selector = report.get("shadow_tail_selector") or {}
+    shadow_entry_admission = report.get("shadow_entry_admission") or {}
     day = report.get("latest_day") or "unknown"
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
@@ -149,6 +153,11 @@ def render_text(report: dict[str, Any]) -> str:
         "  • shadow tail selector: "
         f"{shadow_tail_selector.get('status', 'unknown')} — "
         f"{shadow_tail_selector.get('detail', 'нет отчёта')}"
+    )
+    lines.append(
+        "  • shadow entry admission: "
+        f"{shadow_entry_admission.get('status', 'unknown')} — "
+        f"{shadow_entry_admission.get('detail', 'нет отчёта')}"
     )
     lines.extend(["", "🎯 ЧТО ДАЛЬШЕ"])
     for action in actions[:4]:
@@ -320,6 +329,7 @@ def _alerts(
     focus_findings: list[dict[str, Any]],
     shadow_reentry: dict[str, Any],
     shadow_tail_selector: dict[str, Any] | None = None,
+    shadow_entry_admission: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     out = []
     if latest.coverage_status not in {"ok", "complete"}:
@@ -354,6 +364,9 @@ def _alerts(
     tail = shadow_tail_selector or {}
     if tail.get("status") == "error":
         out.append({"severity": "warn", "text": f"shadow tail selector report failed: {tail.get('detail', 'unknown error')}"})
+    entry = shadow_entry_admission or {}
+    if entry.get("status") == "error":
+        out.append({"severity": "warn", "text": f"shadow entry admission report failed: {entry.get('detail', 'unknown error')}"})
     return out
 
 
@@ -364,6 +377,7 @@ def _next_actions(
     focus_findings: list[dict[str, Any]],
     shadow_reentry: dict[str, Any],
     shadow_tail_selector: dict[str, Any] | None = None,
+    shadow_entry_admission: dict[str, Any] | None = None,
 ) -> list[str]:
     actions = []
     training = status.get("training") or {}
@@ -397,6 +411,13 @@ def _next_actions(
         actions.append("▶️ Shadow tail selector пока не проходит gate: продолжить observable feature search для exit monetization.")
     elif tail.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить shadow tail selector report: exit-learning контур неполный.")
+    entry = shadow_entry_admission or {}
+    if entry.get("status") == "passed_shadow_gate":
+        actions.append("▶️ Entry admission shadow reward положительный: готовить candle-level behavior replay, BUY не менять.")
+    elif entry.get("status") == "no_positive_reward":
+        actions.append("⏸️ Entry admission: текущие rescue-гипотезы не дают positive reward; BUY-гейты не расширять.")
+    elif entry.get("status") in {"missing", "error"}:
+        actions.append("▶️ Починить entry admission shadow reward report: admission-learning контур неполный.")
     if not actions:
         actions.append("⏸️ Пока одобрять нечего — ждём следующего final report и replay evidence.")
     return actions
@@ -437,6 +458,41 @@ def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
         "decision": decision,
         "top_selector": top.get("name"),
         "test": test,
+        "files": report.get("files") or {},
+    }
+
+
+def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
+    workspace_dir = reports_dir.parent.parent
+    try:
+        report = report_entry_admission_shadow_reward.build_report(
+            reports_dir=reports_dir,
+            files_dir=workspace_dir / "files",
+            output_json=reports_dir / "entry_admission_shadow_reward_latest.json",
+            output_txt=reports_dir / "entry_admission_shadow_reward_latest.txt",
+            save=True,
+        )
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+    best = report.get("best_variant") or {}
+    if not best:
+        return {"status": "missing", "detail": "нет admission candidates"}
+    decision = str(report.get("decision") or "")
+    net = _maybe_float(best.get("net_reward_pct"))
+    precision = _maybe_float(best.get("top_precision"))
+    candidates = int(best.get("candidate_count") or 0)
+    top = int(best.get("top_candidates") or 0)
+    false = int(best.get("false_candidates") or 0)
+    status = "passed_shadow_gate" if decision.startswith("advance_") else "no_positive_reward"
+    detail = (
+        f"best={best.get('reason_set')}, net={_fmt(net, 2)}%, "
+        f"precision={_fmt((precision or 0.0) * 100, 1)}%, candidates={candidates}, top={top}, false={false}"
+    )
+    return {
+        "status": status,
+        "detail": detail,
+        "decision": decision,
+        "best_variant": best,
         "files": report.get("files") or {},
     }
 

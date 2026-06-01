@@ -79,7 +79,9 @@ class LearningProgressReportTest(unittest.TestCase):
             self.assertIn("Бот — 2026-05-19", text)
             self.assertIn("shadow re-entry", text)
             self.assertIn("shadow tail selector", text)
+            self.assertIn("shadow entry admission", text)
             self.assertIn("shadow_tail_selector", report)
+            self.assertIn("shadow_entry_admission", report)
             self.assertTrue(any(a["severity"] == "serious" for a in report["alerts"]))
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
@@ -148,6 +150,43 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertTrue(any("Shadow tail selector прошёл replay-gate" in x for x in actions))
 
+    def test_shadow_entry_admission_summary_and_actions(self) -> None:
+        class FakeAdmission:
+            @staticmethod
+            def build_report(**_kwargs):
+                return {
+                    "decision": "advance_to_entry_admission_behavior_replay",
+                    "best_variant": {
+                        "reason_set": "agent_score",
+                        "net_reward_pct": 12.5,
+                        "top_precision": 0.4,
+                        "candidate_count": 20,
+                        "top_candidates": 8,
+                        "false_candidates": 12,
+                    },
+                    "files": {"json": "x.json"},
+                }
+
+        original = lpr.report_entry_admission_shadow_reward
+        try:
+            lpr.report_entry_admission_shadow_reward = FakeAdmission
+            summary = lpr._build_shadow_entry_admission_summary(Path("."))
+        finally:
+            lpr.report_entry_admission_shadow_reward = original
+
+        self.assertEqual(summary["status"], "passed_shadow_gate")
+        self.assertIn("agent_score", summary["detail"])
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-05-31", coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-01T00:00:00Z"}},
+            {},
+            [],
+            {"summary": {"alerts_total": 10, "labeled_ret5": 10, "avg_ret5": 0.0}},
+            {"status": "failed_gate"},
+            summary,
+        )
+        self.assertTrue(any("Entry admission shadow reward положительный" in x for x in actions))
+
     def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
         components = lpr._learning_components(
             {
@@ -179,6 +218,7 @@ class LearningProgressReportTest(unittest.TestCase):
             "learning_components": {},
             "shadow_reentry": {"status": "complete", "detail": "alerts=0"},
             "shadow_tail_selector": {"status": "missing", "detail": "нет отчёта"},
+            "shadow_entry_admission": {"status": "missing", "detail": "нет отчёта"},
             "next_actions": [],
         }
         self.assertIn("метрика дня не применима", lpr.render_text(report))
