@@ -36,6 +36,10 @@ Create a daily/rolling shadow report for executed portfolio replacements:
   - incoming candidate was watchlist top vs not;
   - replaced position was losing vs non-losing;
   - leader-score delta buckets.
+- policy simulation table over executed replacements:
+  - block non-losing replacements;
+  - block non-losing replacements unless leader edge is high;
+  - block low leader-edge replacements.
 
 ## Non-goals
 
@@ -54,3 +58,5 @@ This report is not a full hold-vs-replace counterfactual unless post-replacement
 - whether executed replacements were followed by better or worse incoming outcomes;
 - which replacement segments look harmful;
 - whether any segment is promising enough to justify candle-level counterfactual replay.
+
+Policy simulation rows are not production-ready rules. They estimate the event-log effect of not taking already-executed replacements by summing avoided negative replacement deltas and subtracting missed positive replacement deltas. A live policy candidate may only advance to behavior replay if it is based on causal fields available at rotation time.

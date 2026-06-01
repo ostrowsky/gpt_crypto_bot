@@ -454,7 +454,9 @@ def _next_actions(
     elif blocker.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить blocker reward report: blocker-learning контур неполный.")
     replacement = portfolio_replacement or {}
-    if replacement.get("status") == "passed_shadow_gate":
+    if replacement.get("status") == "policy_candidate":
+        actions.append("▶️ Portfolio replacement: есть policy-кандидат; готовить behavior replay, live rotation не менять.")
+    elif replacement.get("status") == "passed_shadow_gate":
         actions.append("▶️ Portfolio replacement shadow reward положительный: готовить counterfactual replay, live rotation не менять.")
     elif replacement.get("status") == "hurting":
         actions.append("⚠️ Portfolio replacement выглядит вредным: разобрать rotation outcomes перед любыми новыми заменами.")
@@ -587,12 +589,22 @@ def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
     summary = report.get("summary") or {}
+    policies = report.get("policy_simulations") or []
     decision = str(report.get("decision") or "")
     replacements = int(summary.get("replacement_count") or 0)
     closed = int(summary.get("closed_incoming_count") or 0)
     if replacements <= 0:
         return {"status": "missing", "detail": "нет replacement events", "decision": decision}
-    if decision.startswith("advance_"):
+    advanced_policy = next(
+        (
+            row for row in policies
+            if row.get("kind") == "causal" and str(row.get("decision") or "").startswith("advance_")
+        ),
+        None,
+    )
+    if advanced_policy:
+        status = "policy_candidate"
+    elif decision.startswith("advance_"):
         status = "passed_shadow_gate"
     elif "hurting" in decision:
         status = "hurting"
@@ -605,11 +617,18 @@ def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
         f"med_delta={_fmt(summary.get('median_replacement_delta_pct'), 2)}%, "
         f"positive={_fmt(summary.get('positive_delta_rate_pct'), 1)}%"
     )
+    if advanced_policy:
+        detail += (
+            f"; candidate={advanced_policy.get('policy')}, "
+            f"saved={_fmt(advanced_policy.get('net_saved_delta_pct'), 2)}%, "
+            f"regret={_fmt(advanced_policy.get('regret_rate_pct'), 1)}%"
+        )
     return {
         "status": status,
         "detail": detail,
         "decision": decision,
         "summary": summary,
+        "advanced_policy": advanced_policy or {},
         "files": report.get("files") or {},
     }
 

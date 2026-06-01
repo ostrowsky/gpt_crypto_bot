@@ -242,6 +242,7 @@ class LearningProgressReportTest(unittest.TestCase):
                         "median_replacement_delta_pct": 0.0,
                         "positive_delta_rate_pct": 60.0,
                     },
+                    "policy_simulations": [],
                     "files": {"json": "x.json"},
                 }
 
@@ -266,6 +267,54 @@ class LearningProgressReportTest(unittest.TestCase):
             summary,
         )
         self.assertTrue(any("Portfolio replacement shadow reward положительный" in x for x in actions))
+
+    def test_portfolio_replacement_policy_candidate_action(self) -> None:
+        class FakeReplacement:
+            @staticmethod
+            def build_report(**_kwargs):
+                return {
+                    "decision": "replacement_policy_hurting_in_shadow_monitor",
+                    "summary": {
+                        "replacement_count": 28,
+                        "closed_incoming_count": 24,
+                        "avg_replacement_delta_pct": -0.44,
+                        "median_replacement_delta_pct": -0.53,
+                        "positive_delta_rate_pct": 20.8,
+                    },
+                    "policy_simulations": [
+                        {
+                            "policy": "block_replaced_non_losing",
+                            "kind": "causal",
+                            "net_saved_delta_pct": 9.66,
+                            "regret_rate_pct": 20.0,
+                            "decision": "advance_to_behavior_replay",
+                        }
+                    ],
+                    "files": {"json": "x.json"},
+                }
+
+        original = lpr.report_portfolio_replacement_shadow_reward
+        try:
+            lpr.report_portfolio_replacement_shadow_reward = FakeReplacement
+            summary = lpr._build_portfolio_replacement_summary(Path("."))
+        finally:
+            lpr.report_portfolio_replacement_shadow_reward = original
+
+        self.assertEqual(summary["status"], "policy_candidate")
+        self.assertEqual(summary["advanced_policy"]["policy"], "block_replaced_non_losing")
+        self.assertIn("candidate=block_replaced_non_losing", summary["detail"])
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-05-31", coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-01T00:00:00Z"}},
+            {},
+            [],
+            {"summary": {"alerts_total": 10, "labeled_ret5": 10, "avg_ret5": 0.0}},
+            {"status": "failed_gate"},
+            {"status": "no_positive_reward"},
+            {"status": "monitor"},
+            summary,
+        )
+        self.assertTrue(any("есть policy-кандидат" in x for x in actions))
 
     def test_measurement_is_ok_when_critic_is_newer_than_report_day(self) -> None:
         components = lpr._learning_components(

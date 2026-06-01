@@ -47,6 +47,7 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
             "incoming_watchlist_top_count": sum(1 for r in replacements if r.get("incoming_watchlist_top")),
         },
         "segments": _segment_table(closed),
+        "policy_simulations": _policy_simulations(closed),
         "top_positive": sorted(closed, key=lambda r: r.get("replacement_delta_pct") or 0.0, reverse=True)[:12],
         "top_negative": sorted(closed, key=lambda r: r.get("replacement_delta_pct") or 0.0)[:12],
         "decision": "",
@@ -64,6 +65,7 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
 def render_text(report: dict[str, Any]) -> str:
     c = report.get("coverage") or {}; s = report.get("summary") or {}
     segments = report.get("segments") or []
+    policies = report.get("policy_simulations") or []
     lines = [
         "Portfolio replacement shadow reward (research-only)",
         f"coverage: events={c.get('events_loaded')} replacements={c.get('replacement_events')} closed={c.get('closed_incoming')}",
@@ -79,6 +81,14 @@ def render_text(report: dict[str, Any]) -> str:
                 f"- {row.get('segment')}: n={row.get('closed_count')} "
                 f"avg_delta={row.get('avg_delta_pct')}% med={row.get('median_delta_pct')}% "
                 f"positive={row.get('positive_delta_rate_pct')}%"
+            )
+    if policies:
+        lines.extend(["", "policy simulations:"])
+        for row in policies[:8]:
+            lines.append(
+                f"- {row.get('policy')}: block={row.get('blocked_count')} "
+                f"net_saved={row.get('net_saved_delta_pct')}% regret={row.get('regret_rate_pct')}% "
+                f"decision={row.get('decision')}"
             )
     return "\n".join(lines) + "\n"
 
@@ -202,6 +212,78 @@ def _segment_table(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "avg_incoming_exit_pnl_pct": _avg([r.get("incoming_exit_pnl_pct") for r in selected]),
         })
     return out
+
+
+def _policy_simulations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs = [
+        (
+            "block_replaced_non_losing",
+            "causal",
+            lambda r: (_num(r.get("replaced_exit_pnl_pct"), 0.0) or 0.0) >= 0.0,
+        ),
+        (
+            "block_non_losing_unless_leader_delta_ge_15",
+            "causal",
+            lambda r: (_num(r.get("replaced_exit_pnl_pct"), 0.0) or 0.0) >= 0.0
+            and (_num(r.get("leader_delta"), 0.0) or 0.0) < 15.0,
+        ),
+        (
+            "block_non_losing_unless_leader_delta_ge_20",
+            "causal",
+            lambda r: (_num(r.get("replaced_exit_pnl_pct"), 0.0) or 0.0) >= 0.0
+            and (_num(r.get("leader_delta"), 0.0) or 0.0) < 20.0,
+        ),
+        (
+            "block_leader_delta_lt_10",
+            "causal",
+            lambda r: (_num(r.get("leader_delta"), 0.0) or 0.0) < 10.0,
+        ),
+        (
+            "block_incoming_not_watchlist_top",
+            "diagnostic_future_label",
+            lambda r: not bool(r.get("incoming_watchlist_top")),
+        ),
+    ]
+    out = []
+    for name, kind, pred in specs:
+        blocked = [r for r in rows if pred(r) and r.get("replacement_delta_pct") is not None]
+        kept = [r for r in rows if r not in blocked and r.get("replacement_delta_pct") is not None]
+        if not blocked:
+            continue
+        deltas = [float(r["replacement_delta_pct"]) for r in blocked]
+        savings = [-d for d in deltas]
+        missed_positive = [d for d in deltas if d > 0]
+        avoided_negative = [-d for d in deltas if d < 0]
+        net_saved = round(sum(savings), 6)
+        row = {
+            "policy": name,
+            "kind": kind,
+            "blocked_count": len(blocked),
+            "kept_count": len(kept),
+            "net_saved_delta_pct": net_saved,
+            "avg_saved_per_block_pct": round(mean(savings), 6),
+            "median_saved_per_block_pct": round(median(savings), 6),
+            "avoided_negative_delta_pct": round(sum(avoided_negative), 6),
+            "missed_positive_delta_pct": round(sum(missed_positive), 6),
+            "regret_count": len(missed_positive),
+            "regret_rate_pct": round(len(missed_positive) / len(blocked) * 100, 2),
+            "decision": _policy_decision(name, kind, len(blocked), net_saved, len(missed_positive) / len(blocked) * 100),
+        }
+        out.append(row)
+    out.sort(key=lambda r: (r.get("kind") != "causal", -(r.get("net_saved_delta_pct") or 0.0)))
+    return out
+
+
+def _policy_decision(name: str, kind: str, blocked_count: int, net_saved: float, regret_rate_pct: float) -> str:
+    if kind != "causal":
+        return "diagnostic_only_future_label"
+    if blocked_count < 5:
+        return "collect_more_cases"
+    if net_saved >= 2.0 and regret_rate_pct <= 25.0:
+        return "advance_to_behavior_replay"
+    if net_saved > 0:
+        return "monitor_positive_but_not_promoted"
+    return "reject_or_keep_current"
 
 
 def _parse_ts(v: Any) -> datetime | None:
