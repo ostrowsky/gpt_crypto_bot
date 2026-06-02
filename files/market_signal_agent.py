@@ -1647,6 +1647,46 @@ def _candidate_better_than_position(candidate: dict, pos: AgentPosition) -> bool
     return _candidate_rank_key(candidate) > _position_rank_key(pos)
 
 
+def _replacement_block_non_losing_context(candidate: dict, pos: AgentPosition) -> dict:
+    exit_price = float(pos.mark_price or pos.entry_price)
+    replaced_pnl_pct = pos.pnl_pct(exit_price) if pos.entry_price > 0 else 0.0
+    candidate_leader = float(candidate.get("leader_score", 0.0))
+    replaced_leader = float(getattr(pos, "leader_score", 0.0))
+    leader_delta = candidate_leader - replaced_leader
+    would_block = replaced_pnl_pct >= 0.0
+    reason = (
+        f"replacement block_non_losing: {pos.symbol} pnl {replaced_pnl_pct:.2f}% >= 0.00%"
+        if would_block
+        else ""
+    )
+    return {
+        "candidate_leader": candidate_leader,
+        "replaced_leader": replaced_leader,
+        "leader_delta": leader_delta,
+        "replaced_pnl_pct": replaced_pnl_pct,
+        "would_block": would_block,
+        "reason": reason,
+    }
+
+
+def _log_replacement_block_non_losing_shadow(candidate: dict, pos: AgentPosition, ctx: dict, *, enforced: bool) -> None:
+    agentlog.log_replacement_policy_shadow(
+        candidate_sym=str(candidate["symbol"]),
+        candidate_tf=str(candidate["tf"]),
+        candidate_mode=str(candidate["mode"]),
+        candidate_leader=float(ctx["candidate_leader"]),
+        replaced_sym=pos.symbol,
+        replaced_tf=pos.tf,
+        replaced_mode=pos.signal_mode,
+        replaced_leader=float(ctx["replaced_leader"]),
+        replaced_pnl_pct=float(ctx["replaced_pnl_pct"]),
+        leader_delta=float(ctx["leader_delta"]),
+        would_block=bool(ctx["would_block"]),
+        enforced=bool(enforced),
+        reason=str(ctx["reason"]),
+    )
+
+
 def _candidate_bypasses_symbol_cooldown(candidate: dict) -> bool:
     if not bool(getattr(config, "AGENT_4H_LEADER_BYPASS_SYMBOL_COOLDOWN", True)):
         return False
@@ -1961,6 +2001,33 @@ async def _run_cycle(
                         vol_x=float(candidate["vol_x"]),
                         daily_range=float(candidate["daily_range"]),
                     )
+                continue
+
+            replacement_policy_ctx = _replacement_block_non_losing_context(candidate, old_pos)
+            replacement_policy_enforced = bool(getattr(config, "AGENT_REPLACEMENT_BLOCK_NON_LOSING_ENABLED", False))
+            replacement_policy_shadow = bool(getattr(config, "AGENT_REPLACEMENT_BLOCK_NON_LOSING_SHADOW", True))
+            if replacement_policy_ctx["would_block"] and (replacement_policy_shadow or replacement_policy_enforced):
+                _log_replacement_block_non_losing_shadow(
+                    candidate,
+                    old_pos,
+                    replacement_policy_ctx,
+                    enforced=replacement_policy_enforced,
+                )
+            if replacement_policy_enforced and replacement_policy_ctx["would_block"]:
+                agentlog.log_blocked(
+                    str(candidate["symbol"]),
+                    str(candidate["tf"]),
+                    float(candidate["price"]),
+                    str(replacement_policy_ctx["reason"]),
+                    signal_type="agent_replacement_policy",
+                    rsi=float(candidate["rsi"]),
+                    adx=float(candidate["adx"]),
+                    vol_x=float(candidate["vol_x"]),
+                    daily_range=float(candidate["daily_range"]),
+                    replaced_symbol=old_pos.symbol,
+                    replaced_pnl_pct=float(replacement_policy_ctx["replaced_pnl_pct"]),
+                    leader_delta=float(replacement_policy_ctx["leader_delta"]),
+                )
                 continue
 
             entries.append(

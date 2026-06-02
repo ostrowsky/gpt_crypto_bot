@@ -152,3 +152,40 @@ def log_blocked(
         rec["daily_range"] = round(daily_range, 2)
     rec.update(compact_block_context(**context))
     _write(rec)
+
+
+def log_replacement_policy_shadow(
+    *,
+    candidate_sym: str,
+    candidate_tf: str,
+    candidate_mode: str,
+    candidate_leader: float,
+    replaced_sym: str,
+    replaced_tf: str,
+    replaced_mode: str,
+    replaced_leader: float,
+    replaced_pnl_pct: float,
+    leader_delta: float,
+    would_block: bool,
+    enforced: bool,
+    reason: str,
+) -> None:
+    _write(
+        {
+            "event": "replacement_policy_shadow",
+            "policy": "block_non_losing",
+            "candidate_sym": candidate_sym,
+            "candidate_tf": candidate_tf,
+            "candidate_mode": candidate_mode,
+            "candidate_leader": round(float(candidate_leader), 4),
+            "replaced_sym": replaced_sym,
+            "replaced_tf": replaced_tf,
+            "replaced_mode": replaced_mode,
+            "replaced_leader": round(float(replaced_leader), 4),
+            "replaced_pnl_pct": round(float(replaced_pnl_pct), 4),
+            "leader_delta": round(float(leader_delta), 4),
+            "would_block": bool(would_block),
+            "enforced": bool(enforced),
+            "reason": reason,
+        }
+    )

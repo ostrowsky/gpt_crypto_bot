@@ -27,6 +27,8 @@ Add replay-only variants that test causal replacement restrictions:
 - Compare against the current `score_replace` behavior before promotion.
 - If fresh Binance candle replay is unavailable, report the replay as blocked
   and keep the event-log shadow simulation as hypothesis prioritization only.
+- Production flag must default OFF. Shadow logging may run while live behavior
+  remains unchanged.
 
 ## Promotion Gate
 
@@ -36,3 +38,12 @@ A replacement restriction may advance toward production only if replay shows:
 - lower replacement churn or better replacement PnL;
 - no unacceptable increase in skipped winners under a full portfolio;
 - stable result over more than one replay window.
+
+## Implementation Gate
+
+After replay evidence on 2026-06-02, the next allowed implementation step is:
+
+- add `AGENT_REPLACEMENT_BLOCK_NON_LOSING_ENABLED = False`;
+- add `AGENT_REPLACEMENT_BLOCK_NON_LOSING_SHADOW = True`;
+- log `replacement_policy_shadow` events for candidates that would be blocked;
+- do not block live replacements unless the enable flag is explicitly turned on.
