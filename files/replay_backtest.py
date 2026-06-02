@@ -141,6 +141,7 @@ class ReplayRunStats:
     replacements_total: int = 0
     replacements_improved: int = 0
     replacements_worsened: int = 0
+    replacement_policy_skipped: int = 0
     skipped_top_gainer_score: int = 0
     skipped_cluster_cap: int = 0
     cooldown_skipped_candidates: int = 0
@@ -2350,6 +2351,30 @@ def _candidate_ranker_rotation_ok(candidate: ReplayCandidate) -> bool:
     )
 
 
+def _replacement_policy_block_reason(
+    *,
+    variant: str,
+    replaced_pnl_pct: float,
+    leader_delta: float,
+) -> str:
+    """Research-only replay gate for replacement policy candidates.
+
+    These variants are intentionally causal: they use only fields available at
+    rotation time, not future top-mover labels or later trade outcomes.
+    """
+    if variant == "replacement_block_non_losing" and replaced_pnl_pct >= 0.0:
+        return f"block non-losing replacement pnl={replaced_pnl_pct:.2f}%"
+    if variant == "replacement_block_leader_delta_lt_10" and leader_delta < 10.0:
+        return f"block low leader delta {leader_delta:.2f} < 10.00"
+    if (
+        variant == "replacement_block_non_losing_unless_delta20"
+        and replaced_pnl_pct >= 0.0
+        and leader_delta < 20.0
+    ):
+        return f"block non-losing replacement pnl={replaced_pnl_pct:.2f}% leader_delta={leader_delta:.2f} < 20.00"
+    return ""
+
+
 def _series_price_at_or_before(data: np.ndarray, ts_ms: int) -> Optional[Tuple[int, float]]:
     idx = _find_last_closed_index(data["t"], ts_ms)
     if idx is None:
@@ -2706,6 +2731,9 @@ async def simulate_portfolio(
             "score",
             "score_replace",
             "score_replace_cluster",
+            "replacement_block_non_losing",
+            "replacement_block_leader_delta_lt_10",
+            "replacement_block_non_losing_unless_delta20",
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",
@@ -2862,6 +2890,16 @@ async def simulate_portfolio(
                         baseline_score = weakest_rotation_score if use_ranker_rotation else weakest_score
                     if score_to_compare < baseline_score + candidate_min_delta + extra_delta:
                         continue
+                    replaced_pnl_pct = (price / open_trade.entry_price - 1.0) * 100.0 if open_trade.entry_price > 0 else 0.0
+                    leader_delta = float(score_to_compare) - float(baseline_score)
+                    replacement_block_reason = _replacement_policy_block_reason(
+                        variant=variant,
+                        replaced_pnl_pct=replaced_pnl_pct,
+                        leader_delta=leader_delta,
+                    )
+                    if replacement_block_reason:
+                        stats.replacement_policy_skipped += 1
+                        continue
                     replaceable.append((baseline_score, open_key, open_trade, idx, price))
 
                 if not replaceable:
@@ -3001,6 +3039,7 @@ def _make_report(
             "replacements_total": run_stats.replacements_total,
             "replacements_improved": run_stats.replacements_improved,
             "replacements_worsened": run_stats.replacements_worsened,
+            "replacement_policy_skipped": run_stats.replacement_policy_skipped,
             "skipped_top_gainer_score": run_stats.skipped_top_gainer_score,
             "skipped_cluster_cap": run_stats.skipped_cluster_cap,
             "cooldown_skipped_candidates": run_stats.cooldown_skipped_candidates,
@@ -3086,6 +3125,9 @@ async def run_replay(
         "suspicious_exit_reentry",
         "baseline_suspicious_reentry",
         "partial_profit_take",
+        "replacement_block_non_losing",
+        "replacement_block_leader_delta_lt_10",
+        "replacement_block_non_losing_unless_delta20",
     } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
@@ -3271,6 +3313,9 @@ def parse_args() -> argparse.Namespace:
             "suspicious_exit_reentry",
             "baseline_suspicious_reentry",
             "partial_profit_take",
+            "replacement_block_non_losing",
+            "replacement_block_leader_delta_lt_10",
+            "replacement_block_non_losing_unless_delta20",
         ],
         default="score_replace",
     )
