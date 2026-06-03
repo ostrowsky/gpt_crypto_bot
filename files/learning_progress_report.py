@@ -116,6 +116,8 @@ def render_text(report: dict[str, Any]) -> str:
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
     ask = verdict.get("operator_hint", "проверь полный отчёт")
+    confidence = verdict.get("confidence", "unknown")
+    confidence_reason = verdict.get("confidence_reason", "")
     early_now = _fmt(rolling.get("early_last7_pct"), 1)
     early_prev = _fmt(rolling.get("early_prev7_pct"), 1)
     capture = _fmt(latest.get("capture_pct"), 1)
@@ -134,7 +136,7 @@ def render_text(report: dict[str, Any]) -> str:
     lines = [
         f"Бот — {day}",
         "",
-        f"{emoji} {title}   ·   👉 {ask}",
+        f"{emoji} {title}   ·   confidence={confidence}   ·   👉 {ask}",
         "",
         f"Главное: early-capture ~{early_now}% за 7д ({early_prev}% → {early_now}%). Цель — 25%+.",
         yesterday_line,
@@ -142,6 +144,8 @@ def render_text(report: dict[str, Any]) -> str:
         "",
         "📋 Прошлые решения:",
     ]
+    if confidence_reason:
+        lines.insert(4, f"Основание: {confidence_reason}")
     for item in decisions[:4]:
         lines.append(f"  • {item['name']} — {item['status']} · {item['impact']}")
     if not decisions:
@@ -280,15 +284,41 @@ def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetr
     early_old = _avg([d.early_pct for d in older])
     training = (((status.get("training") or {}).get("last_finished_at")) or "")
     stale_training = bool(training and training[:10] < latest.day)
+    confidence, confidence_reason = _verdict_confidence(latest, previous, older)
+    extra = {"confidence": confidence, "confidence_reason": confidence_reason}
     if latest.coverage_status not in {"ok", "complete"} and not _coverage_is_safe_partial(latest):
-        return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "сначала проверь покрытие данных"}
+        return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "сначала проверь покрытие данных", **extra}
     if stale_training and early_recent <= early_old + 1.0:
-        return {"label": "СТОИТ НА МЕСТЕ", "emoji": "🟠", "operator_hint": "нужно чинить обучение/гейты"}
+        return {"label": "СТОИТ НА МЕСТЕ", "emoji": "🟠", "operator_hint": "нужно чинить обучение/гейты", **extra}
     if early_recent >= early_old + 2.0:
-        return {"label": "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ", "emoji": "📈", "operator_hint": "фокус — монетизация выходов"}
+        return {"label": "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ", "emoji": "📈", "operator_hint": "фокус — монетизация выходов", **extra}
     if early_recent + 2.0 < early_old:
-        return {"label": "ДЕГРАДИРУЕТ", "emoji": "📉", "operator_hint": "нужно остановить авто-изменения"}
-    return {"label": "СТОИТ НА МЕСТЕ", "emoji": "➡️", "operator_hint": "ждать нельзя, нужны узкие проверки"}
+        if confidence == "high":
+            return {"label": "ДЕГРАДИРУЕТ", "emoji": "📉", "operator_hint": "остановить авто-изменения и проверить replay", **extra}
+        return {"label": "УХУДШИЛСЯ ПО EARLY-CAPTURE", "emoji": "🟠", "operator_hint": "нужны replay-проверки, не авто-изменения", **extra}
+    return {"label": "СТОИТ НА МЕСТЕ", "emoji": "➡️", "operator_hint": "ждать нельзя, нужны узкие проверки", **extra}
+
+
+def _verdict_confidence(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics]) -> tuple[str, str]:
+    reasons: list[str] = []
+    if latest.watchlist_top_count < 5:
+        reasons.append(f"малый denominator дня: watchlist_top={latest.watchlist_top_count}")
+    if len(previous) < 6 or len(older) < 6:
+        reasons.append(f"короткое rolling окно: prev={len(previous)}, older={len(older)}")
+    report_days = [d.day for d in [*older, *previous, latest] if d.day and d.day != "unknown"]
+    if len(report_days) >= 2:
+        try:
+            parsed = [date.fromisoformat(day) for day in report_days]
+            span = (max(parsed) - min(parsed)).days + 1
+            if span > len(set(parsed)) + 3:
+                reasons.append(f"разреженные отчётные дни: reports={len(set(parsed))}/{span} calendar days")
+        except Exception:
+            pass
+    if latest.coverage_status not in {"ok", "complete"} and not _coverage_is_safe_partial(latest):
+        reasons.append(f"coverage={latest.coverage_status}")
+    if reasons:
+        return "medium" if len(reasons) == 1 else "low", "; ".join(reasons)
+    return "high", "достаточный denominator и плотное rolling окно"
 
 
 def _learning_components(
@@ -470,6 +500,9 @@ def _next_actions(
 
 
 def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
+    cached = _load_fresh_cached_json(reports_dir / "observable_tail_selector_replay_latest.json")
+    if cached:
+        return _shadow_tail_selector_summary_from_report(cached)
     try:
         report = replay_observable_tail_selector.build_replay(
             reports_dir=reports_dir,
@@ -480,6 +513,10 @@ def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
         )
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+    return _shadow_tail_selector_summary_from_report(report)
+
+
+def _shadow_tail_selector_summary_from_report(report: dict[str, Any]) -> dict[str, Any]:
     ranked = report.get("ranked_selectors") or []
     if not ranked:
         return {"status": "missing", "detail": "нет selector candidates"}
@@ -510,6 +547,9 @@ def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
 
 def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
+    cached = _load_fresh_cached_json(reports_dir / "entry_admission_shadow_reward_latest.json")
+    if cached:
+        return _shadow_entry_admission_summary_from_report(cached)
     try:
         report = report_entry_admission_shadow_reward.build_report(
             reports_dir=reports_dir,
@@ -520,6 +560,10 @@ def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
         )
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+    return _shadow_entry_admission_summary_from_report(report)
+
+
+def _shadow_entry_admission_summary_from_report(report: dict[str, Any]) -> dict[str, Any]:
     best = report.get("best_variant") or {}
     if not best:
         return {"status": "missing", "detail": "нет admission candidates"}
@@ -545,6 +589,9 @@ def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
 
 def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
+    cached = _load_fresh_cached_json(reports_dir / "blocked_winner_causal_reward_latest.json")
+    if cached:
+        return _blocker_reward_summary_from_report(cached)
     try:
         report = report_blocked_winner_causal_reward.build_report(
             reports_dir=reports_dir,
@@ -555,6 +602,10 @@ def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
         )
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+    return _blocker_reward_summary_from_report(report)
+
+
+def _blocker_reward_summary_from_report(report: dict[str, Any]) -> dict[str, Any]:
     table = report.get("reason_table") or []
     if not table:
         return {"status": "missing", "detail": "нет blocker rows"}
@@ -578,6 +629,9 @@ def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
 
 def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
+    cached = _load_fresh_cached_json(reports_dir / "portfolio_replacement_shadow_reward_latest.json")
+    if cached:
+        return _portfolio_replacement_summary_from_report(cached)
     try:
         report = report_portfolio_replacement_shadow_reward.build_report(
             files_dir=workspace_dir / "files",
@@ -588,6 +642,10 @@ def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
         )
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+    return _portfolio_replacement_summary_from_report(report)
+
+
+def _portfolio_replacement_summary_from_report(report: dict[str, Any]) -> dict[str, Any]:
     summary = report.get("summary") or {}
     policies = report.get("policy_simulations") or []
     decision = str(report.get("decision") or "")
@@ -690,6 +748,18 @@ def _focus_findings(reports_dir: Path, latest_day: str, focus: list[str]) -> lis
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return {}
+
+
+def _load_fresh_cached_json(path: Path, max_age_hours: float = 36.0) -> dict[str, Any]:
+    try:
+        if not path.exists():
+            return {}
+        age_seconds = datetime.now(timezone.utc).timestamp() - path.stat().st_mtime
+        if age_seconds > max_age_hours * 3600:
+            return {}
+        return _load_json(path)
     except Exception:
         return {}
 

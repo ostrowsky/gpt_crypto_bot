@@ -153,6 +153,40 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertTrue(any("Shadow tail selector прошёл replay-gate" in x for x in actions))
 
+    def test_shadow_tail_selector_uses_fresh_cache_without_recomputing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            reports = Path(td)
+            (reports / "observable_tail_selector_replay_latest.json").write_text(json.dumps({
+                "decision": "no_selector_passed_observable_shadow_gate",
+                "ranked_selectors": [
+                    {
+                        "name": "cached_selector",
+                        "test": {
+                            "avg_delta_pct": 0.09,
+                            "median_delta_pct": 0.0,
+                            "worse_rate_pct": 26.5,
+                            "allowed_rate_pct": 31.0,
+                            "false_positive_allowed_rate_pct": 0.0,
+                        },
+                    }
+                ],
+            }), encoding="utf-8")
+
+            class FailingReplay:
+                @staticmethod
+                def build_replay(**_kwargs):
+                    raise AssertionError("daily report should use fresh cache")
+
+            original = lpr.replay_observable_tail_selector
+            try:
+                lpr.replay_observable_tail_selector = FailingReplay
+                summary = lpr._build_shadow_tail_selector_summary(reports)
+            finally:
+                lpr.replay_observable_tail_selector = original
+
+        self.assertEqual(summary["status"], "failed_gate")
+        self.assertIn("cached_selector", summary["detail"])
+
     def test_shadow_entry_admission_summary_and_actions(self) -> None:
         class FakeAdmission:
             @staticmethod
@@ -328,6 +362,45 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertEqual(components["measurement"]["status"], "ok")
 
+    def test_verdict_downgrade_uses_low_confidence_on_small_sparse_denominator(self) -> None:
+        latest = lpr.DayMetrics(
+            day="2026-06-02",
+            watchlist_top_count=3,
+            early_pct=0.0,
+            coverage_status="partial",
+            coverage_assessment="partial_safe_inactive_symbols_only",
+        )
+        previous = [
+            lpr.DayMetrics(day="2026-05-26", watchlist_top_count=5, early_pct=60.0, coverage_status="complete"),
+            lpr.DayMetrics(day="2026-05-27", watchlist_top_count=3, early_pct=0.0, coverage_status="complete"),
+        ]
+        older = [
+            lpr.DayMetrics(day="2026-05-18", watchlist_top_count=5, early_pct=60.0, coverage_status="complete"),
+            lpr.DayMetrics(day="2026-05-19", watchlist_top_count=5, early_pct=50.0, coverage_status="complete"),
+        ]
+
+        verdict = lpr._verdict(latest, previous, older, {"training": {"last_finished_at": "2026-06-03T06:00:00Z"}})
+
+        self.assertEqual(verdict["label"], "УХУДШИЛСЯ ПО EARLY-CAPTURE")
+        self.assertEqual(verdict["confidence"], "low")
+        self.assertIn("малый denominator", verdict["confidence_reason"])
+
+    def test_verdict_can_degrade_only_with_high_confidence_window(self) -> None:
+        latest = lpr.DayMetrics(day="2026-06-02", watchlist_top_count=10, early_pct=10.0, coverage_status="complete")
+        previous = [
+            lpr.DayMetrics(day=f"2026-05-{day:02d}", watchlist_top_count=10, early_pct=10.0, coverage_status="complete")
+            for day in range(26, 32)
+        ]
+        older = [
+            lpr.DayMetrics(day=f"2026-05-{day:02d}", watchlist_top_count=10, early_pct=45.0, coverage_status="complete")
+            for day in range(19, 26)
+        ]
+
+        verdict = lpr._verdict(latest, previous, older, {"training": {"last_finished_at": "2026-06-03T06:00:00Z"}})
+
+        self.assertEqual(verdict["label"], "ДЕГРАДИРУЕТ")
+        self.assertEqual(verdict["confidence"], "high")
+
     def test_zero_watchlist_denominator_is_not_serious_early_failure(self) -> None:
         latest = lpr.DayMetrics(
             day="2026-05-31",
@@ -352,7 +425,9 @@ class LearningProgressReportTest(unittest.TestCase):
             "portfolio_replacement": {"status": "missing", "detail": "нет отчёта"},
             "next_actions": [],
         }
-        self.assertIn("метрика дня не применима", lpr.render_text(report))
+        text = lpr.render_text(report)
+        self.assertIn("confidence=unknown", text)
+        self.assertIn("метрика дня не применима", text)
 
     def test_measurement_freshness_falls_back_to_report_files_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as td:
