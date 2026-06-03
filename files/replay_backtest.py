@@ -1837,6 +1837,7 @@ async def _build_candidates_for_symbol(
     cache_4h: Dict[str, Tuple[np.ndarray, dict]],
     market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
     *,
+    variant: str = "score_replace",
     include_trend_start: bool = False,
 ) -> List[ReplayCandidate]:
     candidates: List[ReplayCandidate] = []
@@ -2003,7 +2004,8 @@ async def _build_candidates_for_symbol(
                 signal_flags=signal_flags,
             )
             candidate_score += _ml_candidate_ranker_runtime_bonus(ranker_info)
-            if _top_gainer_chase_guard_reason(
+            if _chase_guard_reason_for_replay_variant(
+                variant=variant,
                 tf=tf,
                 mode=mode,
                 rsi=rsi,
@@ -2375,6 +2377,44 @@ def _replacement_policy_block_reason(
     return ""
 
 
+def _chase_guard_reason_for_replay_variant(
+    *,
+    variant: str,
+    tf: str,
+    mode: str,
+    rsi: float,
+    daily_range: float,
+) -> Optional[str]:
+    """Replay-only chase-guard variants.
+
+    Production chase-guard behavior remains in monitor._top_gainer_chase_guard_reason.
+    These variants test narrow relaxations before any live change is considered.
+    """
+    if variant == "chase_guard_off":
+        return None
+    if variant == "chase_guard_rsi_off":
+        original_enabled = getattr(config, "TOP_GAINER_CHASE_GUARD_ENABLED", True)
+        original_rsi_max = getattr(config, "TOP_GAINER_CHASE_GUARD_MAX_RSI", 76.0)
+        try:
+            config.TOP_GAINER_CHASE_GUARD_ENABLED = original_enabled
+            config.TOP_GAINER_CHASE_GUARD_MAX_RSI = 999.0
+            return _top_gainer_chase_guard_reason(tf=tf, mode=mode, rsi=rsi, daily_range=daily_range)
+        finally:
+            config.TOP_GAINER_CHASE_GUARD_ENABLED = original_enabled
+            config.TOP_GAINER_CHASE_GUARD_MAX_RSI = original_rsi_max
+    if variant == "chase_guard_rsi_82":
+        original_enabled = getattr(config, "TOP_GAINER_CHASE_GUARD_ENABLED", True)
+        original_rsi_max = getattr(config, "TOP_GAINER_CHASE_GUARD_MAX_RSI", 76.0)
+        try:
+            config.TOP_GAINER_CHASE_GUARD_ENABLED = original_enabled
+            config.TOP_GAINER_CHASE_GUARD_MAX_RSI = 82.0
+            return _top_gainer_chase_guard_reason(tf=tf, mode=mode, rsi=rsi, daily_range=daily_range)
+        finally:
+            config.TOP_GAINER_CHASE_GUARD_ENABLED = original_enabled
+            config.TOP_GAINER_CHASE_GUARD_MAX_RSI = original_rsi_max
+    return _top_gainer_chase_guard_reason(tf=tf, mode=mode, rsi=rsi, daily_range=daily_range)
+
+
 def _series_price_at_or_before(data: np.ndarray, ts_ms: int) -> Optional[Tuple[int, float]]:
     idx = _find_last_closed_index(data["t"], ts_ms)
     if idx is None:
@@ -2658,6 +2698,7 @@ async def simulate_portfolio(
                 cache_15m,
                 cache_4h,
                 market_ctx,
+                variant=variant,
                 include_trend_start=variant == "trend_start",
             )
             stats.candidates_total += len(built)
@@ -2734,6 +2775,9 @@ async def simulate_portfolio(
             "replacement_block_non_losing",
             "replacement_block_leader_delta_lt_10",
             "replacement_block_non_losing_unless_delta20",
+            "chase_guard_off",
+            "chase_guard_rsi_off",
+            "chase_guard_rsi_82",
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",
@@ -3128,6 +3172,9 @@ async def run_replay(
         "replacement_block_non_losing",
         "replacement_block_leader_delta_lt_10",
         "replacement_block_non_losing_unless_delta20",
+        "chase_guard_off",
+        "chase_guard_rsi_off",
+        "chase_guard_rsi_82",
     } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
@@ -3316,6 +3363,9 @@ def parse_args() -> argparse.Namespace:
             "replacement_block_non_losing",
             "replacement_block_leader_delta_lt_10",
             "replacement_block_non_losing_unless_delta20",
+            "chase_guard_off",
+            "chase_guard_rsi_off",
+            "chase_guard_rsi_82",
         ],
         default="score_replace",
     )

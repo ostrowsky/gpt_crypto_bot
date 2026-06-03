@@ -32,6 +32,7 @@ $releaseSuite = @(
     "test_report_blocked_winner_causal_reward",
     "test_report_portfolio_replacement_shadow_reward",
     "test_replay_replacement_policy_variants",
+    "test_replay_chase_guard_variants",
     "test_market_signal_agent_replacement_policy",
     "test_learning_progress_report",
     "test_replay_protected_trailing_exit_candle",
