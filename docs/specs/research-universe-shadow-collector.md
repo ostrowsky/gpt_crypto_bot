@@ -58,7 +58,8 @@ It should report status in `rl_worker_status.json`, including:
 - symbols scanned;
 - rows written;
 - labels updated;
-- in-progress cycle status while a long collector cycle has not yet returned to the worker loop.
+- in-progress cycle status while a long collector cycle has not yet returned to the worker loop;
+- batch-level progress for pairs scanned, rows written, and labels updated.
 
 ## Expected Effect
 

@@ -107,6 +107,8 @@ async def run_once(
                 batch_size=batch_size,
                 fetch_limit=fetch_limit,
                 symbol_timeout_sec=symbol_timeout_sec,
+                status_file=status_file,
+                status=status,
             )
         status.update(result)
         status["finished_at"] = _utc_now_iso()
@@ -166,6 +168,8 @@ async def collect_symbols(
     batch_size: int,
     fetch_limit: int,
     symbol_timeout_sec: int,
+    status_file: Path | None = None,
+    status: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     existing_ids = _existing_ids(dataset_file)
     rows_written = 0
@@ -196,6 +200,15 @@ async def collect_symbols(
                 continue
             rows_written += int(result.get("rows_written", 0))
             labels_updated += int(result.get("labels_updated", 0))
+        if status_file is not None and status is not None:
+            status.update(
+                {
+                    "pairs_scanned": min(start + len(batch), len(pairs)),
+                    "rows_written": rows_written,
+                    "labels_updated": labels_updated,
+                }
+            )
+            _write_status(status_file, status)
     return {
         "symbols_scanned": len(universe),
         "pairs_scanned": len(pairs),
