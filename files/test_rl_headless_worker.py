@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import unittest
 import tempfile
 from pathlib import Path
 
 import config
+import rl_headless_worker
 from rl_headless_worker import (
     WorkerState,
     _claim_learning_progress_telegram_slot,
@@ -156,6 +158,48 @@ class TestResearchUniverseShadowStatus(unittest.TestCase):
         self.assertEqual(section["last_symbols_scanned"], 123)
         self.assertEqual(section["last_rows_written"], 45)
         self.assertIn("research_universe_shadow.jsonl", section["dataset_file"])
+
+    def test_status_snapshot_overlays_in_progress_collector_status(self) -> None:
+        state = WorkerState(
+            train_interval_sec=60,
+            status_interval_sec=60,
+            min_rows=1,
+            min_new_rows=1,
+            collector_enabled=False,
+        )
+        with tempfile.TemporaryDirectory() as td:
+            status_file = Path(td) / "research_status.json"
+            status_file.write_text(
+                json.dumps(
+                    {
+                        "running": True,
+                        "started_at": "2026-06-04T11:18:03Z",
+                        "finished_at": None,
+                        "symbols_total": 80,
+                        "symbols_scanned": 80,
+                        "pairs_scanned": 12,
+                        "rows_written": 72,
+                        "labels_updated": 3,
+                        "last_error": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            old_status_file = rl_headless_worker.research_universe_shadow_collector.STATUS_FILE
+            try:
+                rl_headless_worker.research_universe_shadow_collector.STATUS_FILE = status_file
+                snapshot = build_status_snapshot(state, critic_report={}, ml_rows_total=0)
+            finally:
+                rl_headless_worker.research_universe_shadow_collector.STATUS_FILE = old_status_file
+
+        section = snapshot["research_universe_shadow"]
+        self.assertTrue(section["running"])
+        self.assertEqual(section["last_started_at"], "2026-06-04T11:18:03Z")
+        self.assertEqual(section["last_symbols_scanned"], 80)
+        self.assertEqual(section["last_pairs_scanned"], 12)
+        self.assertEqual(section["last_rows_written"], 72)
+        self.assertEqual(section["last_labels_updated"], 3)
+        self.assertEqual(section["cycle_status"]["symbols_total"], 80)
 
 
 if __name__ == "__main__":

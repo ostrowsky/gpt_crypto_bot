@@ -69,6 +69,7 @@ async def run_once(
 ) -> dict[str, Any]:
     max_symbols = int(max_symbols if max_symbols is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_MAX_SYMBOLS", 80))
     batch_size = int(batch_size if batch_size is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_BATCH_SIZE", 8))
+    symbol_timeout_sec = int(getattr(config, "RESEARCH_UNIVERSE_SHADOW_SYMBOL_TIMEOUT_SEC", 40))
     min_quote_volume = float(min_quote_volume if min_quote_volume is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_MIN_QUOTE_VOLUME", 1_000_000.0))
     tf_list = tuple(str(x) for x in (timeframes or getattr(config, "RESEARCH_UNIVERSE_SHADOW_TIMEFRAMES", ("15m",))))
     status = {
@@ -88,7 +89,8 @@ async def run_once(
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         connector = aiohttp.TCPConnector(limit=max(4, batch_size * 2))
-        async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+        timeout = aiohttp.ClientTimeout(total=max(30, symbol_timeout_sec + 10))
+        async with aiohttp.ClientSession(headers=headers, connector=connector, timeout=timeout) as session:
             universe = await build_research_universe(
                 session,
                 max_symbols=max_symbols,
@@ -104,6 +106,7 @@ async def run_once(
                 timeframes=tf_list,
                 batch_size=batch_size,
                 fetch_limit=fetch_limit,
+                symbol_timeout_sec=symbol_timeout_sec,
             )
         status.update(result)
         status["finished_at"] = _utc_now_iso()
@@ -162,6 +165,7 @@ async def collect_symbols(
     timeframes: Iterable[str],
     batch_size: int,
     fetch_limit: int,
+    symbol_timeout_sec: int,
 ) -> dict[str, int]:
     existing_ids = _existing_ids(dataset_file)
     rows_written = 0
@@ -171,13 +175,16 @@ async def collect_symbols(
         batch = pairs[start : start + batch_size]
         results = await asyncio.gather(
             *[
-                _collect_one(
-                    session,
-                    item,
-                    tf,
-                    dataset_file=dataset_file,
-                    existing_ids=existing_ids,
-                    fetch_limit=fetch_limit,
+                asyncio.wait_for(
+                    _collect_one(
+                        session,
+                        item,
+                        tf,
+                        dataset_file=dataset_file,
+                        existing_ids=existing_ids,
+                        fetch_limit=fetch_limit,
+                    ),
+                    timeout=symbol_timeout_sec,
                 )
                 for item, tf in batch
             ],

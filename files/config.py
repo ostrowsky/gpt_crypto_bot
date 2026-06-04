@@ -166,6 +166,7 @@ RESEARCH_UNIVERSE_SHADOW_TIMEFRAMES: tuple[str, ...] = ("15m",)
 RESEARCH_UNIVERSE_SHADOW_MIN_QUOTE_VOLUME: float = 1_000_000.0
 RESEARCH_UNIVERSE_SHADOW_BATCH_SIZE: int = 8
 RESEARCH_UNIVERSE_SHADOW_INTERVAL_SEC: int = 15 * 60
+RESEARCH_UNIVERSE_SHADOW_SYMBOL_TIMEOUT_SEC: int = 40
 
 ATR_TRAIL_K: float = 2.0   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РґР»СЏ С‚СЂРµР№Р»РёРЅРі-СЃС‚РѕРїР°
 MACDWARN_BARS: int = 3     # Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ MACD hist РїР°РґР°РµС‚ в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рѕ СЂР°Р·РІРѕСЂРѕС‚Рµ

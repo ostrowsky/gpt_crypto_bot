@@ -23,7 +23,7 @@ The collector must support learning/replay research without changing live behavi
 - Do not emit Telegram alerts.
 - Do not write into `ml_dataset.jsonl` or `critic_dataset.jsonl` by default.
 - Store research observations in a separate JSONL file.
-- Keep configurable caps for symbol count, timeframes, batch size, and cycle interval.
+- Keep configurable caps for symbol count, timeframes, batch size, cycle interval, and per-symbol timeout.
 - Start with a bounded liquid-symbol ramp-up before attempting uncapped full-universe collection.
 - Promotion from research universe to trade watchlist requires a separate replay/liquidity/operator gate.
 
@@ -48,7 +48,7 @@ Each row should include:
 
 The collector may run from the headless worker as a separate background task.
 
-Default rollout should be capped to avoid starving the existing live/research loops. Increase the cap only after runtime status shows healthy cycle duration and no API degradation.
+Default rollout should be capped to avoid starving the existing live/research loops. Increase the cap only after runtime status shows healthy cycle duration and no API degradation. Each symbol fetch must be bounded by timeout so a long-tail API hang cannot block the worker indefinitely.
 
 It should report status in `rl_worker_status.json`, including:
 
@@ -57,7 +57,8 @@ It should report status in `rl_worker_status.json`, including:
 - last error;
 - symbols scanned;
 - rows written;
-- labels updated.
+- labels updated;
+- in-progress cycle status while a long collector cycle has not yet returned to the worker loop.
 
 ## Expected Effect
 

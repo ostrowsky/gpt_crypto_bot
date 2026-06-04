@@ -101,6 +101,14 @@ def _claim_learning_progress_telegram_slot(
     return True
 
 
+def _load_json_file(path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _count_jsonl_rows(path: Path) -> int:
     if not path.exists():
         return 0
@@ -171,6 +179,42 @@ def build_status_snapshot(
     critic_report: Dict[str, Any],
     ml_rows_total: int,
 ) -> Dict[str, Any]:
+    research_shadow_file_status = _load_json_file(research_universe_shadow_collector.STATUS_FILE)
+    research_shadow_section = {
+        "enabled": state.research_universe_shadow_enabled,
+        "runs_total": state.research_universe_shadow_runs_total,
+        "runs_ok": state.research_universe_shadow_runs_ok,
+        "runs_failed": state.research_universe_shadow_runs_failed,
+        "last_started_at": state.research_universe_shadow_last_started_at,
+        "last_finished_at": state.research_universe_shadow_last_finished_at,
+        "last_error": state.research_universe_shadow_last_error,
+        "last_symbols_scanned": state.research_universe_shadow_last_symbols_scanned,
+        "last_pairs_scanned": state.research_universe_shadow_last_pairs_scanned,
+        "last_rows_written": state.research_universe_shadow_last_rows_written,
+        "last_labels_updated": state.research_universe_shadow_last_labels_updated,
+        "dataset_file": str(research_universe_shadow_collector.DATASET_FILE),
+    }
+    if research_shadow_file_status:
+        research_shadow_section["cycle_status"] = research_shadow_file_status
+        # The collector writes its own status while a long cycle is still in
+        # progress. Surface that partial status here so /status does not look
+        # stale or empty until the full cycle returns to the worker loop.
+        if research_shadow_file_status.get("running"):
+            research_shadow_section["running"] = True
+        for section_key, file_key in (
+            ("last_started_at", "started_at"),
+            ("last_finished_at", "finished_at"),
+            ("last_error", "last_error"),
+            ("last_symbols_scanned", "symbols_scanned"),
+            ("last_pairs_scanned", "pairs_scanned"),
+            ("last_rows_written", "rows_written"),
+            ("last_labels_updated", "labels_updated"),
+        ):
+            current = research_shadow_section.get(section_key)
+            value = research_shadow_file_status.get(file_key)
+            if current in (None, "", 0) and value not in (None, ""):
+                research_shadow_section[section_key] = value
+
     return {
         "worker": {
             "started_at": state.started_at,
@@ -207,20 +251,7 @@ def build_status_snapshot(
             "ml_dataset_rows": ml_rows_total,
             "critic_dataset": critic_report,
         },
-        "research_universe_shadow": {
-            "enabled": state.research_universe_shadow_enabled,
-            "runs_total": state.research_universe_shadow_runs_total,
-            "runs_ok": state.research_universe_shadow_runs_ok,
-            "runs_failed": state.research_universe_shadow_runs_failed,
-            "last_started_at": state.research_universe_shadow_last_started_at,
-            "last_finished_at": state.research_universe_shadow_last_finished_at,
-            "last_error": state.research_universe_shadow_last_error,
-            "last_symbols_scanned": state.research_universe_shadow_last_symbols_scanned,
-            "last_pairs_scanned": state.research_universe_shadow_last_pairs_scanned,
-            "last_rows_written": state.research_universe_shadow_last_rows_written,
-            "last_labels_updated": state.research_universe_shadow_last_labels_updated,
-            "dataset_file": str(research_universe_shadow_collector.DATASET_FILE),
-        },
+        "research_universe_shadow": research_shadow_section,
         "top_gainer_critic": {
             "enabled": state.top_gainer_enabled,
             "runs_total": state.top_gainer_runs_total,
