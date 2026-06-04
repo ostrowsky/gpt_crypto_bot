@@ -25,6 +25,7 @@ import report_candidate_ranker_shadow
 import report_critic_dataset
 import report_suspicious_reentry_scorecard
 import report_v2_daily_scorecard
+import report_research_universe_shadow_scorecard
 import research_universe_shadow_collector
 import learning_progress_report
 import signal_quality_feedback
@@ -1497,6 +1498,14 @@ async def _signal_quality_loop(state: WorkerState) -> None:
                 )
                 if bool(getattr(config, "SUSPICIOUS_REENTRY_SCORECARD_TELEGRAM_ENABLED", True)):
                     await _send_telegram_text(report_suspicious_reentry_scorecard.render_text(reentry_scorecard))
+            if bool(getattr(config, "RESEARCH_UNIVERSE_SHADOW_SCORECARD_ENABLED", True)):
+                research_scorecard = await asyncio.to_thread(
+                    report_research_universe_shadow_scorecard.build_scorecard,
+                    days=int(getattr(config, "RESEARCH_UNIVERSE_SHADOW_SCORECARD_DAYS", 14)),
+                    horizon=int(getattr(config, "RESEARCH_UNIVERSE_SHADOW_SCORECARD_HORIZON", 5)),
+                )
+                if bool(getattr(config, "RESEARCH_UNIVERSE_SHADOW_SCORECARD_TELEGRAM_ENABLED", False)):
+                    await _send_telegram_text(report_research_universe_shadow_scorecard.render_text(research_scorecard))
             await _write_status_now(state)
         except asyncio.CancelledError:
             raise
