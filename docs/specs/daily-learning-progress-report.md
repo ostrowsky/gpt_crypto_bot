@@ -39,6 +39,7 @@ from final reports.
 - No BUY/SELL changes.
 - No automatic approval of hypotheses.
 - If data is partial/stale, the report must say so clearly.
+- Telegram delivery must be idempotent per daily slot, even if the worker restarts inside the delivery window.
 
 ## Required Output
 
@@ -50,3 +51,13 @@ A concise Telegram-friendly report with:
 - previous decisions and whether they helped;
 - alerts;
 - next operator actions.
+
+## Delivery Idempotency
+
+The worker must persist a sent marker for each `target_day::learning_progress` slot before Telegram delivery.
+
+Expected behavior:
+
+- If the same slot was already marked sent, skip Telegram delivery.
+- Use an atomic lock/marker so two workers cannot send the same daily report concurrently.
+- Keep report generation allowed for diagnostics, but prevent duplicate Telegram messages for the same slot.

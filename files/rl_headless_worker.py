@@ -41,6 +41,7 @@ LOG_FILE = RUNTIME_DIR / "rl_worker_runtime.log"
 REPORT_DIR = RUNTIME_DIR / "reports"
 CHAT_IDS_FILE = ROOT / ".chat_ids"
 TRAIN_LOCK_FILE = RUNTIME_DIR / "rl_worker_train.lock"
+LEARNING_PROGRESS_SENT_DIR = RUNTIME_DIR / "learning_progress_sent_slots"
 LATEST_TRAIN_JSON = REPORT_DIR / "rl_train_latest.json"
 LATEST_TRAIN_TXT = REPORT_DIR / "rl_train_latest.txt"
 SIGNAL_QUALITY_SCRIPT = (
@@ -69,6 +70,34 @@ def _utc_now() -> datetime:
 
 def _utc_now_iso() -> str:
     return _utc_now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _slot_marker_name(slot_key: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(slot_key))
+    return safe.strip("_") or "unknown"
+
+
+def _claim_learning_progress_telegram_slot(
+    slot_key: str,
+    marker_dir: Path = LEARNING_PROGRESS_SENT_DIR,
+) -> bool:
+    """Atomically claim a daily learning-progress Telegram slot.
+
+    Worker memory is not enough because a restart inside the 09:00 delivery
+    window resets ``learning_progress_last_slot_key``. This persisted marker
+    prevents duplicate Telegram reports from the same slot across restarts or
+    concurrent workers.
+    """
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker = marker_dir / f"{_slot_marker_name(slot_key)}.sent"
+    try:
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"slot_key": slot_key, "claimed_at_utc": _utc_now_iso()}, ensure_ascii=False))
+        fh.write("\n")
+    return True
 
 
 def _count_jsonl_rows(path: Path) -> int:
@@ -1429,13 +1458,18 @@ async def _learning_progress_loop(state: WorkerState) -> None:
             state.learning_progress_last_report_txt = str(files.get("txt", ""))
             state.learning_progress_last_verdict = str(verdict.get("label") or "")
             if bool(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_TELEGRAM_ENABLED", True)):
-                notify = await _send_telegram_text(learning_progress_report.render_text(report))
-                state.learning_progress_last_telegram_sent_count = int(notify.get("sent", 0) or 0)
-                if state.learning_progress_last_telegram_sent_count > 0:
-                    state.learning_progress_last_telegram_error = ""
+                if _claim_learning_progress_telegram_slot(slot_key):
+                    notify = await _send_telegram_text(learning_progress_report.render_text(report))
+                    state.learning_progress_last_telegram_sent_count = int(notify.get("sent", 0) or 0)
+                    if state.learning_progress_last_telegram_sent_count > 0:
+                        state.learning_progress_last_telegram_error = ""
+                    else:
+                        errors = notify.get("errors") or []
+                        state.learning_progress_last_telegram_error = "; ".join(str(item) for item in errors) or str(notify.get("skipped") or "not_sent")
                 else:
-                    errors = notify.get("errors") or []
-                    state.learning_progress_last_telegram_error = "; ".join(str(item) for item in errors) or str(notify.get("skipped") or "not_sent")
+                    state.learning_progress_last_telegram_sent_count = 0
+                    state.learning_progress_last_telegram_error = f"duplicate_slot_skipped:{slot_key}"
+                    log.info("Learning progress Telegram skipped: duplicate slot %s", slot_key)
             log.info("Learning progress report done: day=%s verdict=%s", state.learning_progress_last_target_day_local, state.learning_progress_last_verdict)
             await _write_status_now(state)
         except asyncio.CancelledError:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 
 import config
 from rl_headless_worker import (
+    _claim_learning_progress_telegram_slot,
     _render_top_gainer_telegram,
     _should_send_top_gainer_telegram,
     should_train,
@@ -118,6 +121,15 @@ class TestTopGainerTelegramReport(unittest.TestCase):
         finally:
             config.TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED = old_enabled
             config.TOP_GAINER_CRITIC_TELEGRAM_FINAL_ONLY = old_final_only
+
+
+class TestLearningProgressTelegramIdempotency(unittest.TestCase):
+    def test_learning_progress_slot_claim_is_persistent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            marker_dir = Path(td)
+            self.assertTrue(_claim_learning_progress_telegram_slot("2026-06-03::learning_progress", marker_dir))
+            self.assertFalse(_claim_learning_progress_telegram_slot("2026-06-03::learning_progress", marker_dir))
+            self.assertTrue(_claim_learning_progress_telegram_slot("2026-06-04::learning_progress", marker_dir))
 
 
 if __name__ == "__main__":
