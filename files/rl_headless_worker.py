@@ -25,6 +25,7 @@ import report_candidate_ranker_shadow
 import report_critic_dataset
 import report_suspicious_reentry_scorecard
 import report_v2_daily_scorecard
+import research_universe_shadow_collector
 import learning_progress_report
 import signal_quality_feedback
 import top_gainer_critic
@@ -205,6 +206,20 @@ def build_status_snapshot(
         "datasets": {
             "ml_dataset_rows": ml_rows_total,
             "critic_dataset": critic_report,
+        },
+        "research_universe_shadow": {
+            "enabled": state.research_universe_shadow_enabled,
+            "runs_total": state.research_universe_shadow_runs_total,
+            "runs_ok": state.research_universe_shadow_runs_ok,
+            "runs_failed": state.research_universe_shadow_runs_failed,
+            "last_started_at": state.research_universe_shadow_last_started_at,
+            "last_finished_at": state.research_universe_shadow_last_finished_at,
+            "last_error": state.research_universe_shadow_last_error,
+            "last_symbols_scanned": state.research_universe_shadow_last_symbols_scanned,
+            "last_pairs_scanned": state.research_universe_shadow_last_pairs_scanned,
+            "last_rows_written": state.research_universe_shadow_last_rows_written,
+            "last_labels_updated": state.research_universe_shadow_last_labels_updated,
+            "dataset_file": str(research_universe_shadow_collector.DATASET_FILE),
         },
         "top_gainer_critic": {
             "enabled": state.top_gainer_enabled,
@@ -928,6 +943,17 @@ class WorkerState:
     collector_last_cycle_finished_at: Optional[str] = None
     collector_last_cycle_stats: Dict[str, Any] = field(default_factory=dict)
     collector_last_error: str = ""
+    research_universe_shadow_enabled: bool = bool(getattr(config, "RESEARCH_UNIVERSE_SHADOW_ENABLED", True))
+    research_universe_shadow_runs_total: int = 0
+    research_universe_shadow_runs_ok: int = 0
+    research_universe_shadow_runs_failed: int = 0
+    research_universe_shadow_last_started_at: Optional[str] = None
+    research_universe_shadow_last_finished_at: Optional[str] = None
+    research_universe_shadow_last_error: str = ""
+    research_universe_shadow_last_symbols_scanned: int = 0
+    research_universe_shadow_last_pairs_scanned: int = 0
+    research_universe_shadow_last_rows_written: int = 0
+    research_universe_shadow_last_labels_updated: int = 0
     train_runs_total: int = 0
     train_runs_ok: int = 0
     train_runs_failed: int = 0
@@ -1034,6 +1060,44 @@ async def _collector_supervisor(state: WorkerState) -> None:
             await _write_status_now(state)
         wait = data_collector._seconds_until_next_bar()
         await asyncio.sleep(wait)
+
+
+async def _research_universe_shadow_loop(state: WorkerState) -> None:
+    log = logging.getLogger("rl_headless_worker.research_universe_shadow")
+    interval_sec = max(60, int(getattr(config, "RESEARCH_UNIVERSE_SHADOW_INTERVAL_SEC", 15 * 60)))
+    while True:
+        if not state.research_universe_shadow_enabled:
+            state.research_universe_shadow_last_error = "disabled"
+            await asyncio.sleep(interval_sec)
+            continue
+        state.research_universe_shadow_runs_total += 1
+        state.research_universe_shadow_last_started_at = _utc_now_iso()
+        try:
+            result = await research_universe_shadow_collector.run_once()
+            state.research_universe_shadow_runs_ok += 1
+            state.research_universe_shadow_last_finished_at = _utc_now_iso()
+            state.research_universe_shadow_last_error = ""
+            state.research_universe_shadow_last_symbols_scanned = int(result.get("symbols_scanned") or 0)
+            state.research_universe_shadow_last_pairs_scanned = int(result.get("pairs_scanned") or 0)
+            state.research_universe_shadow_last_rows_written = int(result.get("rows_written") or 0)
+            state.research_universe_shadow_last_labels_updated = int(result.get("labels_updated") or 0)
+            log.info(
+                "Research universe shadow cycle: symbols=%s pairs=%s rows=%s labels=%s",
+                state.research_universe_shadow_last_symbols_scanned,
+                state.research_universe_shadow_last_pairs_scanned,
+                state.research_universe_shadow_last_rows_written,
+                state.research_universe_shadow_last_labels_updated,
+            )
+            await _write_status_now(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.research_universe_shadow_runs_failed += 1
+            state.research_universe_shadow_last_finished_at = _utc_now_iso()
+            state.research_universe_shadow_last_error = str(exc)
+            log.exception("Research universe shadow cycle failed: %s", exc)
+            await _write_status_now(state)
+        await asyncio.sleep(interval_sec)
 
 
 async def _training_loop(state: WorkerState) -> None:
@@ -1532,6 +1596,7 @@ async def _amain(args: argparse.Namespace) -> int:
         asyncio.create_task(_top_gainer_critic_loop(state), name="top_gainer_critic"),
         asyncio.create_task(_signal_quality_loop(state), name="signal_quality_evaluator"),
         asyncio.create_task(_learning_progress_loop(state), name="learning_progress_report"),
+        asyncio.create_task(_research_universe_shadow_loop(state), name="research_universe_shadow"),
     ]
     if args.enable_collector:
         tasks.insert(0, asyncio.create_task(_collector_supervisor(state), name="collector"))

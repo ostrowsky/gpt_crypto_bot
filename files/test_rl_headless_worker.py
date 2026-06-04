@@ -6,7 +6,9 @@ from pathlib import Path
 
 import config
 from rl_headless_worker import (
+    WorkerState,
     _claim_learning_progress_telegram_slot,
+    build_status_snapshot,
     _render_top_gainer_telegram,
     _should_send_top_gainer_telegram,
     should_train,
@@ -130,6 +132,30 @@ class TestLearningProgressTelegramIdempotency(unittest.TestCase):
             self.assertTrue(_claim_learning_progress_telegram_slot("2026-06-03::learning_progress", marker_dir))
             self.assertFalse(_claim_learning_progress_telegram_slot("2026-06-03::learning_progress", marker_dir))
             self.assertTrue(_claim_learning_progress_telegram_slot("2026-06-04::learning_progress", marker_dir))
+
+
+class TestResearchUniverseShadowStatus(unittest.TestCase):
+    def test_status_snapshot_exposes_research_universe_shadow_collector(self) -> None:
+        state = WorkerState(
+            train_interval_sec=60,
+            status_interval_sec=60,
+            min_rows=1,
+            min_new_rows=1,
+            collector_enabled=False,
+        )
+        state.research_universe_shadow_runs_total = 1
+        state.research_universe_shadow_runs_ok = 1
+        state.research_universe_shadow_last_symbols_scanned = 123
+        state.research_universe_shadow_last_rows_written = 45
+
+        snapshot = build_status_snapshot(state, critic_report={}, ml_rows_total=0)
+        section = snapshot["research_universe_shadow"]
+
+        self.assertTrue(section["enabled"])
+        self.assertEqual(section["runs_total"], 1)
+        self.assertEqual(section["last_symbols_scanned"], 123)
+        self.assertEqual(section["last_rows_written"], 45)
+        self.assertIn("research_universe_shadow.jsonl", section["dataset_file"])
 
 
 if __name__ == "__main__":

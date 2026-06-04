@@ -158,6 +158,15 @@ BOT_ENABLE_DATA_COLLECTOR: bool = False
 BOT_STARTUP_AUTO_SCAN_ENABLED: bool = True
 RL_WORKER_ENABLE_COLLECTOR: bool = True
 
+# Research-only wide Binance universe collector. It does not trade, does not
+# emit Telegram alerts, and does not write to production ML/critic datasets.
+RESEARCH_UNIVERSE_SHADOW_ENABLED: bool = True
+RESEARCH_UNIVERSE_SHADOW_MAX_SYMBOLS: int = 300
+RESEARCH_UNIVERSE_SHADOW_TIMEFRAMES: tuple[str, ...] = ("15m",)
+RESEARCH_UNIVERSE_SHADOW_MIN_QUOTE_VOLUME: float = 1_000_000.0
+RESEARCH_UNIVERSE_SHADOW_BATCH_SIZE: int = 8
+RESEARCH_UNIVERSE_SHADOW_INTERVAL_SEC: int = 15 * 60
+
 ATR_TRAIL_K: float = 2.0   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РґР»СЏ С‚СЂРµР№Р»РёРЅРі-СЃС‚РѕРїР°
 MACDWARN_BARS: int = 3     # Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ MACD hist РїР°РґР°РµС‚ в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рѕ СЂР°Р·РІРѕСЂРѕС‚Рµ
 
