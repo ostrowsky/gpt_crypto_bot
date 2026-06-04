@@ -24,6 +24,7 @@ The collector must support learning/replay research without changing live behavi
 - Do not write into `ml_dataset.jsonl` or `critic_dataset.jsonl` by default.
 - Store research observations in a separate JSONL file.
 - Keep configurable caps for symbol count, timeframes, batch size, and cycle interval.
+- Start with a bounded liquid-symbol ramp-up before attempting uncapped full-universe collection.
 - Promotion from research universe to trade watchlist requires a separate replay/liquidity/operator gate.
 
 ## Dataset
@@ -46,6 +47,8 @@ Each row should include:
 ## Runtime Integration
 
 The collector may run from the headless worker as a separate background task.
+
+Default rollout should be capped to avoid starving the existing live/research loops. Increase the cap only after runtime status shows healthy cycle duration and no API degradation.
 
 It should report status in `rl_worker_status.json`, including:
 

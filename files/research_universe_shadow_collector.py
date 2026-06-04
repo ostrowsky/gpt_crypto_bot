@@ -67,7 +67,7 @@ async def run_once(
     min_quote_volume: float | None = None,
     fetch_limit: int = DEFAULT_FETCH_LIMIT,
 ) -> dict[str, Any]:
-    max_symbols = int(max_symbols if max_symbols is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_MAX_SYMBOLS", 300))
+    max_symbols = int(max_symbols if max_symbols is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_MAX_SYMBOLS", 80))
     batch_size = int(batch_size if batch_size is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_BATCH_SIZE", 8))
     min_quote_volume = float(min_quote_volume if min_quote_volume is not None else getattr(config, "RESEARCH_UNIVERSE_SHADOW_MIN_QUOTE_VOLUME", 1_000_000.0))
     tf_list = tuple(str(x) for x in (timeframes or getattr(config, "RESEARCH_UNIVERSE_SHADOW_TIMEFRAMES", ("15m",))))
@@ -95,6 +95,8 @@ async def run_once(
                 min_quote_volume=min_quote_volume,
             )
             status["symbols_total"] = len(universe)
+            status["symbols_scanned"] = len(universe)
+            _write_status(status_file, status)
             result = await collect_symbols(
                 session,
                 universe,
