@@ -267,27 +267,43 @@ def _apply_latest_coverage_triage(days: list[DayMetrics], reports_dir: Path) -> 
 def _rolling_summary(days: list[DayMetrics]) -> dict[str, Any]:
     last7 = days[-7:]
     prev7 = days[-14:-7]
+    last7_top = _days_with_top_denominator(last7)
+    prev7_top = _days_with_top_denominator(prev7)
     return {
-        "early_last7_pct": _avg([d.early_pct for d in last7]),
-        "early_prev7_pct": _avg([d.early_pct for d in prev7]),
-        "capture_last7_pct": _avg([d.capture_pct for d in last7]),
-        "capture_prev7_pct": _avg([d.capture_pct for d in prev7]),
+        "early_last7_pct": _avg([d.early_pct for d in last7_top]),
+        "early_prev7_pct": _avg([d.early_pct for d in prev7_top]),
+        "capture_last7_pct": _avg([d.capture_pct for d in last7_top]),
+        "capture_prev7_pct": _avg([d.capture_pct for d in prev7_top]),
         "miss_rate_last7_pct": _avg([d.miss_rate * 100 for d in last7 if d.miss_rate is not None]),
         "blocked_winners_last7": sum(d.blocked_winner_count for d in last7),
         "n_last7": len(last7),
         "n_prev7": len(prev7),
+        "n_last7_top_days": len(last7_top),
+        "n_prev7_top_days": len(prev7_top),
     }
 
 
+def _days_with_top_denominator(days: Iterable[DayMetrics]) -> list[DayMetrics]:
+    return [d for d in days if int(d.watchlist_top_count or 0) > 0]
+
+
 def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics], status: dict[str, Any]) -> dict[str, str]:
-    early_recent = _avg([d.early_pct for d in previous[-7:]] + [latest.early_pct])
-    early_old = _avg([d.early_pct for d in older])
+    recent_top_days = _days_with_top_denominator([*previous[-7:], latest])
+    older_top_days = _days_with_top_denominator(older)
+    early_recent = _avg([d.early_pct for d in recent_top_days])
+    early_old = _avg([d.early_pct for d in older_top_days])
     training = (((status.get("training") or {}).get("last_finished_at")) or "")
     stale_training = bool(training and training[:10] < latest.day)
     confidence, confidence_reason = _verdict_confidence(latest, previous, older)
     extra = {"confidence": confidence, "confidence_reason": confidence_reason}
     if latest.coverage_status not in {"ok", "complete"} and not _coverage_is_safe_partial(latest):
         return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "сначала проверь покрытие данных", **extra}
+    if latest.watchlist_top_count <= 0:
+        if early_recent is not None and early_old is not None and early_recent >= early_old + 2.0:
+            return {"label": 'ROLLING УЛУЧШАЕТСЯ, ДЕНЬ НЕИНФОРМАТИВЕН', "emoji": "🟡", "operator_hint": 'не принимать решений по пустому дню; фокус — exit', **extra}
+        return {"label": 'ДЕНЬ НЕИНФОРМАТИВЕН', "emoji": "🟡", "operator_hint": 'ждать валидный denominator; проверять exit', **extra}
+    if early_recent is None or early_old is None:
+        return {"label": 'СТАТУС НЕПОЛНЫЙ', "emoji": "🟡", "operator_hint": 'нужно больше валидных top-mover дней', **extra}
     if stale_training and early_recent <= early_old + 1.0:
         return {"label": "СТОИТ НА МЕСТЕ", "emoji": "🟠", "operator_hint": "нужно чинить обучение/гейты", **extra}
     if early_recent >= early_old + 2.0:

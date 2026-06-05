@@ -12,6 +12,7 @@ class LearningProgressReportTest(unittest.TestCase):
     def test_safe_partial_coverage_does_not_override_developing_verdict(self) -> None:
         latest = lpr.DayMetrics(
             day="2026-05-30",
+            watchlist_top_count=15,
             early_pct=100.0,
             coverage_status="partial",
             coverage_reasons=("partial candle coverage 186/206",),
@@ -20,11 +21,11 @@ class LearningProgressReportTest(unittest.TestCase):
             missing_symbol_status_counts={"BREAK": 20},
         )
         previous = [
-            lpr.DayMetrics(day=f"2026-05-2{i}", early_pct=40.0, coverage_status="complete")
+            lpr.DayMetrics(day=f"2026-05-2{i}", watchlist_top_count=15, early_pct=40.0, coverage_status="complete")
             for i in range(3, 10)
         ]
         older = [
-            lpr.DayMetrics(day=f"2026-05-1{i}", early_pct=20.0, coverage_status="complete")
+            lpr.DayMetrics(day=f"2026-05-1{i}", watchlist_top_count=15, early_pct=20.0, coverage_status="complete")
             for i in range(6, 23)
         ]
 
@@ -34,6 +35,32 @@ class LearningProgressReportTest(unittest.TestCase):
         self.assertEqual(verdict["label"], "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ")
         self.assertEqual(alerts[0]["severity"], "warn")
         self.assertIn("partial_safe_inactive_symbols_only", alerts[0]["text"])
+
+
+    def test_zero_denominator_day_does_not_get_green_developing_verdict(self) -> None:
+        latest = lpr.DayMetrics(
+            day="2026-06-04",
+            watchlist_top_count=0,
+            early_pct=0.0,
+            coverage_status="partial",
+            coverage_assessment="partial_safe_inactive_symbols_only",
+        )
+        previous = [
+            lpr.DayMetrics(day=f"2026-06-0{i}", watchlist_top_count=15, early_pct=60.0, coverage_status="complete")
+            for i in range(1, 7)
+        ]
+        older = [
+            lpr.DayMetrics(day=f"2026-05-2{i}", watchlist_top_count=15, early_pct=20.0, coverage_status="complete")
+            for i in range(1, 8)
+        ]
+
+        verdict = lpr._verdict(latest, previous, older, {"training": {"last_finished_at": "2026-06-05T06:00:00Z"}})
+        rolling = lpr._rolling_summary([*older, *previous, latest])
+
+        self.assertEqual(verdict["label"], 'ROLLING УЛУЧШАЕТСЯ, ДЕНЬ НЕИНФОРМАТИВЕН')
+        self.assertNotEqual(verdict["label"], "??????????? ?? ??????? ???????")
+        self.assertEqual(rolling["early_last7_pct"], 60.0)
+        self.assertEqual(rolling["n_last7_top_days"], 6)
 
     def test_build_report_flags_stale_training_and_low_early_capture(self) -> None:
         with tempfile.TemporaryDirectory() as td:
