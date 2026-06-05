@@ -103,6 +103,31 @@ async def _send_shadow_alert(session: aiohttp.ClientSession, event: dict) -> Non
             log.warning("v2 shadow telegram failed for %s: %s", chat_id, exc)
 
 
+def _cycle_snapshot(
+    *,
+    started_at: str,
+    scanned: int,
+    emitted: int,
+    stale: int,
+    errors: int,
+    in_progress: bool,
+    current_symbol: str = "",
+    current_tf: str = "",
+) -> dict:
+    cycle = {
+        "started_at": started_at,
+        "finished_at": None if in_progress else _now(),
+        "in_progress": bool(in_progress),
+        "scanned": int(scanned),
+        "emitted": int(emitted),
+        "stale": int(stale),
+        "errors": int(errors),
+    }
+    if current_symbol or current_tf:
+        cycle["current"] = {"symbol": current_symbol, "tf": current_tf}
+    return cycle
+
+
 def _snapshot(data, feat, i: int) -> FeatureSnapshot:
     ema20_arr = feat.get("ema20", feat.get("ema_fast"))
     daily_range_arr = feat.get("daily_range", feat.get("daily_range_pct"))
@@ -124,68 +149,129 @@ async def run_once() -> dict:
     scanned = 0
     errors = 0
     stale = 0
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+    started_at = _now()
+    scan_timeout_sec = max(5, int(getattr(config, "V2_SHADOW_SCAN_TIMEOUT_SEC", 20)))
+    status_every = max(1, int(getattr(config, "V2_SHADOW_STATUS_EVERY_SCANS", 10)))
+    _save_status(
+        running=True,
+        last_cycle=_cycle_snapshot(
+            started_at=started_at,
+            scanned=scanned,
+            emitted=emitted,
+            stale=stale,
+            errors=errors,
+            in_progress=True,
+        ),
+    )
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=max(30, scan_timeout_sec + 5))) as session:
         for sym in config.load_watchlist():
             for tf in config.TIMEFRAMES:
                 try:
-                    data = await fetch_klines(session, sym, tf, limit=120)
-                    if data is None or len(data) < 30:
-                        continue
-                    i = len(data["c"]) - 2
-                    bar_ts = int(data["t"][i])
-                    max_age_ms = 3 * BAR_MS.get(tf, 60 * 60 * 1000)
-                    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                    if now_ms - bar_ts > max_age_ms:
+                    _save_status(
+                        running=True,
+                        last_cycle=_cycle_snapshot(
+                            started_at=started_at,
+                            scanned=scanned,
+                            emitted=emitted,
+                            stale=stale,
+                            errors=errors,
+                            in_progress=True,
+                            current_symbol=str(sym),
+                            current_tf=str(tf),
+                        ),
+                    )
+                    result = await asyncio.wait_for(
+                        _scan_symbol_tf(session, state, str(sym), str(tf)),
+                        timeout=scan_timeout_sec,
+                    )
+                    if result.get("stale"):
                         stale += 1
-                        continue
-                    feat = compute_features(data["o"], data["h"], data["l"], data["c"].astype(float), data["v"])
-                    snapshot = _snapshot(data, feat, i)
-                    decision = estimate_shadow_state(snapshot)
-                    key = f"{sym}|{tf}"
-                    previous = state.get(key)
-                    bootstrap = previous is None
-                    changed = material_transition(previous, decision)
-                    event = {
-                        "event": "v2_shadow_signal",
-                        "source": "v2_shadow_observer",
-                        "ts": _now(),
-                        "sym": sym,
-                        "tf": tf,
-                        "bar_ts": bar_ts,
-                        "previous_state": None if not previous else previous.get("state"),
-                        "state": decision.state.value,
-                        "action": decision.action,
-                        "confidence": decision.confidence,
-                        "reason": decision.reason,
-                        "bootstrap": bootstrap,
-                        "features": snapshot.__dict__,
-                    }
-                    trace_event = {
-                        **event,
-                        "observed_at": event["ts"],
-                        "material_transition": changed,
-                    }
-                    if not previous or previous.get("bar_ts") != bar_ts:
-                        append_decision_trace(TRACE_FILE, trace_event)
-                    if changed:
-                        append_shadow_event(EVENTS_FILE, event)
-                        if telegram_eligible(previous, decision):
-                            await _send_shadow_alert(session, event)
+                    if result.get("scanned"):
+                        scanned += 1
+                    if result.get("emitted"):
                         emitted += 1
-                    state[key] = {
-                        "state": decision.state.value,
-                        "action": decision.action,
-                        "bar_ts": bar_ts,
-                        "updated_at": event["ts"],
-                    }
-                    scanned += 1
                 except Exception as exc:
                     errors += 1
                     log.debug("shadow scan failed for %s %s: %s", sym, tf, exc)
+                if (scanned + stale + errors) % status_every == 0:
+                    _save_status(
+                        running=True,
+                        last_cycle=_cycle_snapshot(
+                            started_at=started_at,
+                            scanned=scanned,
+                            emitted=emitted,
+                            stale=stale,
+                            errors=errors,
+                            in_progress=True,
+                            current_symbol=str(sym),
+                            current_tf=str(tf),
+                        ),
+                    )
     _save_state(state)
-    cycle = {"scanned": scanned, "emitted": emitted, "stale": stale, "errors": errors, "finished_at": _now()}
+    cycle = _cycle_snapshot(
+        started_at=started_at,
+        scanned=scanned,
+        emitted=emitted,
+        stale=stale,
+        errors=errors,
+        in_progress=False,
+    )
     _save_status(running=True, last_cycle=cycle)
     return cycle
+
+
+async def _scan_symbol_tf(session: aiohttp.ClientSession, state: dict, sym: str, tf: str) -> dict:
+    data = await fetch_klines(session, sym, tf, limit=120)
+    if data is None or len(data) < 30:
+        return {"scanned": 0, "emitted": 0, "stale": 0}
+    i = len(data["c"]) - 2
+    bar_ts = int(data["t"][i])
+    max_age_ms = 3 * BAR_MS.get(tf, 60 * 60 * 1000)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    if now_ms - bar_ts > max_age_ms:
+        return {"scanned": 0, "emitted": 0, "stale": 1}
+    feat = compute_features(data["o"], data["h"], data["l"], data["c"].astype(float), data["v"])
+    snapshot = _snapshot(data, feat, i)
+    decision = estimate_shadow_state(snapshot)
+    key = f"{sym}|{tf}"
+    previous = state.get(key)
+    bootstrap = previous is None
+    changed = material_transition(previous, decision)
+    event = {
+        "event": "v2_shadow_signal",
+        "source": "v2_shadow_observer",
+        "ts": _now(),
+        "sym": sym,
+        "tf": tf,
+        "bar_ts": bar_ts,
+        "previous_state": None if not previous else previous.get("state"),
+        "state": decision.state.value,
+        "action": decision.action,
+        "confidence": decision.confidence,
+        "reason": decision.reason,
+        "bootstrap": bootstrap,
+        "features": snapshot.__dict__,
+    }
+    trace_event = {
+        **event,
+        "observed_at": event["ts"],
+        "material_transition": changed,
+    }
+    if not previous or previous.get("bar_ts") != bar_ts:
+        append_decision_trace(TRACE_FILE, trace_event)
+    emitted = 0
+    if changed:
+        append_shadow_event(EVENTS_FILE, event)
+        if telegram_eligible(previous, decision):
+            await _send_shadow_alert(session, event)
+        emitted = 1
+    state[key] = {
+        "state": decision.state.value,
+        "action": decision.action,
+        "bar_ts": bar_ts,
+        "updated_at": event["ts"],
+    }
+    return {"scanned": 1, "emitted": emitted, "stale": 0}
 
 
 async def run_forever() -> None:

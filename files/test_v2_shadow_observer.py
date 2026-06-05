@@ -58,6 +58,41 @@ class TestV2ShadowObserver(unittest.TestCase):
             rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(len(rows), 1)
 
+    def test_worker_cycle_snapshot_exposes_in_progress_heartbeat_fields(self) -> None:
+        import v2_shadow_worker as worker
+
+        cycle = worker._cycle_snapshot(
+            started_at="2026-06-05T08:00:00Z",
+            scanned=12,
+            emitted=2,
+            stale=1,
+            errors=3,
+            in_progress=True,
+            current_symbol="BTCUSDT",
+            current_tf="15m",
+        )
+
+        self.assertTrue(cycle["in_progress"])
+        self.assertEqual(cycle["finished_at"], None)
+        self.assertEqual(cycle["scanned"], 12)
+        self.assertEqual(cycle["current"], {"symbol": "BTCUSDT", "tf": "15m"})
+
+    def test_worker_cycle_snapshot_marks_finished_cycle(self) -> None:
+        import v2_shadow_worker as worker
+
+        cycle = worker._cycle_snapshot(
+            started_at="2026-06-05T08:00:00Z",
+            scanned=20,
+            emitted=0,
+            stale=2,
+            errors=0,
+            in_progress=False,
+        )
+
+        self.assertFalse(cycle["in_progress"])
+        self.assertIsNotNone(cycle["finished_at"])
+        self.assertNotIn("current", cycle)
+
 
 if __name__ == "__main__":
     unittest.main()

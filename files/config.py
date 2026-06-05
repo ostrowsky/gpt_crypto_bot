@@ -558,6 +558,8 @@ V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED: bool = True
 SUSPICIOUS_REENTRY_SCORECARD_ENABLED: bool = True
 SUSPICIOUS_REENTRY_SCORECARD_TELEGRAM_ENABLED: bool = True
 V2_SHADOW_REALTIME_TELEGRAM_ENABLED: bool = False
+V2_SHADOW_SCAN_TIMEOUT_SEC: int = 20
+V2_SHADOW_STATUS_EVERY_SCANS: int = 10
 
 # Daily operator learning-progress report. Runs after final previous-day
 # top-gainer and signal-quality reports have landed. Reporting only.
