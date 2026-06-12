@@ -277,6 +277,7 @@ class LearningProgressReportTest(unittest.TestCase):
             lpr.report_blocked_winner_causal_reward = original
 
         self.assertEqual(summary["status"], "passed_harm_gate")
+        self.assertEqual(summary["evidence_strength"], "strong")
         self.assertIn("score_gate", summary["detail"])
         actions = lpr._next_actions(
             lpr.DayMetrics(day="2026-05-31", coverage_status="complete"),
@@ -288,7 +289,38 @@ class LearningProgressReportTest(unittest.TestCase):
             {"status": "no_positive_reward"},
             summary,
         )
-        self.assertTrue(any("Blocker reward нашёл вредный blocker" in x for x in actions))
+        self.assertTrue(any("Blocker reward нашёл сильный blocker-кандидат" in x for x in actions))
+
+    def test_blocker_reward_weak_net_harm_action_is_cautious(self) -> None:
+        summary = lpr._blocker_reward_summary_from_report(
+            {
+                "decision": "advance_top_harmful_blockers_to_behavior_replay",
+                "reason_table": [
+                    {
+                        "reason_code": "chase_guard",
+                        "net_harm_pct": 0.75,
+                        "harm_pct": 125.75,
+                        "protection_credit_pct": 125.0,
+                        "decision": "advance_to_behavior_replay",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(summary["status"], "passed_harm_gate")
+        self.assertEqual(summary["evidence_strength"], "weak")
+        actions = lpr._next_actions(
+            lpr.DayMetrics(day="2026-06-11", coverage_status="complete"),
+            {"training": {"last_finished_at": "2026-06-12T00:00:00Z"}},
+            {},
+            [],
+            {"summary": {"alerts_total": 0, "labeled_ret5": 0}},
+            {"status": "failed_gate"},
+            {"status": "no_positive_reward"},
+            summary,
+        )
+        self.assertTrue(any("слабый blocker-кандидат" in x for x in actions))
+        self.assertFalse(any("вредный blocker" in x for x in actions))
 
     def test_portfolio_replacement_summary_and_actions(self) -> None:
         class FakeReplacement:

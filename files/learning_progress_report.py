@@ -494,7 +494,18 @@ def _next_actions(
         actions.append("▶️ Починить entry admission shadow reward report: admission-learning контур неполный.")
     blocker = blocker_reward or {}
     if blocker.get("status") == "passed_harm_gate":
-        actions.append("▶️ Blocker reward нашёл вредный blocker: готовить targeted behavior replay, гейты не расслаблять напрямую.")
+        top = blocker.get("top") or {}
+        net_harm = _maybe_float(top.get("net_harm_pct"))
+        if net_harm is not None and net_harm < 5.0:
+            actions.append(
+                "▶️ Blocker reward нашёл слабый blocker-кандидат: только targeted replay; "
+                "гейты не расслаблять напрямую."
+            )
+        else:
+            actions.append(
+                "▶️ Blocker reward нашёл сильный blocker-кандидат: готовить targeted behavior replay; "
+                "гейты не расслаблять напрямую."
+            )
     elif blocker.get("status") == "monitor":
         actions.append("⏸️ Blocker reward: явного вредного blocker-а нет; не расслаблять blockers без targeted replay.")
     elif blocker.get("status") in {"missing", "error"}:
@@ -633,9 +644,12 @@ def _blocker_reward_summary_from_report(report: dict[str, Any]) -> dict[str, Any
         f"harm={_fmt(top.get('harm_pct'), 2)}%, protect={_fmt(top.get('protection_credit_pct'), 2)}%, "
         f"decision={top.get('decision')}"
     )
+    net_harm = _maybe_float(top.get("net_harm_pct"))
+    evidence_strength = "weak" if net_harm is not None and net_harm < 5.0 else "strong"
     return {
         "status": status,
         "detail": detail,
+        "evidence_strength": evidence_strength,
         "decision": decision,
         "top_reason": top.get("reason_code"),
         "top": top,
