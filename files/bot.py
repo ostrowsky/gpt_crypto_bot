@@ -1777,17 +1777,17 @@ def main() -> None:
         )
     request = HTTPXRequest(
         connection_pool_size=32,
-        connect_timeout=2.0,
-        read_timeout=6.0,
-        write_timeout=6.0,
-        pool_timeout=1.0,
+        connect_timeout=10.0,
+        read_timeout=20.0,
+        write_timeout=20.0,
+        pool_timeout=5.0,
     )
     updates_request = HTTPXRequest(
         connection_pool_size=4,
-        connect_timeout=5.0,
-        read_timeout=15.0,
-        write_timeout=5.0,
-        pool_timeout=1.0,
+        connect_timeout=10.0,
+        read_timeout=30.0,
+        write_timeout=10.0,
+        pool_timeout=5.0,
     )
     app = (
         Application.builder()
@@ -1807,7 +1807,7 @@ def main() -> None:
     app.add_error_handler(_on_error)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     log.info("Bot started.")
-    app.run_polling(drop_pending_updates=True, poll_interval=0.0, timeout=10)
+    app.run_polling(drop_pending_updates=True, poll_interval=0.0, timeout=10, bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
