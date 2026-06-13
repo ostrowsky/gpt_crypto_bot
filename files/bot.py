@@ -85,6 +85,7 @@ from build_info import build_badge as _runtime_build_badge
 import config
 import botlog
 from monitor import MonitorState, monitoring_loop, load_positions, save_positions
+from menu_text import is_hide_menu_text, is_open_menu_text
 from strategy import market_scan, check_entry_conditions, check_setup_conditions, analyze_coin, fetch_klines, get_entry_mode
 from telegram_delivery_audit import classify_message
 
@@ -117,6 +118,7 @@ state = MonitorState()
 state.positions = load_positions()
 AGENT_POSITIONS_PATH = Path(__file__).resolve().parent / "agent_positions.json"
 AGENT_STATUS_PATH = Path(__file__).resolve().parent / ".runtime" / "market_agent_status.json"
+_menu_send_locks: dict[int, asyncio.Lock] = {}
 _POSITION_ROWS_CACHE: dict[str, object] = {
     "count": len(state.positions),
     "rows": [],
@@ -497,7 +499,16 @@ async def _send_message_control(
     parse_mode=None,
     reply_markup=None,
     timeout: float = 1.8,
+    audit_delivery: bool = True,
 ) -> None:
+    meta = classify_message(text)
+    if audit_delivery:
+        botlog.log_telegram_delivery(
+            delivery_stage="attempt",
+            delivery_path="control_raw",
+            chat_id=chat_id,
+            **meta,
+        )
     try:
         await asyncio.wait_for(
             _raw_send_message(
@@ -510,9 +521,31 @@ async def _send_message_control(
             timeout=timeout + 0.7,
         )
         log.info("control send raw ok chat_id=%s", chat_id)
+        if audit_delivery:
+            botlog.log_telegram_delivery(
+                delivery_stage="ok",
+                delivery_path="control_raw",
+                chat_id=chat_id,
+                **meta,
+            )
         return
     except Exception as exc:
+        if audit_delivery:
+            botlog.log_telegram_delivery(
+                delivery_stage="failed",
+                delivery_path="control_raw",
+                chat_id=chat_id,
+                error_class=exc.__class__.__name__,
+                **meta,
+            )
         log.warning("control send raw failed chat_id=%s: %s", chat_id, exc.__class__.__name__)
+    if audit_delivery:
+        botlog.log_telegram_delivery(
+            delivery_stage="attempt",
+            delivery_path="control_ptb_fallback",
+            chat_id=chat_id,
+            **meta,
+        )
     try:
         await _send_message_retry(
             app,
@@ -524,7 +557,22 @@ async def _send_message_control(
             timeout=1.0,
             raw_fallback=False,
         )
+        if audit_delivery:
+            botlog.log_telegram_delivery(
+                delivery_stage="ok",
+                delivery_path="control_ptb_fallback",
+                chat_id=chat_id,
+                **meta,
+            )
     except Exception as exc:
+        if audit_delivery:
+            botlog.log_telegram_delivery(
+                delivery_stage="failed",
+                delivery_path="control_ptb_fallback",
+                chat_id=chat_id,
+                error_class=exc.__class__.__name__,
+                **meta,
+            )
         log.warning("control send PTB fallback failed chat_id=%s: %s", chat_id, exc.__class__.__name__)
 
 
@@ -535,6 +583,7 @@ async def _send(chat_id: int, text: str, app: Application) -> None:
         text,
         parse_mode=ParseMode.MARKDOWN,
         timeout=1.8,
+        audit_delivery=False,
     )
 
 
@@ -829,19 +878,29 @@ def _main_menu_text() -> str:
 async def _send_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE, *, refresh_quick_keyboard: bool) -> None:
     chat_id = update.message.chat_id
     _save_chat_id(chat_id)
+    lock = _menu_send_locks.setdefault(int(chat_id), asyncio.Lock())
+    if lock.locked():
+        log.info("MENU send coalesced chat_id=%s", chat_id)
+        return
+    async with lock:
+        await _send_main_menu_locked(update, ctx, refresh_quick_keyboard=refresh_quick_keyboard)
+
+
+async def _send_main_menu_locked(update: Update, ctx: ContextTypes.DEFAULT_TYPE, *, refresh_quick_keyboard: bool) -> None:
+    chat_id = update.message.chat_id
     if refresh_quick_keyboard:
         await _send_message_control(
             ctx.application,
             chat_id,
             "Кнопки меню включены.",
             reply_markup=kb_quick_menu(),
-            timeout=1.2,
+            timeout=4.0,
         )
     await _send_message_control(
         ctx.application,
         chat_id,
         _main_menu_text(), parse_mode=ParseMode.MARKDOWN, reply_markup=kb_main(),
-        timeout=1.2,
+        timeout=4.0,
     )
 
 
@@ -1426,13 +1485,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id if update.effective_chat else None
     log.info("MENU TEXT chat_id=%s text=%r", chat_id, incoming_text)
     lower_text = incoming_text.lower()
-    if incoming_text == "📋 Открыть меню":
+    if is_open_menu_text(incoming_text):
         await _send_main_menu(update, ctx, refresh_quick_keyboard=False)
         return
     if "открыть" in lower_text and "меню" in lower_text:
         await _send_main_menu(update, ctx, refresh_quick_keyboard=False)
         return
-    if incoming_text == "🙈 Скрыть меню":
+    if is_hide_menu_text(incoming_text):
         await update.message.reply_text(
             "Кнопки меню скрыты. Чтобы вернуть их, отправьте /menu.",
             reply_markup=ReplyKeyboardRemove(),

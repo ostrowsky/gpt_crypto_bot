@@ -18,7 +18,9 @@ def chat_id_hash(chat_id: int | str) -> str:
 def classify_message(text: str) -> dict[str, Any]:
     text = str(text or "")
     lower = text.lower()
-    if "сигнал покупки" in lower or "buy signal" in lower:
+    if "crypto trend bot" in lower or "кнопки меню" in lower or "меню" in lower and "портфель" in lower:
+        kind = "menu"
+    elif "сигнал покупки" in lower or "buy signal" in lower:
         kind = "buy"
     elif "сигнал продажи" in lower or "sell signal" in lower:
         kind = "sell"
