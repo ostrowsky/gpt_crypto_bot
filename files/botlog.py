@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from blocking import blocked_gate, compact_block_context, normalize_blocked_reason
+from telegram_delivery_audit import chat_id_hash
 
 LOG_FILE = Path("bot_events.jsonl")
 _pylog   = logging.getLogger("botlog")
@@ -149,6 +150,36 @@ def log_forward(sym: str, tf: str, mode: str, horizon: int,
         "pnl_pct":       pnl,
         "correct":       correct,
     })
+
+
+def log_telegram_delivery(
+    *,
+    delivery_stage: str,
+    delivery_path: str,
+    message_kind: str,
+    chat_id: int | str | None = None,
+    sym: Optional[str] = None,
+    tf: Optional[str] = None,
+    error_class: Optional[str] = None,
+    text_preview: str = "",
+) -> None:
+    rec: Dict[str, Any] = {
+        "event": "telegram_delivery",
+        "source": "bot",
+        "delivery_stage": delivery_stage,
+        "delivery_path": delivery_path,
+        "message_kind": message_kind,
+        "text_preview": text_preview[:180],
+    }
+    if chat_id is not None:
+        rec["chat_id_hash"] = chat_id_hash(chat_id)
+    if sym:
+        rec["sym"] = sym
+    if tf:
+        rec["tf"] = tf
+    if error_class:
+        rec["error_class"] = error_class
+    _write(rec)
 
 
 def log_blocked(sym: str, tf: str, price: float, reason: str,

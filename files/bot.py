@@ -83,8 +83,10 @@ from runtime_executors import install_default_io_executor, run_cpu, run_telegram
 from build_info import build_badge as _runtime_build_badge
 
 import config
+import botlog
 from monitor import MonitorState, monitoring_loop, load_positions, save_positions
 from strategy import market_scan, check_entry_conditions, check_setup_conditions, analyze_coin, fetch_klines, get_entry_mode
+from telegram_delivery_audit import classify_message
 
 
 class _TelegramTokenRedactionFilter(logging.Filter):
@@ -744,10 +746,38 @@ def _make_broadcast_send(app: "Application"):
     РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ monitoring_loop Р·Р°РїСѓС‰РµРЅРЅРѕРіРѕ РёР· Р°РІС‚Рѕ-СЂРµР°РЅР°Р»РёР·Р°.
     """
     async def _broadcast(text: str) -> None:
-        for cid in list(_known_chat_ids):
+        meta = classify_message(text)
+        chat_ids = list(_known_chat_ids)
+        if not chat_ids:
+            botlog.log_telegram_delivery(
+                delivery_stage="skipped",
+                delivery_path="broadcast",
+                chat_id=None,
+                **meta,
+            )
+        for cid in chat_ids:
+            botlog.log_telegram_delivery(
+                delivery_stage="attempt",
+                delivery_path="broadcast",
+                chat_id=cid,
+                **meta,
+            )
             try:
                 await _send(cid, text, app)
+                botlog.log_telegram_delivery(
+                    delivery_stage="ok",
+                    delivery_path="broadcast",
+                    chat_id=cid,
+                    **meta,
+                )
             except Exception as e:
+                botlog.log_telegram_delivery(
+                    delivery_stage="failed",
+                    delivery_path="broadcast",
+                    chat_id=cid,
+                    error_class=e.__class__.__name__,
+                    **meta,
+                )
                 log.warning("broadcast send failed for %s: %s", cid, e)
         # Сохраняем chat_ids на диск при каждой отправке
         try:

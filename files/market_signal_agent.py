@@ -15,6 +15,7 @@ import numpy as np
 
 import agentlog
 import config
+from telegram_delivery_audit import classify_message
 from unified_portfolio import load_main_positions_raw, ranked_unified_positions
 def _entry_signal_score(
     mode: str,
@@ -417,15 +418,34 @@ def _write_status(
 
 
 async def _send_telegram(session: aiohttp.ClientSession, text: str) -> None:
+    meta = classify_message(text)
     token = getattr(config, "TELEGRAM_BOT_TOKEN", "")
     if not token:
+        agentlog.log_telegram_delivery(
+            delivery_stage="skipped",
+            delivery_path="agent",
+            error_class="missing_token",
+            **meta,
+        )
         return
     chat_ids = _load_chat_ids()
     if not chat_ids:
+        agentlog.log_telegram_delivery(
+            delivery_stage="skipped",
+            delivery_path="agent",
+            error_class="no_chat_ids",
+            **meta,
+        )
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     timeout = aiohttp.ClientTimeout(total=12)
     for chat_id in chat_ids:
+        agentlog.log_telegram_delivery(
+            delivery_stage="attempt",
+            delivery_path="agent",
+            chat_id=chat_id,
+            **meta,
+        )
         try:
             async with session.post(
                 url,
@@ -434,7 +454,20 @@ async def _send_telegram(session: aiohttp.ClientSession, text: str) -> None:
             ) as resp:
                 resp.raise_for_status()
                 await resp.text()
+                agentlog.log_telegram_delivery(
+                    delivery_stage="ok",
+                    delivery_path="agent",
+                    chat_id=chat_id,
+                    **meta,
+                )
         except Exception as exc:
+            agentlog.log_telegram_delivery(
+                delivery_stage="failed",
+                delivery_path="agent",
+                chat_id=chat_id,
+                error_class=exc.__class__.__name__,
+                **meta,
+            )
             log.warning("telegram send failed for %s: %s", chat_id, exc)
 
 
