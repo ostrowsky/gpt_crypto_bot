@@ -111,7 +111,8 @@ def _labeled_rows(reports_dir: Path, cache_dir: Path, cfg: TrailingTailConfig) -
     max_h = max(policy.max_horizon for policy in cfg.policies)
     hold_cfg = hold_replay.ReplayConfig(days=cfg.days, min_mfe_pct=cfg.min_mfe_pct, min_giveback_pct=cfg.min_giveback_pct, horizons=(max_h,))
     cases = hold_replay._load_cases(reports_dir, hold_cfg)
-    rows = [hold_replay._label_case(case, cache_dir, hold_cfg) for case in cases]
+    candle_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[int]]] = {}
+    rows = [hold_replay._label_case(case, cache_dir, hold_cfg, candle_cache=candle_cache) for case in cases]
     for row in rows:
         if not row.get("eligible") or row.get("label_status") != "labeled":
             continue

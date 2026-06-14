@@ -4024,22 +4024,68 @@ def _register_suspicious_reentry_watch(
         max_favorable_pct=mfe_pct,
         bars_held=int(getattr(pos, "bars_elapsed", 0)),
     )
-    if score < float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_EXIT_SCORE_MIN", 0.68)):
+    score_floor = float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_EXIT_SCORE_MIN", 0.68))
+    mfe_floor = float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_MIN_MFE_PCT", 1.0))
+    mode = str(getattr(pos, "signal_mode", "trend"))
+    tf = str(getattr(pos, "tf", "15m"))
+    decision = "registered"
+    if score < score_floor:
+        decision = "rejected_exit_score"
+        botlog.log_suspicious_reentry_watch_decision(
+            sym=pos.symbol,
+            tf=tf,
+            mode=mode,
+            decision=decision,
+            exit_score=float(score),
+            score_floor=score_floor,
+            mfe_pct=float(mfe_pct),
+            mfe_floor=mfe_floor,
+            exit_reason=str(exit_reason),
+            exit_pnl_pct=float(pnl_pct),
+            bars_held=int(getattr(pos, "bars_elapsed", 0)),
+        )
         return
-    if mfe_pct < float(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_MIN_MFE_PCT", 1.0)):
+    if mfe_pct < mfe_floor:
+        decision = "rejected_mfe"
+        botlog.log_suspicious_reentry_watch_decision(
+            sym=pos.symbol,
+            tf=tf,
+            mode=mode,
+            decision=decision,
+            exit_score=float(score),
+            score_floor=score_floor,
+            mfe_pct=float(mfe_pct),
+            mfe_floor=mfe_floor,
+            exit_reason=str(exit_reason),
+            exit_pnl_pct=float(pnl_pct),
+            bars_held=int(getattr(pos, "bars_elapsed", 0)),
+        )
         return
     window_bars = int(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_WINDOW_BARS", 8))
     state.suspicious_reentry_watch[pos.symbol] = {
         "until_ts": int(exit_ts) + window_bars * _tf_bar_ms(str(getattr(pos, "tf", "15m"))),
         "exit_ts": int(exit_ts),
-        "tf": str(getattr(pos, "tf", "15m")),
-        "mode": str(getattr(pos, "signal_mode", "trend")),
+        "tf": tf,
+        "mode": mode,
         "exit_reason": str(exit_reason),
         "exit_price": float(exit_price),
         "exit_pnl_pct": float(pnl_pct),
         "mfe_pct": float(mfe_pct),
         "exit_score": float(score),
     }
+    botlog.log_suspicious_reentry_watch_decision(
+        sym=pos.symbol,
+        tf=tf,
+        mode=mode,
+        decision=decision,
+        exit_score=float(score),
+        score_floor=score_floor,
+        mfe_pct=float(mfe_pct),
+        mfe_floor=mfe_floor,
+        exit_reason=str(exit_reason),
+        exit_pnl_pct=float(pnl_pct),
+        bars_held=int(getattr(pos, "bars_elapsed", 0)),
+    )
 
 
 async def _maybe_send_suspicious_reentry_shadow_alert(

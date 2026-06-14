@@ -354,6 +354,37 @@ def log_suspicious_reentry_shadow(
     })
 
 
+def log_suspicious_reentry_watch_decision(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    decision: str,
+    exit_score: float,
+    score_floor: float,
+    mfe_pct: float,
+    mfe_floor: float,
+    exit_reason: str,
+    exit_pnl_pct: float,
+    bars_held: int,
+) -> None:
+    """One-shot shadow telemetry explaining why a re-entry watch was or was not opened."""
+    _write({
+        "event": "suspicious_reentry_watch_decision",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "decision": str(decision),
+        "exit_score": round(float(exit_score), 4),
+        "score_floor": round(float(score_floor), 4),
+        "mfe_pct": round(float(mfe_pct), 4),
+        "mfe_floor": round(float(mfe_floor), 4),
+        "exit_reason": str(exit_reason),
+        "exit_pnl_pct": round(float(exit_pnl_pct), 4),
+        "bars_held": int(bars_held),
+    })
+
+
 def log_cooldown(sym: str, tf: str, bars_remaining: int, first: bool = False) -> None:
     """
     Вход заблокирован кулдауном. Логируется только при first=True

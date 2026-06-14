@@ -49,3 +49,9 @@ A partial policy may advance to candle-path trailing-tail replay only if:
 - false-positive buckets are not made materially worse.
 
 Production adoption requires a separate replay with fees/slippage, remainder stop logic, and no duplicate trade artifacts.
+
+## Research Harness Reliability
+
+Replay runs over the maximum available history must be bounded by unique `(symbol, timeframe)` candle-cache loads, not by repeated file scans per trade case. The hold-label helper is shared by hold, partial-exit, trailing-tail, and observable-tail selector replays; therefore it must memoize candle series within a single replay invocation.
+
+This is a measurement/research reliability requirement only. It must not change live SELL behavior or any replay metric definition.

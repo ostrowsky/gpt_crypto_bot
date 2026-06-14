@@ -99,7 +99,8 @@ def render_text(report: dict[str, Any]) -> str:
 def _labeled_rows(reports_dir: Path, cache_dir: Path, cfg: PartialExitConfig) -> list[dict[str, Any]]:
     hold_cfg = hold_replay.ReplayConfig(days=cfg.days, min_mfe_pct=cfg.min_mfe_pct, min_giveback_pct=cfg.min_giveback_pct, horizons=cfg.horizons)
     cases = hold_replay._load_cases(reports_dir, hold_cfg)
-    labeled = [hold_replay._label_case(case, cache_dir, hold_cfg) for case in cases]
+    candle_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[int]]] = {}
+    labeled = [hold_replay._label_case(case, cache_dir, hold_cfg, candle_cache=candle_cache) for case in cases]
     return [row for row in labeled if row.get("eligible")]
 
 

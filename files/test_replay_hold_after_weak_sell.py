@@ -85,6 +85,32 @@ class HoldAfterWeakSellReplayTests(unittest.TestCase):
             payload = replay.build_replay(reports_dir=reports, cache_dir=cache, cfg=replay.ReplayConfig(days=14), save=False)
             self.assertEqual(payload["coverage"]["eligible_total"], 0)
 
+    def test_candle_cache_reuses_symbol_timeframe_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / "reports"; reports.mkdir()
+            cache = root / "cache"; cache.mkdir()
+            report = {"summary": {}, "early_exits": [_row(source="bot"), _row(source="agent", pnl_pct=1.1)]}
+            (reports / f"signal_quality_{DAY}_final.json").write_text(json.dumps(report), encoding="utf-8")
+            _write_cache(cache, [101, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111])
+
+            original = replay._load_cached_candles
+            calls = []
+
+            def counting_loader(cache_dir, sym, tf):
+                calls.append((sym, tf))
+                return original(cache_dir, sym, tf)
+
+            replay._load_cached_candles = counting_loader
+            try:
+                payload = replay.build_replay(reports_dir=reports, cache_dir=cache, cfg=replay.ReplayConfig(days=14), save=False)
+            finally:
+                replay._load_cached_candles = original
+
+            self.assertEqual(payload["coverage"]["eligible_total"], 2)
+            self.assertEqual(payload["coverage"]["labeled_total"], 2)
+            self.assertEqual(calls, [("AAAUSDT", "15m")])
+
 
 if __name__ == "__main__":
     unittest.main()

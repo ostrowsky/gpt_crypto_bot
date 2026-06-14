@@ -31,6 +31,7 @@ Produce a daily scorecard for `suspicious_reentry_shadow` events:
 3. The report writes dated and latest JSON/TXT artifacts under `.runtime/reports`.
 4. Telegram delivery can be enabled from the daily worker, but the report remains decision-support only.
 5. Unit tests cover positive, negative, and pending-label cases without network access.
+6. The live path logs one-shot upstream watch decisions (`registered`, `rejected_exit_score`, `rejected_mfe`) for closed positions considered by the shadow re-entry watch. A day with zero `suspicious_reentry_shadow` alerts is not diagnosable unless the upstream watch-decision funnel is available.
 
 ## Promotion Gate
 

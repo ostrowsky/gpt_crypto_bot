@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import math
 import re
@@ -38,7 +39,8 @@ def build_replay(
     save: bool = True,
 ) -> dict[str, Any]:
     cases = _load_cases(reports_dir, cfg)
-    labeled = [_label_case(case, cache_dir, cfg) for case in cases]
+    candle_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[int]]] = {}
+    labeled = [_label_case(case, cache_dir, cfg, candle_cache=candle_cache) for case in cases]
     eligible = [row for row in labeled if row.get("eligible")]
     complete = [row for row in eligible if row.get("label_status") == "labeled"]
     policies = {"baseline": _policy_summary(complete, "pnl_pct")}
@@ -144,7 +146,12 @@ def _compact_case(day: str, bucket: str, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _label_case(case: dict[str, Any], cache_dir: Path, cfg: ReplayConfig) -> dict[str, Any]:
+def _label_case(
+    case: dict[str, Any],
+    cache_dir: Path,
+    cfg: ReplayConfig,
+    candle_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[int]]] | None = None,
+) -> dict[str, Any]:
     eligible, reason = _eligible(case, cfg)
     row = {**case, "eligible": eligible, "eligibility_reason": reason, "label_status": "not_eligible" if not eligible else "missing"}
     if not eligible:
@@ -157,11 +164,16 @@ def _label_case(case: dict[str, Any], cache_dir: Path, cfg: ReplayConfig) -> dic
     if exit_ts_ms is None:
         row["label_reason"] = "missing exit_ts"
         return row
-    candles = _load_cached_candles(cache_dir, str(case.get("sym") or ""), str(case.get("tf") or "15m"))
+    candles, candle_ts = _load_cached_candle_series(
+        cache_dir,
+        str(case.get("sym") or ""),
+        str(case.get("tf") or "15m"),
+        candle_cache,
+    )
     if not candles:
         row["label_reason"] = "missing cached candles"
         return row
-    idx = _first_idx_at_or_after(candles, exit_ts_ms)
+    idx = _first_idx_at_or_after_ts(candle_ts, exit_ts_ms)
     if idx is None:
         row["label_reason"] = "exit candle not found"
         return row
@@ -292,11 +304,33 @@ def _load_cached_candles(cache_dir: Path, sym: str, tf: str) -> list[dict[str, A
     return [rows[t] for t in sorted(rows)]
 
 
+def _load_cached_candle_series(
+    cache_dir: Path,
+    sym: str,
+    tf: str,
+    candle_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[int]]] | None = None,
+) -> tuple[list[dict[str, Any]], list[int]]:
+    key = (sym, tf)
+    if candle_cache is not None and key in candle_cache:
+        return candle_cache[key]
+    candles = _load_cached_candles(cache_dir, sym, tf)
+    timestamps = [int(row.get("t") or 0) for row in candles]
+    series = (candles, timestamps)
+    if candle_cache is not None:
+        candle_cache[key] = series
+    return series
+
+
 def _first_idx_at_or_after(candles: list[dict[str, Any]], ts_ms: int) -> int | None:
     for i, row in enumerate(candles):
         if int(row.get("t") or 0) >= ts_ms:
             return i
     return None
+
+
+def _first_idx_at_or_after_ts(timestamps: list[int], ts_ms: int) -> int | None:
+    idx = bisect.bisect_left(timestamps, ts_ms)
+    return idx if idx < len(timestamps) else None
 
 
 def _tags(row: dict[str, Any], reason: str) -> list[str]:
