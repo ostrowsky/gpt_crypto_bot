@@ -29,6 +29,8 @@ SHADOW_REENTRY_SCORECARD_LATEST = REPORT_DIR / "suspicious_reentry_scorecard_lat
 @dataclass(frozen=True)
 class DayMetrics:
     day: str
+    critic_present: bool = True
+    signal_quality_present: bool = True
     watchlist_top_count: int = 0
     bought: int = 0
     missed: int = 0
@@ -86,6 +88,14 @@ def build_report(
         "shadow_entry_admission": shadow_entry_admission,
         "blocker_reward": blocker_reward,
         "portfolio_replacement": portfolio_replacement,
+        "data_confidence": _data_confidence(
+            latest,
+            reports_dir,
+            shadow_tail_selector,
+            shadow_entry_admission,
+            blocker_reward,
+            portfolio_replacement,
+        ),
         "previous_decisions": _previous_decisions(feedback, status, latest.day),
         "alerts": _alerts(latest, status, feedback, focus_findings, shadow_reentry, shadow_tail_selector, shadow_entry_admission, blocker_reward, portfolio_replacement),
         "focus_symbols": focus_findings,
@@ -112,6 +122,7 @@ def render_text(report: dict[str, Any]) -> str:
     shadow_entry_admission = report.get("shadow_entry_admission") or {}
     blocker_reward = report.get("blocker_reward") or {}
     portfolio_replacement = report.get("portfolio_replacement") or {}
+    data_confidence = report.get("data_confidence") or {}
     day = report.get("latest_day") or "unknown"
     emoji = verdict.get("emoji", "⚪")
     title = verdict.get("label", "СТАТУС НЕЯСЕН")
@@ -127,12 +138,18 @@ def render_text(report: dict[str, Any]) -> str:
     blocked = latest.get("blocked_winner_count") or 0
     miss_rate = latest.get("miss_rate")
     miss_piece = "miss-rate нет" if miss_rate is None else f"miss-rate {float(miss_rate) * 100:.0f}%"
-    yesterday_line = (
-        "Вчера: watchlist top movers: 0 — метрика дня не применима; "
-        f"{capture_piece}."
-        if int(latest.get("watchlist_top_count") or 0) == 0
-        else f"Вчера: поймал {capture}% top movers, вовремя {early}%; {capture_piece}."
-    )
+    if not bool(latest.get("critic_present", True)):
+        yesterday_line = (
+            "Вчера: top-mover denominator недоступен — final critic не создан; "
+            f"{capture_piece}."
+        )
+    elif int(latest.get("watchlist_top_count") or 0) == 0:
+        yesterday_line = (
+            "Вчера: watchlist top movers: 0 — метрика дня не применима; "
+            f"{capture_piece}."
+        )
+    else:
+        yesterday_line = f"Вчера: поймал {capture}% top movers, вовремя {early}%; {capture_piece}."
     lines = [
         f"Бот — {day}",
         "",
@@ -142,10 +159,14 @@ def render_text(report: dict[str, Any]) -> str:
         yesterday_line,
         f"Где теряем: blocked winners {blocked}; {miss_piece}; exit efficiency median {_fmt(latest.get('median_exit_efficiency'), 2)}.",
         "",
-        "📋 Прошлые решения:",
     ]
     if confidence_reason:
         lines.insert(4, f"Основание: {confidence_reason}")
+    if data_confidence:
+        lines.extend(["", "🔎 Достоверность данных:"])
+        for item in data_confidence.get("items", [])[:5]:
+            lines.append(f"  • {item.get('label')}: {item.get('status')} — {item.get('detail')}")
+    lines.extend(["", "📋 Прошлые решения:"])
     for item in decisions[:4]:
         lines.append(f"  • {item['name']} — {item['status']} · {item['impact']}")
     if not decisions:
@@ -204,6 +225,8 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
         by_day.setdefault(day, {})["signal_quality"] = data
     out = []
     for day in sorted(by_day):
+        critic_present = "critic" in by_day[day]
+        signal_quality_present = "signal_quality" in by_day[day]
         critic = by_day[day].get("critic") or {}
         sq = by_day[day].get("signal_quality") or {}
         sq_summary = sq.get("summary") or {}
@@ -211,6 +234,8 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
         out.append(
             DayMetrics(
                 day=day,
+                critic_present=critic_present,
+                signal_quality_present=signal_quality_present,
                 watchlist_top_count=int(critic.get("watchlist_top_count") or 0),
                 bought=int(critic.get("watchlist_top_bought") or 0),
                 missed=int(critic.get("watchlist_top_missed") or 0),
@@ -296,6 +321,8 @@ def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetr
     stale_training = bool(training and training[:10] < latest.day)
     confidence, confidence_reason = _verdict_confidence(latest, previous, older)
     extra = {"confidence": confidence, "confidence_reason": confidence_reason}
+    if not latest.critic_present:
+        return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "починить final top-gainer critic", **extra}
     if latest.coverage_status not in {"ok", "complete"} and not _coverage_is_safe_partial(latest):
         return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "сначала проверь покрытие данных", **extra}
     if latest.watchlist_top_count <= 0:
@@ -317,6 +344,8 @@ def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetr
 
 def _verdict_confidence(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics]) -> tuple[str, str]:
     reasons: list[str] = []
+    if not latest.critic_present:
+        reasons.append("final top-gainer critic missing")
     if latest.watchlist_top_count < 5:
         reasons.append(f"малый denominator дня: watchlist_top={latest.watchlist_top_count}")
     if len(previous) < 6 or len(older) < 6:
@@ -355,11 +384,13 @@ def _learning_components(
             critic_day = latest_day
         if not sq_day and (reports_dir / f"signal_quality_{latest_day}_final.json").exists():
             sq_day = latest_day
+    critic_piece = critic_day or "missing"
+    sq_piece = sq_day or "missing"
     return {
         "measurement": {
             "label": "measurement",
             "status": "ok" if _day_not_older(critic_day, latest_day) and _day_not_older(sq_day, latest_day) else "stale/partial",
-            "detail": f"critic={critic_day}, signal_quality={sq_day}",
+            "detail": f"critic={critic_piece}, signal_quality={sq_piece}",
         },
         "feedback": {
             "label": "feedback",
@@ -386,6 +417,64 @@ def _previous_decisions(feedback: dict[str, Any], status: dict[str, Any], latest
     return out
 
 
+def _data_confidence(
+    latest: DayMetrics,
+    reports_dir: Path,
+    shadow_tail_selector: dict[str, Any],
+    shadow_entry_admission: dict[str, Any],
+    blocker_reward: dict[str, Any],
+    portfolio_replacement: dict[str, Any],
+) -> dict[str, Any]:
+    critic_path = reports_dir / f"top_gainer_critic_{latest.day}_final.json"
+    signal_path = reports_dir / f"signal_quality_{latest.day}_final.json"
+    if not latest.critic_present:
+        denominator_status = "unknown"
+        denominator_detail = "final critic missing; watchlist_top_count нельзя трактовать как 0"
+    elif latest.watchlist_top_count <= 0:
+        denominator_status = "empty"
+        denominator_detail = "critic fresh enough, но watchlist top movers отсутствуют"
+    else:
+        denominator_status = "ok"
+        denominator_detail = f"watchlist_top={latest.watchlist_top_count}"
+    research_stale = [
+        name
+        for name, component in (
+            ("tail_selector", shadow_tail_selector),
+            ("entry_admission", shadow_entry_admission),
+            ("blocker_reward", blocker_reward),
+            ("portfolio_replacement", portfolio_replacement),
+        )
+        if (component or {}).get("stale")
+    ]
+    items = [
+        {
+            "label": "top-gainer critic",
+            "status": "fresh" if latest.critic_present else "missing",
+            "detail": str(critic_path.name if latest.critic_present else "нет final critic за день"),
+        },
+        {
+            "label": "signal-quality",
+            "status": str(latest.coverage_status or "unknown"),
+            "detail": str(signal_path.name if latest.signal_quality_present else "нет signal-quality final за день"),
+        },
+        {
+            "label": "top-mover denominator",
+            "status": denominator_status,
+            "detail": denominator_detail,
+        },
+        {
+            "label": "research replays",
+            "status": "stale" if research_stale else "fresh",
+            "detail": ", ".join(research_stale) if research_stale else "optional research artifacts fresh enough",
+        },
+    ]
+    return {
+        "status": "decision_grade" if latest.critic_present and latest.signal_quality_present and denominator_status == "ok" and not research_stale else "diagnostic_only",
+        "items": items,
+        "research_stale_components": research_stale,
+    }
+
+
 def _alerts(
     latest: DayMetrics,
     status: dict[str, Any],
@@ -398,6 +487,8 @@ def _alerts(
     portfolio_replacement: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     out = []
+    if not latest.critic_present:
+        out.append({"severity": "serious", "text": "top-gainer critic final missing; watchlist_top denominator unknown"})
     if latest.coverage_status not in {"ok", "complete"}:
         if _coverage_is_safe_partial(latest):
             counts = latest.missing_symbol_status_counts or {}
@@ -455,6 +546,8 @@ def _next_actions(
 ) -> list[str]:
     actions = []
     training = status.get("training") or {}
+    if not latest.critic_present:
+        actions.append("▶️ Починить/перезапустить final top-gainer critic: без него watchlist_top=0 недостоверен.")
     if str(training.get("last_finished_at") or "")[:10] < latest.day:
         actions.append("▶️ Починить ML/ranker retraining freshness: сейчас модель не доказывает ежедневное обучение.")
     if latest.blocked_winner_count:

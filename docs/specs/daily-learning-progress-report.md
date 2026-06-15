@@ -44,6 +44,9 @@ from final reports.
   replays inline. If an optional research component cache is stale, use the
   cached artifact and mark that component as stale instead of blocking the daily
   report.
+- A `watchlist_top=0` day is valid only when the final top-gainer critic for the
+  target day exists. If the critic is missing, the denominator is unknown and the
+  report must be `СТАТУС НЕПОЛНЫЙ`, not `ДЕНЬ НЕИНФОРМАТИВЕН`.
 
 ## Required Output
 

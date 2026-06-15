@@ -542,6 +542,37 @@ class LearningProgressReportTest(unittest.TestCase):
             self.assertEqual(components["measurement"]["status"], "ok")
             self.assertIn("critic=2026-05-31", components["measurement"]["detail"])
 
+    def test_missing_critic_marks_denominator_unknown_not_zero_top_day(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / "reports"
+            reports.mkdir()
+            (reports / "signal_quality_2026-06-14_final.json").write_text(json.dumps({
+                "summary": {
+                    "miss_rate": 0.9,
+                    "false_positive_rate": 0.2,
+                    "capture_ratio_at_entry": {"median": 0.54},
+                    "exit_efficiency": {"median": 0.61},
+                    "giveback_pct": {"median": 1.0},
+                },
+                "coverage": {"status": "partial", "reasons": ["partial candle coverage"]},
+            }), encoding="utf-8")
+            status = root / "status.json"
+            status.write_text(json.dumps({"training": {"last_finished_at": "2026-06-15T05:00:00Z"}}), encoding="utf-8")
+            feedback = root / "feedback.json"
+            feedback.write_text(json.dumps({"reason": "feedback"}), encoding="utf-8")
+
+            report = lpr.build_report(reports, status, feedback, [], root / "out.json", root / "out.txt")
+            text = lpr.render_text(report)
+
+            self.assertFalse(report["latest"]["critic_present"])
+            self.assertEqual(report["verdict"]["label"], "СТАТУС НЕПОЛНЫЙ")
+            self.assertEqual(report["data_confidence"]["status"], "diagnostic_only")
+            self.assertEqual(report["data_confidence"]["items"][2]["status"], "unknown")
+            self.assertTrue(any("top-gainer critic final missing" in a["text"] for a in report["alerts"]))
+            self.assertIn("top-mover denominator недоступен", text)
+            self.assertNotIn("watchlist top movers: 0 — метрика дня не применима", text)
+
 
 class LearningProgressWorkerIntegrationTest(unittest.TestCase):
     def test_rl_worker_has_0900_learning_progress_task(self) -> None:
