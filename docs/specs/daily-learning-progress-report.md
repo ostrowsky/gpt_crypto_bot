@@ -40,6 +40,10 @@ from final reports.
 - No automatic approval of hypotheses.
 - If data is partial/stale, the report must say so clearly.
 - Telegram delivery must be idempotent per daily slot, even if the worker restarts inside the delivery window.
+- The 09:00 report is a fast aggregation layer. It must not run heavy research
+  replays inline. If an optional research component cache is stale, use the
+  cached artifact and mark that component as stale instead of blocking the daily
+  report.
 
 ## Required Output
 

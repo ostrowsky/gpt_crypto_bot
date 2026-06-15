@@ -527,9 +527,9 @@ def _next_actions(
 
 
 def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
-    cached = _load_fresh_cached_json(reports_dir / "observable_tail_selector_replay_latest.json")
+    cached, stale = _load_cached_json_with_staleness(reports_dir / "observable_tail_selector_replay_latest.json")
     if cached:
-        return _shadow_tail_selector_summary_from_report(cached)
+        return _with_cache_staleness(_shadow_tail_selector_summary_from_report(cached), stale)
     try:
         report = replay_observable_tail_selector.build_replay(
             reports_dir=reports_dir,
@@ -574,9 +574,9 @@ def _shadow_tail_selector_summary_from_report(report: dict[str, Any]) -> dict[st
 
 def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
-    cached = _load_fresh_cached_json(reports_dir / "entry_admission_shadow_reward_latest.json")
+    cached, stale = _load_cached_json_with_staleness(reports_dir / "entry_admission_shadow_reward_latest.json")
     if cached:
-        return _shadow_entry_admission_summary_from_report(cached)
+        return _with_cache_staleness(_shadow_entry_admission_summary_from_report(cached), stale)
     try:
         report = report_entry_admission_shadow_reward.build_report(
             reports_dir=reports_dir,
@@ -616,9 +616,9 @@ def _shadow_entry_admission_summary_from_report(report: dict[str, Any]) -> dict[
 
 def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
-    cached = _load_fresh_cached_json(reports_dir / "blocked_winner_causal_reward_latest.json")
+    cached, stale = _load_cached_json_with_staleness(reports_dir / "blocked_winner_causal_reward_latest.json")
     if cached:
-        return _blocker_reward_summary_from_report(cached)
+        return _with_cache_staleness(_blocker_reward_summary_from_report(cached), stale)
     try:
         report = report_blocked_winner_causal_reward.build_report(
             reports_dir=reports_dir,
@@ -659,9 +659,9 @@ def _blocker_reward_summary_from_report(report: dict[str, Any]) -> dict[str, Any
 
 def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
-    cached = _load_fresh_cached_json(reports_dir / "portfolio_replacement_shadow_reward_latest.json")
+    cached, stale = _load_cached_json_with_staleness(reports_dir / "portfolio_replacement_shadow_reward_latest.json")
     if cached:
-        return _portfolio_replacement_summary_from_report(cached)
+        return _with_cache_staleness(_portfolio_replacement_summary_from_report(cached), stale)
     try:
         report = report_portfolio_replacement_shadow_reward.build_report(
             files_dir=workspace_dir / "files",
@@ -792,6 +792,33 @@ def _load_fresh_cached_json(path: Path, max_age_hours: float = 36.0) -> dict[str
         return _load_json(path)
     except Exception:
         return {}
+
+
+def _load_cached_json_with_staleness(path: Path, max_age_hours: float = 36.0) -> tuple[dict[str, Any], bool]:
+    """Load cached research artifact without blocking the daily report on recompute.
+
+    The morning learning report must be a fast aggregation layer. If an expensive
+    research artifact is stale, keep the report moving and mark that component
+    stale instead of recomputing heavy replay inline.
+    """
+    try:
+        if not path.exists():
+            return {}, False
+        age_seconds = datetime.now(timezone.utc).timestamp() - path.stat().st_mtime
+        data = _load_json(path)
+        return data, age_seconds > max_age_hours * 3600
+    except Exception:
+        return {}, False
+
+
+def _with_cache_staleness(summary: dict[str, Any], stale: bool) -> dict[str, Any]:
+    if not stale:
+        return summary
+    out = dict(summary)
+    out["stale"] = True
+    detail = str(out.get("detail") or "")
+    out["detail"] = f"stale cache; {detail}" if detail else "stale cache"
+    return out
 
 
 def _day_from_signal_quality_path(path: Path, data: dict[str, Any]) -> str:

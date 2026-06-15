@@ -214,6 +214,46 @@ class LearningProgressReportTest(unittest.TestCase):
         self.assertEqual(summary["status"], "failed_gate")
         self.assertIn("cached_selector", summary["detail"])
 
+    def test_shadow_tail_selector_uses_stale_cache_without_recomputing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            reports = Path(td)
+            cache = reports / "observable_tail_selector_replay_latest.json"
+            cache.write_text(json.dumps({
+                "decision": "no_selector_passed_observable_shadow_gate",
+                "ranked_selectors": [
+                    {
+                        "name": "stale_selector",
+                        "test": {
+                            "avg_delta_pct": 0.09,
+                            "median_delta_pct": 0.0,
+                            "worse_rate_pct": 26.5,
+                            "allowed_rate_pct": 31.0,
+                            "false_positive_allowed_rate_pct": 0.0,
+                        },
+                    }
+                ],
+            }), encoding="utf-8")
+            old_time = 1_700_000_000
+            import os
+            os.utime(cache, (old_time, old_time))
+
+            class FailingReplay:
+                @staticmethod
+                def build_replay(**_kwargs):
+                    raise AssertionError("daily report must not recompute stale heavy replay inline")
+
+            original = lpr.replay_observable_tail_selector
+            try:
+                lpr.replay_observable_tail_selector = FailingReplay
+                summary = lpr._build_shadow_tail_selector_summary(reports)
+            finally:
+                lpr.replay_observable_tail_selector = original
+
+        self.assertEqual(summary["status"], "failed_gate")
+        self.assertTrue(summary["stale"])
+        self.assertIn("stale cache", summary["detail"])
+        self.assertIn("stale_selector", summary["detail"])
+
     def test_shadow_entry_admission_summary_and_actions(self) -> None:
         class FakeAdmission:
             @staticmethod
