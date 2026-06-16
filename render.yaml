@@ -1,0 +1,16 @@
+services:
+  - type: worker
+    name: gpt-crypto-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r files/requirements.txt
+    startCommand: cd files && python bot.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONNOUSERSITE
+        value: "1"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false

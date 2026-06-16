@@ -116,15 +116,27 @@ def _labeled_rows(reports_dir: Path, cache_dir: Path, cfg: TrailingTailConfig) -
     for row in rows:
         if not row.get("eligible") or row.get("label_status") != "labeled":
             continue
-        _attach_candle_path(row, cache_dir, max_h)
+        _attach_candle_path(row, cache_dir, max_h, candle_cache=candle_cache)
     return [row for row in rows if row.get("eligible")]
 
 
-def _attach_candle_path(row: dict[str, Any], cache_dir: Path, max_horizon: int) -> None:
+def _attach_candle_path(
+    row: dict[str, Any],
+    cache_dir: Path,
+    max_horizon: int,
+    *,
+    candle_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[int]]] | None = None,
+) -> None:
     sym = str(row.get("sym") or "")
     tf = str(row.get("tf") or "15m")
     exit_ts_ms = hold_replay._parse_ts_ms(row.get("exit_ts"))
-    candles = hold_replay._load_cached_candles(cache_dir, sym, tf)
+    key = (sym, tf)
+    if candle_cache is not None and key in candle_cache:
+        candles = candle_cache[key][0]
+    else:
+        candles = hold_replay._load_cached_candles(cache_dir, sym, tf)
+        if candle_cache is not None:
+            candle_cache[key] = (candles, [int(c.get("t")) for c in candles if c.get("t") is not None])
     if exit_ts_ms is None or not candles:
         row["tail_path_status"] = "missing_path"
         return

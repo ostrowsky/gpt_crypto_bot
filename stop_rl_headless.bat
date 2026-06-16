@@ -5,6 +5,10 @@ cd /d "%~dp0"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
   "$root = '%~dp0'.TrimEnd('\');" ^
   "$pidFile = Join-Path $root '.runtime\rl_worker_bg.json';" ^
+  "$stopFile = Join-Path $root '.runtime\rl_worker.stop';" ^
+  "$runtimeDir = Split-Path -Parent $stopFile;" ^
+  "if (-not (Test-Path $runtimeDir)) { New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null };" ^
+  "Set-Content -Path $stopFile -Value ((Get-Date).ToUniversalTime().ToString('o')) -Encoding UTF8;" ^
   "$ids = @();" ^
   "if (Test-Path $pidFile) {" ^
   "  try {" ^

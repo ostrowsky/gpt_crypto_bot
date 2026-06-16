@@ -12,6 +12,7 @@ $runtimeDir = Join-Path $root ".runtime"
 $loopLog = Join-Path $runtimeDir "headless_loop.log"
 $pidFile = Join-Path $runtimeDir "rl_worker_bg.json"
 $heartbeatFile = Join-Path $runtimeDir "rl_worker_wrapper_heartbeat.json"
+$stopFile = Join-Path $runtimeDir "rl_worker.stop"
 
 if (-not (Test-Path $python)) {
     throw "Python runtime not found: $python"
@@ -57,6 +58,13 @@ function Write-LoopState {
 Push-Location $workdir
 try {
     while ($true) {
+        if (Test-Path $stopFile) {
+            $now = (Get-Date).ToString("o")
+            Add-Content -Path $loopLog -Encoding UTF8 -Value "$now headless_loop: stop file found, exiting"
+            Write-LoopState -State "stop_requested"
+            break
+        }
+
         $started = (Get-Date).ToString("o")
         Add-Content -Path $loopLog -Encoding UTF8 -Value "$started headless_loop: worker start"
         $argList = @($script) + @($args)
@@ -64,6 +72,16 @@ try {
         Write-LoopState -State "running" -PythonPid $proc.Id -StartedAt $started
 
         while (-not $proc.HasExited) {
+            if (Test-Path $stopFile) {
+                $now = (Get-Date).ToString("o")
+                Add-Content -Path $loopLog -Encoding UTF8 -Value "$now headless_loop: stop file found, stopping worker pid=$($proc.Id)"
+                try {
+                    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                } catch {
+                }
+                Write-LoopState -State "stop_requested" -PythonPid $proc.Id -StartedAt $started
+                break
+            }
             Write-LoopState -State "running" -PythonPid $proc.Id -StartedAt $started
             try {
                 Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction Stop
@@ -80,6 +98,10 @@ try {
         try { $code = $proc.ExitCode } catch {}
         $stopped = (Get-Date).ToString("o")
         Write-LoopState -State "stopped" -PythonPid 0 -StartedAt $started -ExitCode $code
+        if (Test-Path $stopFile) {
+            Add-Content -Path $loopLog -Encoding UTF8 -Value "$stopped headless_loop: stop requested, no restart"
+            break
+        }
         Add-Content -Path $loopLog -Encoding UTF8 -Value "$stopped headless_loop: worker exit code=$code, restart in ${RestartDelaySec}s"
         Start-Sleep -Seconds $RestartDelaySec
     }
