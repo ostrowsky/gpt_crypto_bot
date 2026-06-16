@@ -2364,7 +2364,7 @@ def _replacement_policy_block_reason(
     These variants are intentionally causal: they use only fields available at
     rotation time, not future top-mover labels or later trade outcomes.
     """
-    if variant == "replacement_block_non_losing" and replaced_pnl_pct >= 0.0:
+    if variant in {"replacement_block_non_losing", "score_replace_cluster_non_losing"} and replaced_pnl_pct >= 0.0:
         return f"block non-losing replacement pnl={replaced_pnl_pct:.2f}%"
     if variant == "replacement_block_leader_delta_lt_10" and leader_delta < 10.0:
         return f"block low leader delta {leader_delta:.2f} < 10.00"
@@ -2772,6 +2772,7 @@ async def simulate_portfolio(
             "score",
             "score_replace",
             "score_replace_cluster",
+            "score_replace_cluster_non_losing",
             "replacement_block_non_losing",
             "replacement_block_leader_delta_lt_10",
             "replacement_block_non_losing_unless_delta20",
@@ -2788,7 +2789,7 @@ async def simulate_portfolio(
             "suspicious_exit_reentry",
             "partial_profit_take",
         }
-        use_cluster_cap = variant == "score_replace_cluster"
+        use_cluster_cap = variant in {"score_replace_cluster", "score_replace_cluster_non_losing"}
         ts_candidates.sort(
             key=lambda item: (
                 item.top_gainer_score if use_top_gainer_score else item.score,
@@ -3163,6 +3164,7 @@ async def run_replay(
     enable_replacement = variant in {
         "score_replace",
         "score_replace_cluster",
+        "score_replace_cluster_non_losing",
         "protected_trailing_exit",
         "protected_weak_only",
         "exit_discriminator_shadow_policy",
@@ -3350,6 +3352,7 @@ def parse_args() -> argparse.Namespace:
             "score",
             "score_replace",
             "score_replace_cluster",
+            "score_replace_cluster_non_losing",
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",

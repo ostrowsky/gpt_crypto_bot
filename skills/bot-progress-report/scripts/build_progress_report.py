@@ -41,6 +41,10 @@ def _med(values: list[float | None]) -> float | None:
     return round(median(cleaned), 4) if cleaned else None
 
 
+def _num(value: float | None, default: float = 0.0) -> float:
+    return default if value is None else float(value)
+
+
 def _load_day_report(prefix: str, day: str, suffix: str) -> dict | None:
     """Load one canonical report per target day, ignoring manual/duplicate artifacts."""
     return _load_json(REPORTS / f"{prefix}{day}{suffix}")
@@ -113,8 +117,8 @@ def build(days: int) -> dict:
     }
     quality = {
         "days_loaded": len(quality_rows),
-        "miss_rate_avg_pct": _avg([s.get("miss_rate", 0.0) * 100.0 for s in quality_summaries]),
-        "false_positive_rate_avg_pct": _avg([s.get("false_positive_rate", 0.0) * 100.0 for s in quality_summaries]),
+        "miss_rate_avg_pct": _avg([_num(s.get("miss_rate")) * 100.0 for s in quality_summaries]),
+        "false_positive_rate_avg_pct": _avg([_num(s.get("false_positive_rate")) * 100.0 for s in quality_summaries]),
         "median_capture_ratio": _med([s.get("capture_ratio_at_entry", {}).get("median") for s in quality_summaries if s.get("capture_ratio_at_entry", {}).get("median") is not None]),
         "median_exit_efficiency": _med([s.get("exit_efficiency", {}).get("median") for s in quality_summaries if s.get("exit_efficiency", {}).get("median") is not None]),
         "median_giveback_pct": _med([s.get("giveback_pct", {}).get("median") for s in quality_summaries if s.get("giveback_pct", {}).get("median") is not None]),
