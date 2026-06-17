@@ -173,10 +173,12 @@ Required live checks:
 
 ## Backtest Gate For Future Changes
 1. Form one narrow hypothesis from critic metrics.
-2. Run baseline vs variant replay on at least 4 days and a wider 7-day window when feasible.
-3. Apply only if capture is not worse and at least one quality metric improves materially: total PnL, average PnL, precision, false positives, or blocked-winner reduction.
-4. If results are mixed, keep the change disabled or replay-only.
-5. After applying, run unit tests, compile touched modules, and restart bot/RL worker/market agent.
+2. Always propose validating the hypothesis on the maximum available replay/backtest period before adoption. Treat shorter windows as debugging or triage only.
+3. Run baseline vs variant on the maximum feasible period supported by the relevant replay engine and available local data. Also record the actual period used and why it is the maximum feasible period.
+4. If a maximum-period run is too slow or blocked, do not silently fall back. Report the blocker, run the largest completed window as provisional evidence, and keep the hypothesis disabled/replay-only until the maximum-period gate completes.
+5. Apply only if capture is not worse and at least one quality metric improves materially: total PnL, average PnL, precision, false positives, blocked-winner reduction, exit efficiency, giveback, or cooldown harm.
+6. If results are mixed, keep the change disabled or replay-only.
+7. After applying, run unit tests, compile touched modules, and restart bot/RL worker/market agent.
 
 ## 2026-05-16 Research Governance Layer
 

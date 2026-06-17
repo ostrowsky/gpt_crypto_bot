@@ -44,6 +44,11 @@ Every feature spec must state:
    - What could get worse if the feature works as designed.
 7. **Backtest / verification gate**
    - Replay, walk-forward, regression, or smoke checks required before adoption.
+   - For every behavior hypothesis, require the maximum feasible replay/backtest
+     period supported by the tool and local data. Short windows are only
+     provisional triage unless the spec explains why they are the maximum
+     available period.
+   - Always propose the maximum-period backtest before recommending adoption.
 8. **Rollback switch**
    - How to disable or revert the behavior safely.
 
@@ -58,6 +63,8 @@ Every feature spec must state:
 3. **Verify.**
    - Run the checks named in the spec.
    - For production behavior changes, replay/backtest evidence is mandatory before enablement.
+   - For each hypothesis, run or explicitly propose the maximum-period replay
+     gate; do not promote from a shorter window without documenting the blocker.
 4. **Document the decision.**
    - Record shipped / rejected / shadow-only status and the next gate.
 5. **Prefer measurement-first rollout.**
@@ -81,4 +88,3 @@ Before calling a feature complete, confirm:
 - [ ] Verification named in the spec was run.
 - [ ] Rollback or disable path is clear.
 - [ ] The final note says whether the feature is shipped, shadow-only, replay-only, or rejected.
-
