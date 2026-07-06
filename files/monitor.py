@@ -1935,7 +1935,6 @@ async def _maybe_send_top_gainer_watch_alert(
     min_score = _top_gainer_score_gate_min_for_mode(mode)
     if score >= min_score or score < float(getattr(config, "TOP_GAINER_WATCH_ALERT_MIN_SCORE", 30.0)):
         return
-    day_key = _local_day_key(bar_ts)
     key = f"top_gainer_score|{sym}|{tf}|{mode}"
     logged = getattr(state, "watch_alert_logged", None)
     if logged is None:
@@ -1954,6 +1953,179 @@ async def _maybe_send_top_gainer_watch_alert(
         f"Blocked: `{reason}`\n"
         "No position opened."
     )
+
+
+async def _maybe_send_top_gainer_score_gate_strong_alert(
+    *,
+    send: Callable[[str], Awaitable[None]],
+    state: "MonitorState",
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    candidate_score: float,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    rsi: float,
+    ranker_info: Optional[Dict[str, float]],
+    reason: str,
+    bar_ts: int,
+) -> None:
+    if not bool(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERTS_ENABLED", False)):
+        return
+    live_score = _top_gainer_live_score(
+        mode=mode,
+        intraday_change_pct=intraday_change_pct,
+        daily_range=daily_range,
+        vol_x=vol_x,
+        adx=adx,
+        rsi=rsi,
+        ranker_info=ranker_info,
+    )
+    min_score = _top_gainer_score_gate_min_for_mode(mode)
+    deficit = float(min_score) - float(live_score)
+    if float(candidate_score) < float(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_CANDIDATE_SCORE", 100.0)):
+        return
+    if float(live_score) < float(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_LIVE_SCORE", 30.0)):
+        return
+    if deficit < 0.0 or deficit > float(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERT_MAX_DEFICIT", 2.0)):
+        return
+    key = f"top_gainer_score_strong|{sym}|{tf}|{mode}"
+    logged = getattr(state, "score_gate_alert_logged", None)
+    if logged is None:
+        logged = {}
+        setattr(state, "score_gate_alert_logged", logged)
+    if logged.get(key) == int(bar_ts):
+        return
+    logged[key] = int(bar_ts)
+    await send(
+        "STRONG SIGNAL - entry blocked by score gate\n\n"
+        f"*{sym}*  `[{tf}]`  `{mode}`\n"
+        f"Price: `{price:.6g}`\n"
+        f"Candidate score: `{float(candidate_score):.1f}`\n"
+        f"Top-gainer score: `{float(live_score):.2f}` / `{float(min_score):.2f}` "
+        f"(deficit `{float(deficit):.2f}`)\n"
+        f"RSI: `{rsi:.1f}`  ADX: `{adx:.1f}`  Vol x: `{vol_x:.2f}`\n"
+        f"Daily range: `{daily_range:.2f}%`  Intraday: `{intraday_change_pct:+.2f}%`\n"
+        f"Blocked: `{reason}`\n"
+        "Signal delivered; no position opened automatically."
+    )
+
+
+async def _maybe_send_top_gainer_chase_guard_alert(
+    *,
+    send: Callable[[str], Awaitable[None]],
+    state: "MonitorState",
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    candidate_score: float,
+    intraday_change_pct: float,
+    daily_range: float,
+    vol_x: float,
+    adx: float,
+    rsi: float,
+    ranker_info: Optional[Dict[str, float]],
+    reason: str,
+    bar_ts: int,
+) -> None:
+    if not bool(getattr(config, "TOP_GAINER_CHASE_GUARD_ALERTS_ENABLED", False)):
+        return
+    live_score = _top_gainer_live_score(
+        mode=mode,
+        intraday_change_pct=intraday_change_pct,
+        daily_range=daily_range,
+        vol_x=vol_x,
+        adx=adx,
+        rsi=rsi,
+        ranker_info=ranker_info,
+    )
+    if float(candidate_score) < float(getattr(config, "TOP_GAINER_CHASE_GUARD_ALERT_MIN_CANDIDATE_SCORE", 100.0)):
+        return
+    if float(live_score) < float(getattr(config, "TOP_GAINER_CHASE_GUARD_ALERT_MIN_LIVE_SCORE", 34.0)):
+        return
+    day_key = _local_day_key(bar_ts)
+    key = f"top_gainer_chase|{sym}|{tf}|{mode}"
+    logged = getattr(state, "chase_guard_alert_logged", None)
+    if logged is None:
+        logged = {}
+        setattr(state, "chase_guard_alert_logged", logged)
+    if logged.get(key) == day_key:
+        return
+    logged[key] = day_key
+    await send(
+        "STRONG SIGNAL - entry blocked by chase guard\n\n"
+        f"*{sym}*  `[{tf}]`  `{mode}`\n"
+        f"Price: `{price:.6g}`\n"
+        f"Candidate score: `{float(candidate_score):.1f}`\n"
+        f"Top-gainer score: `{float(live_score):.2f}`\n"
+        f"RSI: `{rsi:.1f}`  ADX: `{adx:.1f}`  Vol x: `{vol_x:.2f}`\n"
+        f"Daily range: `{daily_range:.2f}%`  Intraday: `{intraday_change_pct:+.2f}%`\n"
+        f"Blocked: `{reason}`\n"
+        "Signal delivered; no position opened automatically."
+    )
+
+
+async def _maybe_send_open_cluster_cap_watch_alert(
+    *,
+    send: Callable[[str], Awaitable[None]],
+    state: "MonitorState",
+    sym: str,
+    tf: str,
+    mode: str,
+    price: float,
+    candidate_score: float,
+    score_floor: float,
+    reason: str,
+    bar_ts: int,
+) -> None:
+    if not bool(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERTS_ENABLED", False)):
+        return
+    bucket = _signal_cluster_bucket(tf, mode)
+    allowed_buckets = tuple(
+        str(x) for x in getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_BUCKETS", ())
+    )
+    if allowed_buckets and bucket not in allowed_buckets:
+        return
+    min_score = float(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_MIN_SCORE", 80.0))
+    if float(candidate_score) < min_score:
+        return
+    day_key = _local_day_key(bar_ts)
+    key = f"open_cluster_cap|{sym}|{tf}|{mode}|{bucket}"
+    logged = getattr(state, "cluster_cap_alert_logged", None)
+    if logged is None:
+        logged = {}
+        setattr(state, "cluster_cap_alert_logged", logged)
+    if logged.get(key) == day_key:
+        return
+    logged[key] = day_key
+    await send(
+        "STRONG SIGNAL - auto-entry blocked by cluster cap\n\n"
+        f"*{sym}*  `[{tf}]`  `{mode}`\n"
+        f"Bucket: `{bucket}`\n"
+        f"Price: `{price:.6g}`\n"
+        f"Candidate score: `{float(candidate_score):.1f}` / floor `{float(score_floor):.1f}`\n"
+        f"Blocked: `{reason}`\n"
+        "Signal delivered; no position opened automatically."
+    )
+
+
+def _claim_blocked_learning_label(
+    state: "MonitorState",
+    *,
+    sym: str,
+    tf: str,
+    label_type: str,
+    bar_ts: int,
+) -> bool:
+    key = f"{label_type}|{sym}|{tf}"
+    if state.blocked_learning_logged.get(key) == int(bar_ts):
+        return False
+    state.blocked_learning_logged[key] = int(bar_ts)
+    return True
 
 
 def _continuation_profit_lock_active(
@@ -3492,13 +3664,9 @@ def _position_priority(pos: "OpenPosition") -> tuple[float, float, float, float]
 
 
 def _trim_restored_positions(positions: dict) -> tuple[dict, list[str]]:
-    current_day = _current_local_day_key()
     removed: list[str] = []
     kept = {}
     for sym, pos in positions.items():
-        if _local_day_key(int(getattr(pos, "entry_ts", 0) or 0)) != current_day:
-            removed.append(f"{sym}: stale intraday position")
-            continue
         if (
             str(getattr(pos, "signal_mode", "")) == "alignment"
             and not bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False))
@@ -3551,6 +3719,14 @@ def _fill_trade_outcome_labels(
     exit_reason: str,
     bars_held: int,
 ) -> None:
+    bar_minutes = 15 if str(getattr(pos, "tf", "15m")) == "15m" else 60
+    held_minutes = int(bars_held) * bar_minutes
+    early_exit = held_minutes < int(getattr(config, "EXIT_LEARNING_EARLY_EXIT_MAX_MINUTES", 60))
+    learning_labels = {
+        "held_minutes": int(held_minutes),
+        "early_exit_under_1h": bool(early_exit),
+        "entry_quality_negative_early_exit": bool(early_exit),
+    }
     if pos.ml_record_id:
         ml_dataset.fill_labels(
             pos.ml_record_id,
@@ -3558,12 +3734,26 @@ def _fill_trade_outcome_labels(
             exit_reason=exit_reason,
             bars_held=bars_held,
         )
+        ml_dataset.fill_learning_labels(pos.ml_record_id, learning_labels)
     if getattr(pos, "critic_record_id", ""):
         critic_dataset.fill_trade_outcome(
             pos.critic_record_id,
             exit_pnl=exit_pnl,
             exit_reason=exit_reason,
             bars_held=bars_held,
+        )
+        critic_dataset.fill_learning_labels(pos.critic_record_id, learning_labels)
+    if early_exit:
+        botlog.log_exit_learning(
+            sym=str(getattr(pos, "symbol", "")),
+            tf=str(getattr(pos, "tf", "")),
+            mode=str(getattr(pos, "signal_mode", "")),
+            label_type="early_exit_under_1h",
+            record_id=str(getattr(pos, "ml_record_id", "")),
+            critic_record_id=str(getattr(pos, "critic_record_id", "")),
+            exit_reason=str(exit_reason),
+            exit_pnl_pct=float(exit_pnl),
+            bars_held=int(bars_held),
         )
 
 
@@ -3572,6 +3762,29 @@ def _fill_forward_labels(pos: "OpenPosition", horizon: int, ret_pct: float) -> N
         ml_dataset.fill_forward_label(pos.ml_record_id, horizon, ret_pct)
     if getattr(pos, "critic_record_id", ""):
         critic_dataset.fill_forward_label(pos.critic_record_id, horizon, ret_pct)
+
+
+def _portfolio_position_capacity(max_positions_override: Optional[int] = None) -> int:
+    max_pos_cfg = int(
+        getattr(
+            config,
+            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
+            getattr(config, "MAX_OPEN_POSITIONS", 6),
+        )
+        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
+        else getattr(config, "MAX_OPEN_POSITIONS", 6)
+    )
+    return int(max_positions_override if max_positions_override is not None else max_pos_cfg)
+
+
+def _portfolio_open_count(state: "MonitorState") -> int:
+    main_symbols = set(state.positions)
+    n_external = (
+        external_agent_symbol_count(main_symbols)
+        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
+        else 0
+    )
+    return len(state.positions) + n_external
 
 
 def _check_portfolio_limits(
@@ -3591,26 +3804,11 @@ def _check_portfolio_limits(
       2. MAX_POSITIONS_PER_GROUP — не более M позиций в одной группе монет
          (защита от ситуации 11.03.2026 когда 12 L1/AI вошли одновременно)
     """
-    max_pos_cfg = int(
-        getattr(
-            config,
-            "UNIFIED_PORTFOLIO_MAX_POSITIONS",
-            getattr(config, "MAX_OPEN_POSITIONS", 6),
-        )
-        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
-        else getattr(config, "MAX_OPEN_POSITIONS", 6)
-    )
-    max_pos  = int(max_positions_override if max_positions_override is not None else max_pos_cfg)
+    max_pos = _portfolio_position_capacity(max_positions_override)
     max_grp  = getattr(config, "MAX_POSITIONS_PER_GROUP", 2)
 
     # Лимит 1: общее число позиций
-    main_symbols = set(state.positions)
-    n_external = (
-        external_agent_symbol_count(main_symbols)
-        if bool(getattr(config, "UNIFIED_PORTFOLIO_ENABLED", True))
-        else 0
-    )
-    n_open = len(state.positions) + n_external
+    n_open = _portfolio_open_count(state)
     if n_open >= max_pos:
         return False, f"единый портфель полон: {n_open}/{max_pos} позиций"
 
@@ -3802,11 +4000,16 @@ class MonitorState:
     # Портфельный лимит проверяется каждые 60с → без dedup = 100+ строк на монету.
     # Логируем не чаще 1 раза в BLOCK_LOG_INTERVAL_BARS баров (по умолчанию 4 = 1ч на 15m).
     block_logged:  Dict[str, int]  = field(default_factory=dict)
-    watch_alert_logged: Dict[str, str] = field(default_factory=dict)
+    watch_alert_logged: Dict[str, int] = field(default_factory=dict)
+    cluster_cap_alert_logged: Dict[str, str] = field(default_factory=dict)
+    chase_guard_alert_logged: Dict[str, str] = field(default_factory=dict)
+    score_gate_alert_logged: Dict[str, int] = field(default_factory=dict)
+    blocked_learning_logged: Dict[str, int] = field(default_factory=dict)
     scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
     wakeup_shadow_logged: Dict[str, int] = field(default_factory=dict)
     suspicious_reentry_watch: Dict[str, dict] = field(default_factory=dict)
     suspicious_reentry_shadow_logged: Dict[str, int] = field(default_factory=dict)
+    observable_tail_shadow_watch: Dict[str, dict] = field(default_factory=dict)
     time_block_recent: Dict[str, dict] = field(default_factory=dict)
     time_block_streaks: Dict[str, dict] = field(default_factory=dict)
     last_discovery_ts: int = 0
@@ -3883,11 +4086,14 @@ def _open_signal_cluster_cap_reason(
     *,
     tf: str,
     mode: str,
+    max_positions_override: Optional[int] = None,
 ) -> str:
     if not bool(getattr(config, "OPEN_SIGNAL_CLUSTER_CAP_ENABLED", False)):
         return ""
     bucket = _signal_cluster_bucket(tf, mode)
     if not bucket:
+        return ""
+    if _portfolio_open_count(state) < _portfolio_position_capacity(max_positions_override):
         return ""
 
     if bucket == "15m_short_bounce":
@@ -4004,6 +4210,126 @@ def _candidate_score_snapshot(
     }
 
 
+def _register_observable_tail_shadow(
+    state: MonitorState,
+    pos: OpenPosition,
+    *,
+    exit_reason: str,
+    exit_price: float,
+    exit_ts: int,
+    pnl_pct: float,
+) -> None:
+    if not bool(getattr(config, "OBSERVABLE_TAIL_SHADOW_ENABLED", False)):
+        return
+    selector = str(getattr(config, "OBSERVABLE_TAIL_SHADOW_SELECTOR", "non_ema_positive_giveback"))
+    if selector != "non_ema_positive_giveback" or _exit_reason_bucket(exit_reason) == "ema_break":
+        return
+    min_pnl = float(getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT", 0.0))
+    if float(pnl_pct) <= min_pnl:
+        return
+    entry_price = float(getattr(pos, "entry_price", 0.0) or 0.0)
+    peak_price = max(float(getattr(pos, "max_price_since_entry", 0.0) or 0.0), entry_price, float(exit_price))
+    mfe_pct = (peak_price / entry_price - 1.0) * 100.0 if entry_price > 0.0 else 0.0
+    giveback_pct = max(0.0, float(mfe_pct) - float(pnl_pct))
+    if giveback_pct < float(getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_GIVEBACK_PCT", 0.5)):
+        return
+    horizons = _normalize_forward_horizons(getattr(config, "OBSERVABLE_TAIL_SHADOW_HORIZONS", (2, 5, 10)))
+    if not horizons:
+        return
+    sell_fraction = min(1.0, max(0.0, float(getattr(config, "OBSERVABLE_TAIL_SHADOW_SELL_FRACTION", 0.5))))
+    tf = str(getattr(pos, "tf", "15m"))
+    mode = str(getattr(pos, "signal_mode", "trend"))
+    state.observable_tail_shadow_watch[pos.symbol] = {
+        "exit_ts": int(exit_ts),
+        "until_ts": int(exit_ts) + max(horizons) * _tf_bar_ms(tf),
+        "tf": tf,
+        "mode": mode,
+        "selector": selector,
+        "exit_price": float(exit_price),
+        "exit_pnl_pct": float(pnl_pct),
+        "mfe_pct": float(mfe_pct),
+        "giveback_pct": float(giveback_pct),
+        "sell_fraction": float(sell_fraction),
+        "horizons": horizons,
+        "labeled": set(),
+        "ml_record_id": str(getattr(pos, "ml_record_id", "") or ""),
+        "critic_record_id": str(getattr(pos, "critic_record_id", "") or ""),
+    }
+    botlog.log_observable_tail_shadow_candidate(
+        sym=pos.symbol,
+        tf=tf,
+        mode=mode,
+        selector=selector,
+        exit_price=float(exit_price),
+        exit_pnl_pct=float(pnl_pct),
+        mfe_pct=float(mfe_pct),
+        giveback_pct=float(giveback_pct),
+        exit_reason=str(exit_reason),
+        sell_fraction=float(sell_fraction),
+    )
+
+
+def _update_observable_tail_shadow(
+    *,
+    state: MonitorState,
+    sym: str,
+    tf: str,
+    data: np.ndarray,
+    idx: int,
+) -> None:
+    watch = state.observable_tail_shadow_watch.get(sym)
+    if not watch or str(watch.get("tf")) != str(tf):
+        return
+    current_ts = int(data["t"][idx])
+    exit_ts = int(watch.get("exit_ts", 0) or 0)
+    if current_ts <= exit_ts:
+        return
+    bar_ms = _tf_bar_ms(tf)
+    bars_since_exit = int((current_ts - exit_ts) // bar_ms)
+    labeled = watch.setdefault("labeled", set())
+    exit_price = float(watch.get("exit_price", 0.0) or 0.0)
+    if exit_price <= 0.0:
+        state.observable_tail_shadow_watch.pop(sym, None)
+        return
+    for horizon in tuple(watch.get("horizons") or ()):
+        horizon = int(horizon)
+        if horizon in labeled or bars_since_exit < horizon:
+            continue
+        target_ts = exit_ts + horizon * bar_ms
+        target_indices = np.flatnonzero((data["t"][: idx + 1] >= target_ts))
+        if len(target_indices) == 0:
+            continue
+        forward_idx = int(target_indices[0])
+        price = float(data["c"][forward_idx])
+        tail_return_pct = (price / exit_price - 1.0) * 100.0
+        partial_delta_pct = (1.0 - float(watch.get("sell_fraction", 0.5))) * tail_return_pct
+        labeled.add(horizon)
+        labels = {
+            f"observable_tail_ret_{horizon}": round(float(tail_return_pct), 4),
+            f"observable_tail_partial_delta_{horizon}": round(float(partial_delta_pct), 4),
+        }
+        ml_record_id = str(watch.get("ml_record_id", "") or "")
+        critic_record_id = str(watch.get("critic_record_id", "") or "")
+        if ml_record_id:
+            ml_dataset.fill_learning_labels(ml_record_id, labels)
+        if critic_record_id:
+            critic_dataset.fill_learning_labels(critic_record_id, labels)
+        botlog.log_observable_tail_shadow_label(
+            sym=sym,
+            tf=tf,
+            mode=str(watch.get("mode", "trend")),
+            selector=str(watch.get("selector", "")),
+            horizon=horizon,
+            exit_price=exit_price,
+            forward_price=price,
+            tail_return_pct=tail_return_pct,
+            partial_delta_pct=partial_delta_pct,
+        )
+    horizons = tuple(int(value) for value in (watch.get("horizons") or ()))
+    if (horizons and all(value in labeled for value in horizons)) or current_ts > int(watch.get("until_ts", 0) or 0):
+        state.observable_tail_shadow_watch.pop(sym, None)
+
+
 def _register_suspicious_reentry_watch(
     state: MonitorState,
     pos: OpenPosition,
@@ -4013,6 +4339,14 @@ def _register_suspicious_reentry_watch(
     exit_ts: int,
     pnl_pct: float,
 ) -> None:
+    _register_observable_tail_shadow(
+        state,
+        pos,
+        exit_reason=exit_reason,
+        exit_price=exit_price,
+        exit_ts=exit_ts,
+        pnl_pct=pnl_pct,
+    )
     if not bool(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_ENABLED", False)):
         return
     max_price = max(float(getattr(pos, "max_price_since_entry", 0.0) or 0.0), float(getattr(pos, "entry_price", 0.0)), exit_price)
@@ -4069,9 +4403,13 @@ def _register_suspicious_reentry_watch(
         "mode": mode,
         "exit_reason": str(exit_reason),
         "exit_price": float(exit_price),
+        "entry_price": float(getattr(pos, "entry_price", 0.0) or 0.0),
         "exit_pnl_pct": float(pnl_pct),
         "mfe_pct": float(mfe_pct),
         "exit_score": float(score),
+        "ml_record_id": str(getattr(pos, "ml_record_id", "") or ""),
+        "critic_record_id": str(getattr(pos, "critic_record_id", "") or ""),
+        "bars_held": int(getattr(pos, "bars_elapsed", 0)),
     }
     botlog.log_suspicious_reentry_watch_decision(
         sym=pos.symbol,
@@ -4140,6 +4478,39 @@ async def _maybe_send_suspicious_reentry_shadow_alert(
         mfe_pct=float(watch.get("mfe_pct", 0.0)),
         bars_since_exit=int(bars_since_exit),
         cooldown_bars_left=int(cooldown_bars_left),
+    )
+    exit_price = float(watch.get("exit_price", 0.0) or 0.0)
+    continuation_pct = (float(metrics["price"]) / exit_price - 1.0) * 100.0 if exit_price > 0 else 0.0
+    false_early_exit = continuation_pct >= float(
+        getattr(config, "EXIT_LEARNING_POST_EXIT_CONTINUATION_MIN_PCT", 1.0)
+    )
+    continuation_labels = {
+        "post_exit_continuation_pct": round(float(continuation_pct), 4),
+        "post_exit_continuation_bars": int(bars_since_exit),
+        "post_exit_continuation_price": round(float(metrics["price"]), 8),
+        "post_exit_candidate_score": round(float(metrics["candidate_score"]), 4),
+        "false_early_exit": bool(false_early_exit),
+        "cooldown_harm_pct": round(float(max(0.0, continuation_pct)), 4),
+    }
+    ml_record_id = str(watch.get("ml_record_id", "") or "")
+    critic_record_id = str(watch.get("critic_record_id", "") or "")
+    if ml_record_id:
+        ml_dataset.fill_learning_labels(ml_record_id, continuation_labels)
+    if critic_record_id:
+        critic_dataset.fill_learning_labels(critic_record_id, continuation_labels)
+    botlog.log_exit_learning(
+        sym=sym,
+        tf=tf,
+        mode=mode,
+        label_type="post_exit_continuation",
+        record_id=ml_record_id,
+        critic_record_id=critic_record_id,
+        exit_reason=str(watch.get("exit_reason", "")),
+        exit_pnl_pct=float(watch.get("exit_pnl_pct", 0.0)),
+        bars_held=int(watch.get("bars_held", 0) or 0),
+        continuation_pct=float(continuation_pct),
+        continuation_bars=int(bars_since_exit),
+        candidate_score=float(metrics["candidate_score"]),
     )
     if bool(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_TELEGRAM_ENABLED", True)):
         await send(
@@ -4476,6 +4847,7 @@ async def _poll_coin(
     if pos is None:
         # П3: cooldown — не входим повторно N баров после выхода
         # cooldown хранит unix-ms время до которого вход заблокирован
+        _update_observable_tail_shadow(state=state, sym=sym, tf=tf, data=data, idx=i)
         cooldown_until_ms = state.cooldowns.get(sym, 0)
         current_ts_ms = int(data["t"][i])
         if current_ts_ms < cooldown_until_ms:
@@ -5059,7 +5431,7 @@ async def _poll_coin(
                 daily_range=preview_range,
             )
             if chase_guard_reason:
-                _log_critic_candidate(
+                critic_record_id = _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5083,6 +5455,51 @@ async def _poll_coin(
                     continuation_profile=continuation_profile,
                     signal_flags=signal_flags,
                 )
+                intraday_change_pct_now = _intraday_change_pct_from_data(data, i)
+                chase_live_score = _top_gainer_live_score(
+                    mode=preview_mode,
+                    intraday_change_pct=intraday_change_pct_now,
+                    daily_range=preview_range,
+                    vol_x=preview_vol,
+                    adx=preview_adx,
+                    rsi=preview_rsi,
+                    ranker_info=ranker_info,
+                )
+                if (
+                    bool(getattr(config, "TOP_GAINER_CHASE_GUARD_LEARNING_LABEL_ENABLED", True))
+                    and _claim_blocked_learning_label(
+                        state,
+                        sym=sym,
+                        tf=tf,
+                        label_type="blocked_strong_chase_guard",
+                        bar_ts=int(data["t"][i]),
+                    )
+                ):
+                    chase_labels = {
+                        "blocked_strong_chase_guard": True,
+                        "blocked_chase_guard_candidate_score": round(float(candidate_score), 4),
+                        "blocked_chase_guard_live_score": round(float(chase_live_score), 4),
+                        "blocked_chase_guard_rsi": round(float(preview_rsi), 4),
+                        "blocked_chase_guard_daily_range": round(float(preview_range), 4),
+                    }
+                    if critic_record_id:
+                        critic_dataset.fill_learning_labels(critic_record_id, chase_labels)
+                    botlog.log_blocked_learning(
+                        sym=sym,
+                        tf=tf,
+                        mode=preview_mode,
+                        label_type="blocked_strong_chase_guard",
+                        reason_code="top_gainer_chase_guard",
+                        reason=chase_guard_reason,
+                        critic_record_id=critic_record_id,
+                        price=float(c[i]),
+                        candidate_score=float(candidate_score),
+                        live_score=float(chase_live_score),
+                        rsi=float(preview_rsi),
+                        adx=float(preview_adx),
+                        vol_x=float(preview_vol),
+                        daily_range=float(preview_range),
+                    )
                 log.info("TOP GAINER CHASE BLOCK %s [%s]: %s", sym, tf, chase_guard_reason)
                 _maybe_log_ranker_shadow(
                     sym=sym,
@@ -5110,6 +5527,26 @@ async def _poll_coin(
                     today_change_pct=round(float(getattr(report, "today_change_pct", 0.0)), 4),
                     forecast_return_pct=round(float(getattr(report, "forecast_return_pct", 0.0)), 4),
                 )
+                try:
+                    await _maybe_send_top_gainer_chase_guard_alert(
+                        send=send,
+                        state=state,
+                        sym=sym,
+                        tf=tf,
+                        mode=preview_mode,
+                        price=float(c[i]),
+                        candidate_score=candidate_score,
+                        intraday_change_pct=intraday_change_pct_now,
+                        daily_range=preview_range,
+                        vol_x=preview_vol,
+                        adx=preview_adx,
+                        rsi=preview_rsi,
+                        ranker_info=ranker_info,
+                        reason=chase_guard_reason,
+                        bar_ts=int(data["t"][i]),
+                    )
+                except Exception as exc:
+                    log.warning("top-gainer chase guard alert failed for %s [%s]: %s", sym, tf, exc)
                 return
             intraday_change_pct_now = _intraday_change_pct_from_data(data, i)
             objective_gate_reason = _top_gainer_objective_gate_reason(
@@ -5186,7 +5623,7 @@ async def _poll_coin(
                 ranker_info=ranker_info,
             )
             if top_gainer_score_gate_reason:
-                _log_critic_candidate(
+                critic_record_id = _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5210,6 +5647,66 @@ async def _poll_coin(
                     continuation_profile=continuation_profile,
                     signal_flags=signal_flags,
                 )
+                top_gainer_live_score = _top_gainer_live_score(
+                    mode=preview_mode,
+                    intraday_change_pct=intraday_change_pct_now,
+                    daily_range=preview_range,
+                    vol_x=preview_vol,
+                    adx=preview_adx,
+                    rsi=preview_rsi,
+                    ranker_info=ranker_info,
+                )
+                top_gainer_min_score = _top_gainer_score_gate_min_for_mode(preview_mode)
+                top_gainer_score_deficit = float(top_gainer_min_score) - float(top_gainer_live_score)
+                score_gate_strong_block = (
+                    float(candidate_score)
+                    >= float(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_CANDIDATE_SCORE", 100.0))
+                    and float(top_gainer_live_score)
+                    >= float(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_LIVE_SCORE", 30.0))
+                    and 0.0
+                    <= float(top_gainer_score_deficit)
+                    <= float(getattr(config, "TOP_GAINER_SCORE_GATE_STRONG_ALERT_MAX_DEFICIT", 2.0))
+                )
+                if (
+                    score_gate_strong_block
+                    and bool(getattr(config, "TOP_GAINER_SCORE_GATE_LEARNING_LABEL_ENABLED", True))
+                    and _claim_blocked_learning_label(
+                        state,
+                        sym=sym,
+                        tf=tf,
+                        label_type="blocked_strong_score_gate",
+                        bar_ts=int(data["t"][i]),
+                    )
+                ):
+                    score_gate_labels = {
+                        "blocked_strong_score_gate": True,
+                        "blocked_score_gate_candidate_score": round(float(candidate_score), 4),
+                        "blocked_score_gate_live_score": round(float(top_gainer_live_score), 4),
+                        "blocked_score_gate_min_score": round(float(top_gainer_min_score), 4),
+                        "blocked_score_gate_deficit": round(float(top_gainer_score_deficit), 4),
+                        "blocked_score_gate_rsi": round(float(preview_rsi), 4),
+                        "blocked_score_gate_adx": round(float(preview_adx), 4),
+                        "blocked_score_gate_vol_x": round(float(preview_vol), 4),
+                        "blocked_score_gate_daily_range": round(float(preview_range), 4),
+                    }
+                    if critic_record_id:
+                        critic_dataset.fill_learning_labels(critic_record_id, score_gate_labels)
+                    botlog.log_blocked_learning(
+                        sym=sym,
+                        tf=tf,
+                        mode=preview_mode,
+                        label_type="blocked_strong_score_gate",
+                        reason_code="top_gainer_score_gate",
+                        reason=top_gainer_score_gate_reason,
+                        critic_record_id=critic_record_id,
+                        price=float(c[i]),
+                        candidate_score=float(candidate_score),
+                        live_score=float(top_gainer_live_score),
+                        rsi=float(preview_rsi),
+                        adx=float(preview_adx),
+                        vol_x=float(preview_vol),
+                        daily_range=float(preview_range),
+                    )
                 log.info("TOP GAINER SCORE BLOCK %s [%s]: %s", sym, tf, top_gainer_score_gate_reason)
                 _maybe_log_ranker_shadow(
                     sym=sym,
@@ -5238,6 +5735,23 @@ async def _poll_coin(
                     forecast_return_pct=round(float(getattr(report, "forecast_return_pct", 0.0)), 4),
                 )
                 try:
+                    await _maybe_send_top_gainer_score_gate_strong_alert(
+                        send=send,
+                        state=state,
+                        sym=sym,
+                        tf=tf,
+                        mode=preview_mode,
+                        price=float(c[i]),
+                        candidate_score=candidate_score,
+                        intraday_change_pct=intraday_change_pct_now,
+                        daily_range=preview_range,
+                        vol_x=preview_vol,
+                        adx=preview_adx,
+                        rsi=preview_rsi,
+                        ranker_info=ranker_info,
+                        reason=top_gainer_score_gate_reason,
+                        bar_ts=int(data["t"][i]),
+                    )
                     await _maybe_send_top_gainer_watch_alert(
                         send=send,
                         state=state,
@@ -5718,6 +6232,7 @@ async def _poll_coin(
                 state,
                 tf=tf,
                 mode=preview_mode,
+                max_positions_override=effective_max_pos,
             )
             if cluster_cap_reason:
                 _log_critic_candidate(
@@ -5758,6 +6273,18 @@ async def _poll_coin(
                     reason=cluster_cap_reason,
                 )
                 botlog.log_blocked(sym, tf, float(c[i]), cluster_cap_reason, signal_type="open_cluster_cap")
+                await _maybe_send_open_cluster_cap_watch_alert(
+                    send=send,
+                    state=state,
+                    sym=sym,
+                    tf=tf,
+                    mode=preview_mode,
+                    price=float(c[i]),
+                    candidate_score=candidate_score,
+                    score_floor=score_floor,
+                    reason=cluster_cap_reason,
+                    bar_ts=int(data["t"][i]),
+                )
                 return
             port_ok, port_reason = _check_portfolio_limits(
                 sym,
@@ -5871,6 +6398,14 @@ async def _poll_coin(
                             exit_pnl=replace_pos.pnl_pct(float(replace_price)),
                             exit_reason=replace_reason,
                             bars_held=replace_pos.bars_elapsed,
+                        )
+                        _register_observable_tail_shadow(
+                            state,
+                            replace_pos,
+                            exit_reason=replace_reason,
+                            exit_price=float(replace_price),
+                            exit_ts=int(data["t"][i]),
+                            pnl_pct=replace_pnl,
                         )
                         old_tf = replace_pos.tf
                         del state.positions[replace_pos.symbol]

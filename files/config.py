@@ -138,6 +138,11 @@ DAILY_RANGE_MAX: float = 7.0
 # РњР°РєСЃРёРјСѓРј Р±Р°СЂРѕРІ РІ РїРѕР·РёС†РёРё вЂ” РµСЃР»Рё Р·Р° СЌС‚Рѕ РІСЂРµРјСЏ РЅРµС‚ РІС‹С…РѕРґР° РїРѕ СѓСЃР»РѕРІРёСЏРј,
 # РІС‹С…РѕРґРёРј РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ. РќР° 15m: 16 Р±Р°СЂРѕРІ = 4 С‡Р°СЃР°
 MAX_HOLD_BARS: int = 16
+TIME_EXIT_TREND_CONTINUATION_ENABLED: bool = True
+TIME_EXIT_CONTINUE_CLOSE_ABOVE_EMA20: bool = True
+TIME_EXIT_CONTINUE_SLOPE_MIN: float = 0.0
+TIME_EXIT_CONTINUE_RSI_MIN: float = 50.0
+TIME_EXIT_CONTINUE_MACD_HIST_MIN: float = 0.0
 
 # РњРёРЅРёРјСѓРј РѕС†РµРЅС‘РЅРЅС‹С… СЃРёРіРЅР°Р»РѕРІ СЃРµРіРѕРґРЅСЏ РґР»СЏ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃС‚СЂР°С‚РµРіРёРё
 # Р•СЃР»Рё РјРµРЅСЊС€Рµ вЂ” РјРѕРЅРµС‚Р° РЅРµ РїСЂРѕС…РѕРґРёС‚ РІ РјРѕРЅРёС‚РѕСЂРёРЅРі
@@ -384,6 +389,13 @@ ENTRY_SCORE_PCTL: float = 80.0       # dynamic threshold percentile among candid
 ALIGNMENT_BUY_ENABLED: bool = False  # alignment is context/exit warning, not a buy trigger
 MAX_POSITIONS_PER_GROUP: int = 2
 OPEN_SIGNAL_CLUSTER_CAP_ENABLED: bool = True
+OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MODES: tuple[str, ...] = ("breakout", "retest")
+OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES: tuple[str, ...] = ("impulse_speed",)
+OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse")
+OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MODES: tuple[str, ...] = ("alignment",)
+OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES: tuple[str, ...] = ("retest",)
+OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse_speed", "impulse")
+OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MODES: tuple[str, ...] = ("alignment",)
 OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX: int = 2
 OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX: int = 2
 OPEN_SIGNAL_CLUSTER_CAP_15M_MOMENTUM_MAX: int = 2
@@ -391,6 +403,9 @@ OPEN_SIGNAL_CLUSTER_CAP_15M_ALIGNMENT_MAX: int = 2
 OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX: int = 2
 OPEN_SIGNAL_CLUSTER_CAP_1H_MOMENTUM_MAX: int = 2
 OPEN_SIGNAL_CLUSTER_CAP_1H_ALIGNMENT_MAX: int = 2
+OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERTS_ENABLED: bool = True
+OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_MIN_SCORE: float = 80.0
+OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_BUCKETS: tuple[str, ...] = ("15m_impulse", "1h_momentum", "1h_retest")
 
 # Agent: use full portfolio capacity. Top-mover leader_score decides the top 10;
 # do not let the coarse "momentum" mode cluster collapse the portfolio to 2.
@@ -460,6 +475,10 @@ TOP_GAINER_CHASE_GUARD_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
 TOP_GAINER_CHASE_GUARD_MAX_RSI: float = 76.0
 TOP_GAINER_CHASE_GUARD_RSI_RANGE_MIN_PCT: float = 8.0
 TOP_GAINER_CHASE_GUARD_MAX_DAILY_RANGE_PCT: float = 25.0
+TOP_GAINER_CHASE_GUARD_ALERTS_ENABLED: bool = True
+TOP_GAINER_CHASE_GUARD_ALERT_MIN_CANDIDATE_SCORE: float = 100.0
+TOP_GAINER_CHASE_GUARD_ALERT_MIN_LIVE_SCORE: float = 34.0
+TOP_GAINER_CHASE_GUARD_LEARNING_LABEL_ENABLED: bool = True
 TOP_GAINER_OBJECTIVE_GATE_ENABLED: bool = False
 TOP_GAINER_OBJECTIVE_GATE_MODES: tuple[str, ...] = ("breakout", "retest", "trend", "strong_trend", "impulse_speed", "impulse")
 TOP_GAINER_OBJECTIVE_MIN_INTRADAY_CHANGE_PCT: float = 0.35
@@ -481,6 +500,11 @@ TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE: dict[str, float] = {"impulse": 30.0}
 TOP_GAINER_WATCH_ALERTS_ENABLED: bool = True
 TOP_GAINER_WATCH_ALERT_MODES: tuple[str, ...] = ("impulse_speed",)
 TOP_GAINER_WATCH_ALERT_MIN_SCORE: float = 30.0
+TOP_GAINER_SCORE_GATE_STRONG_ALERTS_ENABLED: bool = True
+TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_CANDIDATE_SCORE: float = 100.0
+TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_LIVE_SCORE: float = 28.0
+TOP_GAINER_SCORE_GATE_STRONG_ALERT_MAX_DEFICIT: float = 6.0
+TOP_GAINER_SCORE_GATE_LEARNING_LABEL_ENABLED: bool = True
 
 # Shadow-only early top-mover scout. It never opens positions and never emits a
 # live BUY; it writes hypothetical entries so the signal-quality evaluator can
@@ -538,6 +562,7 @@ AGENT_SOFT_BLOCK_DAILY_RANGE_MAX_PCT: float = 20.0
 RL_TELEGRAM_REPORTS_ENABLED: bool = True
 TOP_GAINER_CRITIC_TELEGRAM_REPORTS_ENABLED: bool = True
 TOP_GAINER_CRITIC_TELEGRAM_FINAL_ONLY: bool = True
+TOP_GAINER_CRITIC_TOP_N: int = 20
 WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED: bool = False
 RL_TRAIN_TELEGRAM_REPORTS_ENABLED: bool = False
 
@@ -551,7 +576,7 @@ SIGNAL_QUALITY_EVALUATOR_RUN_MINUTE_LOCAL: int = 15
 SIGNAL_QUALITY_EVALUATOR_RUN_WINDOW_MINUTES: int = 45
 SIGNAL_QUALITY_EVALUATOR_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")
 SIGNAL_QUALITY_EVALUATOR_SOURCE: str = "all"
-SIGNAL_QUALITY_EVALUATOR_TOP_MOVERS_N: int = 15
+SIGNAL_QUALITY_EVALUATOR_TOP_MOVERS_N: int = 20
 SIGNAL_QUALITY_EVALUATOR_SYMBOLS: tuple[str, ...] = ()
 V2_SHADOW_DAILY_SUMMARY_ENABLED: bool = True
 V2_SHADOW_DAILY_SUMMARY_TELEGRAM_ENABLED: bool = True
@@ -616,6 +641,14 @@ SUSPICIOUS_REENTRY_SHADOW_MIN_MFE_PCT: float = 1.0
 SUSPICIOUS_REENTRY_SHADOW_MIN_CANDIDATE_SCORE: float = 38.0
 SUSPICIOUS_REENTRY_SHADOW_MIN_ADX: float = 18.0
 SUSPICIOUS_REENTRY_SHADOW_DEDUP_BARS: int = 8
+OBSERVABLE_TAIL_SHADOW_ENABLED: bool = True
+OBSERVABLE_TAIL_SHADOW_SELECTOR: str = "non_ema_positive_giveback"
+OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT: float = 0.0
+OBSERVABLE_TAIL_SHADOW_MIN_GIVEBACK_PCT: float = 0.5
+OBSERVABLE_TAIL_SHADOW_SELL_FRACTION: float = 0.5
+OBSERVABLE_TAIL_SHADOW_HORIZONS: tuple[int, ...] = (2, 5, 10)
+EXIT_LEARNING_EARLY_EXIT_MAX_MINUTES: int = 60
+EXIT_LEARNING_POST_EXIT_CONTINUATION_MIN_PCT: float = 1.0
 
 
 # в”Ђв”Ђ Paper execution (entry quality) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ

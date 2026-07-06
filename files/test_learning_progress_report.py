@@ -9,6 +9,17 @@ import learning_progress_report as lpr
 
 
 class LearningProgressReportTest(unittest.TestCase):
+    def test_rolling_top_rates_are_weighted_by_denominator(self) -> None:
+        days = [
+            lpr.DayMetrics(day="2026-06-01", watchlist_top_count=1, early=1, early_pct=100.0, capture_pct=100.0),
+            lpr.DayMetrics(day="2026-06-02", watchlist_top_count=9, early=0, early_pct=0.0, capture_pct=33.33),
+        ]
+
+        rolling = lpr._rolling_summary(days)
+
+        self.assertEqual(rolling["early_last7_pct"], 10.0)
+        self.assertEqual(rolling["capture_last7_pct"], 40.0)
+
     def test_safe_partial_coverage_does_not_override_developing_verdict(self) -> None:
         latest = lpr.DayMetrics(
             day="2026-05-30",

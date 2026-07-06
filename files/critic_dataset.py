@@ -481,6 +481,24 @@ def fill_trade_outcome(record_id: str, exit_pnl: float, exit_reason: str, bars_h
     _rewrite_records(_mutate)
 
 
+def fill_learning_labels(record_id: str, labels: Dict[str, Any]) -> None:
+    if not record_id or not labels or not CRITIC_FILE.exists():
+        return
+
+    def _mutate(rec: Dict[str, Any]) -> bool:
+        if rec.get("id") != record_id:
+            return False
+        rec.setdefault("labels", {})
+        changed = False
+        for key, value in labels.items():
+            if rec["labels"].get(key) != value:
+                rec["labels"][key] = value
+                changed = True
+        return changed
+
+    _rewrite_records(_mutate)
+
+
 def fill_forward_label(record_id: str, horizon: int, ret_pct: float) -> None:
     if not CRITIC_FILE.exists():
         return

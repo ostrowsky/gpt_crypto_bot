@@ -176,6 +176,14 @@ class TestConfig(unittest.TestCase):
 # T07–T14  indicators
 # ════════════════════════════════════════════════════════════════════════════════
 
+    def test_binance_top_denominator_is_consistent(self):
+        self.assertEqual(self.cfg.TOP_GAINER_CRITIC_TOP_N, 20)
+        self.assertEqual(
+            self.cfg.SIGNAL_QUALITY_EVALUATOR_TOP_MOVERS_N,
+            self.cfg.TOP_GAINER_CRITIC_TOP_N,
+        )
+
+
 class TestIndicators(unittest.TestCase):
 
     def setUp(self):
@@ -5468,6 +5476,28 @@ class TestUiResponsivenessAndStalePositions(unittest.TestCase):
 
 
 class TestNightSignalQualityGuards(unittest.TestCase):
+    def test_restored_position_is_not_removed_at_day_boundary(self):
+        import monitor
+
+        pos = monitor.OpenPosition(
+            symbol="NEARUSDT",
+            tf="1h",
+            entry_price=2.0,
+            entry_bar=0,
+            entry_ts=1,
+            entry_ema20=1.9,
+            entry_slope=0.2,
+            entry_adx=30.0,
+            entry_rsi=60.0,
+            entry_vol_x=1.5,
+            signal_mode="strong_trend",
+        )
+
+        kept, removed = monitor._trim_restored_positions({"NEARUSDT": pos})
+
+        self.assertIn("NEARUSDT", kept)
+        self.assertEqual(removed, [])
+
     def test_T236_alignment_is_stricter_in_nonbull(self):
         import config
         from strategy import check_alignment_conditions
@@ -5888,10 +5918,12 @@ class TestNightSignalQualityGuards(unittest.TestCase):
         prev_enabled = config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED
         prev_modes = config.OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MODES
         prev_max = config.OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX
+        prev_unified_max = config.UNIFIED_PORTFOLIO_MAX_POSITIONS
         try:
             config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = True
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MODES = ("breakout", "retest")
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX = 2
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = 2
 
             reason = monitor._open_signal_cluster_cap_reason(
                 "DOTUSDT",
@@ -5906,6 +5938,7 @@ class TestNightSignalQualityGuards(unittest.TestCase):
             config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = prev_enabled
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MODES = prev_modes
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_SHORT_BOUNCE_MAX = prev_max
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = prev_unified_max
 
     def test_T244F_open_cluster_cap_blocks_third_15m_impulse_speed(self):
         import config
@@ -5945,10 +5978,12 @@ class TestNightSignalQualityGuards(unittest.TestCase):
         prev_enabled = config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED
         prev_modes = config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES
         prev_max = config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX
+        prev_unified_max = config.UNIFIED_PORTFOLIO_MAX_POSITIONS
         try:
             config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = True
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES = ("impulse_speed",)
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX = 2
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = 2
 
             reason = monitor._open_signal_cluster_cap_reason(
                 "XRPUSDT",
@@ -5963,6 +5998,406 @@ class TestNightSignalQualityGuards(unittest.TestCase):
             config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = prev_enabled
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES = prev_modes
             config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX = prev_max
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = prev_unified_max
+
+    def test_open_cluster_cap_does_not_block_when_portfolio_has_free_slots(self):
+        import config
+        import monitor
+
+        state = monitor.MonitorState(
+            positions={
+                "ADAUSDT": monitor.OpenPosition(
+                    symbol="ADAUSDT",
+                    tf="15m",
+                    entry_price=1.0,
+                    entry_bar=0,
+                    entry_ts=1,
+                    entry_ema20=1.0,
+                    entry_slope=0.2,
+                    entry_adx=24.0,
+                    entry_rsi=58.0,
+                    entry_vol_x=1.4,
+                    signal_mode="impulse_speed",
+                ),
+                "ENSUSDT": monitor.OpenPosition(
+                    symbol="ENSUSDT",
+                    tf="15m",
+                    entry_price=1.0,
+                    entry_bar=0,
+                    entry_ts=1,
+                    entry_ema20=1.0,
+                    entry_slope=0.2,
+                    entry_adx=23.0,
+                    entry_rsi=57.0,
+                    entry_vol_x=1.3,
+                    signal_mode="impulse_speed",
+                ),
+            }
+        )
+
+        prev_enabled = config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED
+        prev_modes = config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES
+        prev_max = config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX
+        prev_unified_max = config.UNIFIED_PORTFOLIO_MAX_POSITIONS
+        try:
+            config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = True
+            config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES = ("impulse_speed",)
+            config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX = 2
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = 10
+
+            reason = monitor._open_signal_cluster_cap_reason(
+                "POLUSDT",
+                state,
+                tf="15m",
+                mode="impulse_speed",
+            )
+            self.assertEqual(reason, "")
+        finally:
+            config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = prev_enabled
+            config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MODES = prev_modes
+            config.OPEN_SIGNAL_CLUSTER_CAP_15M_IMPULSE_MAX = prev_max
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = prev_unified_max
+
+    def test_open_cluster_cap_watch_alert_sends_for_high_score_once_per_day(self):
+        import config
+        import monitor
+
+        state = monitor.MonitorState()
+        sent = []
+
+        async def fake_send(text):
+            sent.append(text)
+
+        prev_enabled = config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERTS_ENABLED
+        prev_min_score = config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_MIN_SCORE
+        prev_buckets = config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_BUCKETS
+        try:
+            config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERTS_ENABLED = True
+            config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_MIN_SCORE = 80.0
+            config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_BUCKETS = ("15m_impulse",)
+
+            kwargs = dict(
+                send=fake_send,
+                state=state,
+                sym="POLUSDT",
+                tf="15m",
+                mode="impulse_speed",
+                price=0.07413,
+                candidate_score=100.93,
+                score_floor=56.0,
+                reason="open cluster cap: 15m_impulse already 2/2 (GMTUSDT, JASMYUSDT)",
+                bar_ts=1782459000000,
+            )
+            asyncio.run(monitor._maybe_send_open_cluster_cap_watch_alert(**kwargs))
+            asyncio.run(monitor._maybe_send_open_cluster_cap_watch_alert(**kwargs))
+
+            self.assertEqual(len(sent), 1)
+            self.assertIn("POLUSDT", sent[0])
+            self.assertIn("15m_impulse", sent[0])
+            self.assertIn("STRONG SIGNAL", sent[0])
+            self.assertIn("no position opened automatically", sent[0])
+        finally:
+            config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERTS_ENABLED = prev_enabled
+            config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_MIN_SCORE = prev_min_score
+            config.OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_BUCKETS = prev_buckets
+
+    def test_exit_learning_marks_under_one_hour_exit_on_entry_records(self):
+        import monitor
+
+        pos = monitor.OpenPosition(
+            symbol="TIAUSDT",
+            tf="15m",
+            entry_price=1.0,
+            entry_bar=0,
+            entry_ts=1,
+            entry_ema20=1.0,
+            entry_slope=0.2,
+            entry_adx=24.0,
+            entry_rsi=58.0,
+            entry_vol_x=1.4,
+            signal_mode="trend",
+            ml_record_id="ml_tia",
+            critic_record_id="critic_tia",
+        )
+
+        with patch("ml_dataset.fill_labels") as ml_fill, \
+             patch("ml_dataset.fill_learning_labels") as ml_learn, \
+             patch("critic_dataset.fill_trade_outcome") as critic_fill, \
+             patch("critic_dataset.fill_learning_labels") as critic_learn, \
+             patch("botlog.log_exit_learning") as log_learn:
+            monitor._fill_trade_outcome_labels(
+                pos,
+                exit_pnl=-0.2,
+                exit_reason="fast early exit",
+                bars_held=3,
+            )
+
+        ml_fill.assert_called_once()
+        critic_fill.assert_called_once()
+        self.assertEqual(ml_learn.call_args.args[0], "ml_tia")
+        self.assertTrue(ml_learn.call_args.args[1]["early_exit_under_1h"])
+        self.assertTrue(ml_learn.call_args.args[1]["entry_quality_negative_early_exit"])
+        self.assertEqual(critic_learn.call_args.args[0], "critic_tia")
+        log_learn.assert_called_once()
+
+    def test_cooldown_continuation_marks_false_early_exit_learning_labels(self):
+        import monitor
+
+        state = monitor.MonitorState()
+        exit_ts = 1782460800000
+        current_ts = exit_ts + 15 * 60 * 1000
+        state.suspicious_reentry_watch["TIAUSDT"] = {
+            "until_ts": exit_ts + 8 * 15 * 60 * 1000,
+            "exit_ts": exit_ts,
+            "tf": "15m",
+            "mode": "trend",
+            "exit_reason": "ATR trail",
+            "exit_price": 1.0,
+            "exit_pnl_pct": 0.4,
+            "mfe_pct": 2.0,
+            "exit_score": 0.9,
+            "ml_record_id": "ml_tia",
+            "critic_record_id": "critic_tia",
+            "bars_held": 3,
+        }
+        data = {"t": np.array([exit_ts, current_ts]), "c": np.array([1.0, 1.052])}
+        sent = []
+
+        async def fake_send(text):
+            sent.append(text)
+
+        with patch("monitor._signal_snapshot", return_value={"mode": "trend"}), \
+             patch("monitor._candidate_score_snapshot", return_value={
+                 "price": 1.052,
+                 "candidate_score": 88.0,
+                 "adx": 24.0,
+             }), \
+             patch("monitor._suspicious_reentry_candidate_ok", return_value=True), \
+             patch("ml_dataset.fill_learning_labels") as ml_learn, \
+             patch("critic_dataset.fill_learning_labels") as critic_learn, \
+             patch("botlog.log_suspicious_reentry_shadow"), \
+             patch("botlog.log_exit_learning") as log_learn:
+            asyncio.run(
+                monitor._maybe_send_suspicious_reentry_shadow_alert(
+                    state=state,
+                    send=fake_send,
+                    report=Mock(symbol="TIAUSDT"),
+                    sym="TIAUSDT",
+                    tf="15m",
+                    data=data,
+                    feat={},
+                    idx=1,
+                    cooldown_until_ms=exit_ts + 8 * 15 * 60 * 1000,
+                )
+            )
+
+        labels = ml_learn.call_args.args[1]
+        self.assertTrue(labels["false_early_exit"])
+        self.assertAlmostEqual(labels["post_exit_continuation_pct"], 5.2, places=3)
+        self.assertAlmostEqual(labels["cooldown_harm_pct"], 5.2, places=3)
+        self.assertEqual(critic_learn.call_args.args[0], "critic_tia")
+        log_learn.assert_called_once()
+
+    def test_observable_tail_shadow_registers_only_qualified_non_ema_exit(self):
+        import monitor
+
+        state = monitor.MonitorState()
+        pos = monitor.OpenPosition(
+            symbol="NEARUSDT",
+            tf="15m",
+            entry_price=1.0,
+            entry_bar=0,
+            entry_ts=1,
+            entry_ema20=1.0,
+            entry_slope=0.2,
+            entry_adx=24.0,
+            entry_rsi=58.0,
+            entry_vol_x=1.4,
+            signal_mode="trend",
+            ml_record_id="ml_near",
+            critic_record_id="critic_near",
+            max_price_since_entry=1.03,
+        )
+
+        with patch("botlog.log_observable_tail_shadow_candidate") as log_candidate:
+            monitor._register_observable_tail_shadow(
+                state,
+                pos,
+                exit_reason="ATR trail",
+                exit_price=1.02,
+                exit_ts=1782460800000,
+                pnl_pct=2.0,
+            )
+            monitor._register_observable_tail_shadow(
+                state,
+                pos,
+                exit_reason="price below EMA20",
+                exit_price=1.02,
+                exit_ts=1782460800000,
+                pnl_pct=2.0,
+            )
+
+        self.assertIn("NEARUSDT", state.observable_tail_shadow_watch)
+        self.assertAlmostEqual(state.observable_tail_shadow_watch["NEARUSDT"]["giveback_pct"], 1.0)
+        log_candidate.assert_called_once()
+
+    def test_blocked_learning_label_is_deduplicated_per_bar(self):
+        import monitor
+
+        state = monitor.MonitorState()
+
+        self.assertTrue(monitor._claim_blocked_learning_label(
+            state, sym="FILUSDT", tf="15m", label_type="blocked_strong_score_gate", bar_ts=100,
+        ))
+        self.assertFalse(monitor._claim_blocked_learning_label(
+            state, sym="FILUSDT", tf="15m", label_type="blocked_strong_score_gate", bar_ts=100,
+        ))
+        self.assertTrue(monitor._claim_blocked_learning_label(
+            state, sym="FILUSDT", tf="15m", label_type="blocked_strong_score_gate", bar_ts=101,
+        ))
+
+    def test_observable_tail_shadow_writes_forward_labels(self):
+        import monitor
+
+        state = monitor.MonitorState()
+        exit_ts = 1782460800000
+        state.observable_tail_shadow_watch["NEARUSDT"] = {
+            "exit_ts": exit_ts,
+            "until_ts": exit_ts + 10 * 15 * 60 * 1000,
+            "tf": "15m",
+            "mode": "trend",
+            "selector": "non_ema_positive_giveback",
+            "exit_price": 1.0,
+            "sell_fraction": 0.5,
+            "horizons": (2, 5, 10),
+            "labeled": set(),
+            "ml_record_id": "ml_near",
+            "critic_record_id": "critic_near",
+        }
+        data = {
+            "t": np.array([exit_ts, exit_ts + 2 * 15 * 60 * 1000]),
+            "c": np.array([1.0, 1.04]),
+        }
+
+        with patch("ml_dataset.fill_learning_labels") as ml_learn, \
+             patch("critic_dataset.fill_learning_labels") as critic_learn, \
+             patch("botlog.log_observable_tail_shadow_label") as log_label:
+            monitor._update_observable_tail_shadow(
+                state=state,
+                sym="NEARUSDT",
+                tf="15m",
+                data=data,
+                idx=1,
+            )
+
+        labels = ml_learn.call_args.args[1]
+        self.assertAlmostEqual(labels["observable_tail_ret_2"], 4.0)
+        self.assertAlmostEqual(labels["observable_tail_partial_delta_2"], 2.0)
+        self.assertEqual(critic_learn.call_args.args[0], "critic_near")
+        log_label.assert_called_once()
+        self.assertEqual(state.observable_tail_shadow_watch["NEARUSDT"]["labeled"], {2})
+
+    def test_top_gainer_chase_guard_alert_sends_strong_signal_once_per_day(self):
+        import config
+        import monitor
+
+        state = monitor.MonitorState()
+        sent = []
+
+        async def fake_send(text):
+            sent.append(text)
+
+        prev_enabled = config.TOP_GAINER_CHASE_GUARD_ALERTS_ENABLED
+        prev_min_candidate = config.TOP_GAINER_CHASE_GUARD_ALERT_MIN_CANDIDATE_SCORE
+        prev_min_live = config.TOP_GAINER_CHASE_GUARD_ALERT_MIN_LIVE_SCORE
+        try:
+            config.TOP_GAINER_CHASE_GUARD_ALERTS_ENABLED = True
+            config.TOP_GAINER_CHASE_GUARD_ALERT_MIN_CANDIDATE_SCORE = 100.0
+            config.TOP_GAINER_CHASE_GUARD_ALERT_MIN_LIVE_SCORE = 34.0
+            kwargs = dict(
+                send=fake_send,
+                state=state,
+                sym="WIFUSDT",
+                tf="15m",
+                mode="trend",
+                price=0.1538,
+                candidate_score=181.87,
+                intraday_change_pct=5.2,
+                daily_range=12.43,
+                vol_x=1.2,
+                adx=28.0,
+                rsi=79.9,
+                ranker_info=None,
+                reason="top-gainer chase guard: RSI 79.9 > 76.0 with daily_range 12.43% >= 8.00%",
+                bar_ts=1782498516000,
+            )
+            asyncio.run(monitor._maybe_send_top_gainer_chase_guard_alert(**kwargs))
+            asyncio.run(monitor._maybe_send_top_gainer_chase_guard_alert(**kwargs))
+
+            self.assertEqual(len(sent), 1)
+            self.assertIn("WIFUSDT", sent[0])
+            self.assertIn("STRONG SIGNAL", sent[0])
+            self.assertIn("chase guard", sent[0])
+        finally:
+            config.TOP_GAINER_CHASE_GUARD_ALERTS_ENABLED = prev_enabled
+            config.TOP_GAINER_CHASE_GUARD_ALERT_MIN_CANDIDATE_SCORE = prev_min_candidate
+            config.TOP_GAINER_CHASE_GUARD_ALERT_MIN_LIVE_SCORE = prev_min_live
+
+    def test_top_gainer_score_gate_strong_alert_deduplicates_per_bar(self):
+        import config
+        import monitor
+
+        state = monitor.MonitorState()
+        sent = []
+
+        async def fake_send(text):
+            sent.append(text)
+
+        prev_enabled = config.TOP_GAINER_SCORE_GATE_STRONG_ALERTS_ENABLED
+        prev_min_candidate = config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_CANDIDATE_SCORE
+        prev_min_live = config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_LIVE_SCORE
+        prev_max_deficit = config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MAX_DEFICIT
+        prev_mode_min = config.TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE
+        try:
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERTS_ENABLED = True
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_CANDIDATE_SCORE = 100.0
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_LIVE_SCORE = 30.0
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MAX_DEFICIT = 2.0
+            config.TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE = {"trend": 34.0}
+            kwargs = dict(
+                send=fake_send,
+                state=state,
+                sym="SUIUSDT",
+                tf="15m",
+                mode="trend",
+                price=0.6895,
+                candidate_score=121.95,
+                intraday_change_pct=4.0,
+                daily_range=6.8,
+                vol_x=1.3,
+                adx=17.0,
+                rsi=68.5,
+                ranker_info=None,
+                reason="top-gainer score gate: score 33.58 < 34.00 for 15m trend",
+                bar_ts=1782455420000,
+            )
+            asyncio.run(monitor._maybe_send_top_gainer_score_gate_strong_alert(**kwargs))
+            asyncio.run(monitor._maybe_send_top_gainer_score_gate_strong_alert(**kwargs))
+
+            self.assertEqual(len(sent), 1)
+            self.assertIn("SUIUSDT", sent[0])
+            self.assertIn("STRONG SIGNAL", sent[0])
+            self.assertIn("score gate", sent[0])
+            self.assertIn("deficit", sent[0])
+            kwargs["bar_ts"] += 15 * 60 * 1000
+            asyncio.run(monitor._maybe_send_top_gainer_score_gate_strong_alert(**kwargs))
+            self.assertEqual(len(sent), 2)
+        finally:
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERTS_ENABLED = prev_enabled
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_CANDIDATE_SCORE = prev_min_candidate
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MIN_LIVE_SCORE = prev_min_live
+            config.TOP_GAINER_SCORE_GATE_STRONG_ALERT_MAX_DEFICIT = prev_max_deficit
+            config.TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE = prev_mode_min
 
     def test_T244G_open_cluster_cap_blocks_second_1h_retest(self):
         import config
@@ -5989,10 +6424,12 @@ class TestNightSignalQualityGuards(unittest.TestCase):
         prev_enabled = config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED
         prev_modes = config.OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES
         prev_max = config.OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX
+        prev_unified_max = config.UNIFIED_PORTFOLIO_MAX_POSITIONS
         try:
             config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = True
             config.OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES = ("retest",)
             config.OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX = 1
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = 1
 
             reason = monitor._open_signal_cluster_cap_reason(
                 "YFIUSDT",
@@ -6007,6 +6444,7 @@ class TestNightSignalQualityGuards(unittest.TestCase):
             config.OPEN_SIGNAL_CLUSTER_CAP_ENABLED = prev_enabled
             config.OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MODES = prev_modes
             config.OPEN_SIGNAL_CLUSTER_CAP_1H_RETEST_MAX = prev_max
+            config.UNIFIED_PORTFOLIO_MAX_POSITIONS = prev_unified_max
 
     def test_T245_one_hour_impulse_speed_guard_blocks_late_or_weak_entries(self):
         import config

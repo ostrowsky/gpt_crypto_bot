@@ -459,6 +459,37 @@ def fill_labels(
         _pylog.warning("fill_labels error: %s", e)
 
 
+def fill_learning_labels(record_id: str, labels: Dict[str, Any]) -> None:
+    if not record_id or not labels or not ML_FILE.exists():
+        return
+    try:
+        lines = ML_FILE.read_text(encoding="utf-8").splitlines()
+        updated = []
+        changed = False
+        bad_lines = 0
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                bad_lines += 1
+                continue
+            if rec.get("id") == record_id:
+                rec.setdefault("labels", {})
+                for key, value in labels.items():
+                    if rec["labels"].get(key) != value:
+                        rec["labels"][key] = value
+                        changed = True
+            updated.append(json.dumps(rec, ensure_ascii=False, cls=_Enc))
+        if changed:
+            ML_FILE.write_text("\n".join(updated) + "\n", encoding="utf-8")
+        if bad_lines:
+            _pylog.warning("fill_learning_labels skipped %d malformed jsonl lines", bad_lines)
+    except Exception as e:
+        _pylog.warning("fill_learning_labels error: %s", e)
+
+
 def fill_forward_label(
     record_id: str,
     horizon:   int,       # 3, 5 или 10

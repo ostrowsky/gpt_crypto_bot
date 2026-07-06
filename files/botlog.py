@@ -135,6 +135,74 @@ def log_exit(sym: str, tf: str, mode: str, entry_price: float,
     })
 
 
+def log_exit_learning(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    label_type: str,
+    record_id: str = "",
+    critic_record_id: str = "",
+    exit_reason: str = "",
+    exit_pnl_pct: float = 0.0,
+    bars_held: int = 0,
+    continuation_pct: float = 0.0,
+    continuation_bars: int = 0,
+    candidate_score: float = 0.0,
+) -> None:
+    _write({
+        "event": "exit_learning_label",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "label_type": label_type,
+        "record_id": record_id,
+        "critic_record_id": critic_record_id,
+        "exit_reason": exit_reason,
+        "exit_pnl_pct": round(float(exit_pnl_pct), 4),
+        "bars_held": int(bars_held),
+        "continuation_pct": round(float(continuation_pct), 4),
+        "continuation_bars": int(continuation_bars),
+        "candidate_score": round(float(candidate_score), 4),
+    })
+
+
+def log_blocked_learning(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    label_type: str,
+    reason_code: str,
+    reason: str,
+    critic_record_id: str = "",
+    price: float = 0.0,
+    candidate_score: float = 0.0,
+    live_score: float = 0.0,
+    rsi: float = 0.0,
+    adx: float = 0.0,
+    vol_x: float = 0.0,
+    daily_range: float = 0.0,
+) -> None:
+    _write({
+        "event": "blocked_learning_label",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "label_type": label_type,
+        "reason_code": reason_code,
+        "reason": reason,
+        "critic_record_id": critic_record_id,
+        "price": round(float(price), 8),
+        "candidate_score": round(float(candidate_score), 4),
+        "live_score": round(float(live_score), 4),
+        "rsi": round(float(rsi), 2),
+        "adx": round(float(adx), 2),
+        "vol_x": round(float(vol_x), 4),
+        "daily_range": round(float(daily_range), 4),
+    })
+
+
 def log_forward(sym: str, tf: str, mode: str, horizon: int,
                 entry_price: float, forward_price: float, correct: bool) -> None:
     """Результат форвард-прогноза T+N."""
@@ -351,6 +419,60 @@ def log_suspicious_reentry_shadow(
         "mfe_pct": round(float(mfe_pct), 4),
         "bars_since_exit": int(bars_since_exit),
         "cooldown_bars_left": int(cooldown_bars_left),
+    })
+
+
+def log_observable_tail_shadow_candidate(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    selector: str,
+    exit_price: float,
+    exit_pnl_pct: float,
+    mfe_pct: float,
+    giveback_pct: float,
+    exit_reason: str,
+    sell_fraction: float,
+) -> None:
+    _write({
+        "event": "observable_tail_shadow_candidate",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "selector": selector,
+        "exit_price": round(float(exit_price), 8),
+        "exit_pnl_pct": round(float(exit_pnl_pct), 4),
+        "mfe_pct": round(float(mfe_pct), 4),
+        "giveback_pct": round(float(giveback_pct), 4),
+        "exit_reason": str(exit_reason),
+        "sell_fraction": round(float(sell_fraction), 4),
+    })
+
+
+def log_observable_tail_shadow_label(
+    *,
+    sym: str,
+    tf: str,
+    mode: str,
+    selector: str,
+    horizon: int,
+    exit_price: float,
+    forward_price: float,
+    tail_return_pct: float,
+    partial_delta_pct: float,
+) -> None:
+    _write({
+        "event": "observable_tail_shadow_label",
+        "sym": sym,
+        "tf": tf,
+        "mode": mode,
+        "selector": selector,
+        "horizon": int(horizon),
+        "exit_price": round(float(exit_price), 8),
+        "forward_price": round(float(forward_price), 8),
+        "tail_return_pct": round(float(tail_return_pct), 4),
+        "partial_delta_pct": round(float(partial_delta_pct), 4),
     })
 
 

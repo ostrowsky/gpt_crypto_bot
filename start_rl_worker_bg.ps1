@@ -15,6 +15,7 @@ $heartbeatFile = Join-Path $runtimeDir "rl_worker_wrapper_heartbeat.json"
 $stdout = Join-Path $runtimeDir "rl_worker_wrapper_stdout.log"
 $stderr = Join-Path $runtimeDir "rl_worker_wrapper_stderr.log"
 $trainLockFile = Join-Path $runtimeDir "rl_worker_train.lock"
+$stopFile = Join-Path $runtimeDir "rl_worker.stop"
 
 if (-not (Test-Path $runtimeDir)) {
     New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
@@ -110,6 +111,7 @@ Stop-ExistingRLWorkers
 Start-Sleep -Seconds 1
 Clear-OrphanedTrainLock
 
+Remove-Item $stopFile -Force -ErrorAction SilentlyContinue
 Remove-Item $stdout -Force -ErrorAction SilentlyContinue
 Remove-Item $stderr -Force -ErrorAction SilentlyContinue
 Remove-Item $heartbeatFile -Force -ErrorAction SilentlyContinue

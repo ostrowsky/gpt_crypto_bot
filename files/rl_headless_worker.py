@@ -6,6 +6,7 @@ import importlib.util
 import json
 import logging
 import os
+import socket
 import sys
 import time
 from dataclasses import dataclass, field
@@ -100,6 +101,13 @@ def _claim_learning_progress_telegram_slot(
         fh.write(json.dumps({"slot_key": slot_key, "claimed_at_utc": _utc_now_iso()}, ensure_ascii=False))
         fh.write("\n")
     return True
+
+
+def _release_learning_progress_telegram_slot(
+    slot_key: str,
+    marker_dir: Path = LEARNING_PROGRESS_SENT_DIR,
+) -> None:
+    (marker_dir / f"{_slot_marker_name(slot_key)}.sent").unlink(missing_ok=True)
 
 
 def _load_json_file(path: Path) -> Dict[str, Any]:
@@ -531,7 +539,8 @@ async def _send_telegram_text(text: str) -> Dict[str, Any]:
         return result
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     timeout = aiohttp.ClientTimeout(total=20)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    connector = aiohttp.TCPConnector(family=socket.AF_INET)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         for chat_id in chat_ids:
             result["attempted"] += 1
             payload = {
@@ -1570,6 +1579,7 @@ async def _learning_progress_loop(state: WorkerState) -> None:
                     else:
                         errors = notify.get("errors") or []
                         state.learning_progress_last_telegram_error = "; ".join(str(item) for item in errors) or str(notify.get("skipped") or "not_sent")
+                        _release_learning_progress_telegram_slot(slot_key)
                 else:
                     state.learning_progress_last_telegram_sent_count = 0
                     state.learning_progress_last_telegram_error = f"duplicate_slot_skipped:{slot_key}"

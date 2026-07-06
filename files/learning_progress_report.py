@@ -295,10 +295,10 @@ def _rolling_summary(days: list[DayMetrics]) -> dict[str, Any]:
     last7_top = _days_with_top_denominator(last7)
     prev7_top = _days_with_top_denominator(prev7)
     return {
-        "early_last7_pct": _avg([d.early_pct for d in last7_top]),
-        "early_prev7_pct": _avg([d.early_pct for d in prev7_top]),
-        "capture_last7_pct": _avg([d.capture_pct for d in last7_top]),
-        "capture_prev7_pct": _avg([d.capture_pct for d in prev7_top]),
+        "early_last7_pct": _top_rate(last7_top, "early_pct"),
+        "early_prev7_pct": _top_rate(prev7_top, "early_pct"),
+        "capture_last7_pct": _top_rate(last7_top, "capture_pct"),
+        "capture_prev7_pct": _top_rate(prev7_top, "capture_pct"),
         "miss_rate_last7_pct": _avg([d.miss_rate * 100 for d in last7 if d.miss_rate is not None]),
         "blocked_winners_last7": sum(d.blocked_winner_count for d in last7),
         "n_last7": len(last7),
@@ -312,11 +312,20 @@ def _days_with_top_denominator(days: Iterable[DayMetrics]) -> list[DayMetrics]:
     return [d for d in days if int(d.watchlist_top_count or 0) > 0]
 
 
+def _top_rate(days: Iterable[DayMetrics], rate_field: str) -> float | None:
+    rows = list(days)
+    denominator = sum(int(d.watchlist_top_count or 0) for d in rows)
+    if denominator <= 0:
+        return None
+    weighted = sum(float(getattr(d, rate_field, 0.0) or 0.0) * int(d.watchlist_top_count or 0) for d in rows)
+    return round(weighted / denominator, 2)
+
+
 def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics], status: dict[str, Any]) -> dict[str, str]:
     recent_top_days = _days_with_top_denominator([*previous[-7:], latest])
     older_top_days = _days_with_top_denominator(older)
-    early_recent = _avg([d.early_pct for d in recent_top_days])
-    early_old = _avg([d.early_pct for d in older_top_days])
+    early_recent = _top_rate(recent_top_days, "early_pct")
+    early_old = _top_rate(older_top_days, "early_pct")
     training = (((status.get("training") or {}).get("last_finished_at")) or "")
     stale_training = bool(training and training[:10] < latest.day)
     confidence, confidence_reason = _verdict_confidence(latest, previous, older)

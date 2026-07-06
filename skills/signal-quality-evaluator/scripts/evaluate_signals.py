@@ -612,9 +612,11 @@ def _summarize(evaluated: list[dict[str, Any]], missed: list[TrendEpisode]) -> d
         "top_mover_missed_trends": len(top_mover_missed),
         "capture_ratio_at_entry": _stats([x.get("capture_ratio_at_entry") for x in evaluated]),
         "realized_capture_ratio": _stats([x.get("realized_capture_ratio") for x in evaluated]),
-        "exit_efficiency": _stats([x.get("exit_efficiency") for x in evaluated]),
-        "giveback_pct": _stats([x.get("giveback_pct") for x in evaluated]),
-        "pnl_pct": _stats([x.get("pnl_pct") for x in evaluated]),
+        # Exit quality is meaningful only after a real SELL. Open positions use
+        # the window's last close for monitoring and must not pollute SELL stats.
+        "exit_efficiency": _stats([x.get("exit_efficiency") for x in closed]),
+        "giveback_pct": _stats([x.get("giveback_pct") for x in closed]),
+        "pnl_pct": _stats([x.get("pnl_pct") for x in closed]),
     }
 
 

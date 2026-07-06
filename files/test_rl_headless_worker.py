@@ -10,11 +10,24 @@ import rl_headless_worker
 from rl_headless_worker import (
     WorkerState,
     _claim_learning_progress_telegram_slot,
+    _release_learning_progress_telegram_slot,
     build_status_snapshot,
     _render_top_gainer_telegram,
     _should_send_top_gainer_telegram,
     should_train,
 )
+
+
+class TestLearningProgressTelegramSlot(unittest.TestCase):
+    def test_failed_delivery_can_release_claim_for_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            marker_dir = Path(td)
+            self.assertTrue(_claim_learning_progress_telegram_slot("2026-06-30::learning_progress", marker_dir))
+            self.assertFalse(_claim_learning_progress_telegram_slot("2026-06-30::learning_progress", marker_dir))
+
+            _release_learning_progress_telegram_slot("2026-06-30::learning_progress", marker_dir)
+
+            self.assertTrue(_claim_learning_progress_telegram_slot("2026-06-30::learning_progress", marker_dir))
 
 
 class TestRLHeadlessWorkerTrainingGate(unittest.TestCase):
