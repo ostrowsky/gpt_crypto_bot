@@ -360,6 +360,18 @@ def log_scout_shadow(
     })
 
 
+def log_regime_start_shadow(*, sym: str, signal: Dict[str, Any]) -> None:
+    """Record a causal multi-day WATCH candidate without changing positions."""
+    _write({
+        "event": "regime_start_shadow",
+        "source": "regime_start",
+        "sym": sym,
+        "tf": "4h+1d",
+        "mode": "regime_start",
+        **signal,
+    })
+
+
 def log_peak_risk_shadow(
     *,
     sym: str,

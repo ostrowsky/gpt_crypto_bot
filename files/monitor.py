@@ -40,6 +40,7 @@ import botlog
 import critic_dataset
 import ml_dataset
 import signal_quality_feedback
+import regime_start
 from runtime_executors import run_cpu
 from unified_portfolio import external_agent_symbol_count
 
@@ -4007,6 +4008,7 @@ class MonitorState:
     blocked_learning_logged: Dict[str, int] = field(default_factory=dict)
     scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
     wakeup_shadow_logged: Dict[str, int] = field(default_factory=dict)
+    regime_start_logged: Dict[str, int] = field(default_factory=dict)
     suspicious_reentry_watch: Dict[str, dict] = field(default_factory=dict)
     suspicious_reentry_shadow_logged: Dict[str, int] = field(default_factory=dict)
     observable_tail_shadow_watch: Dict[str, dict] = field(default_factory=dict)
@@ -4014,9 +4016,11 @@ class MonitorState:
     time_block_streaks: Dict[str, dict] = field(default_factory=dict)
     last_discovery_ts: int = 0
     last_wakeup_ts: int = 0
+    last_regime_start_ts: int = 0
     recent_discoveries: Dict[str, dict] = field(default_factory=dict)
     discovery_task: Optional[asyncio.Task] = None
     wakeup_task: Optional[asyncio.Task] = None
+    regime_start_task: Optional[asyncio.Task] = None
 
 
 def _tf_bar_ms(tf: str) -> int:
@@ -4813,6 +4817,91 @@ async def _run_wakeup_scout(
                 log.info("WAKEUP UPGRADE %s [15m]: %s", report.symbol, reason)
     log.info("wake-up scout scan complete: matches=%d added=%d", len(wakeup_best), added)
     return added
+
+
+def _closed_candles(data: np.ndarray, bar_ms: int, now_ms: int | None = None) -> np.ndarray:
+    if data is None or len(data) == 0:
+        return data
+    current_ms = now_ms if now_ms is not None else int(datetime.now(timezone.utc).timestamp() * 1000)
+    return data[np.asarray(data["t"], dtype=np.int64) + int(bar_ms) <= int(current_ms)]
+
+
+async def _regime_start_snapshot(
+    session: aiohttp.ClientSession,
+    sym: str,
+) -> Optional[regime_start.RegimeStartSignal]:
+    four_h_task = asyncio.create_task(
+        fetch_klines(session, sym, "4h", limit=int(getattr(config, "REGIME_START_4H_FETCH_LIMIT", 240)))
+    )
+    daily_task = asyncio.create_task(
+        fetch_klines(session, sym, "1d", limit=int(getattr(config, "REGIME_START_1D_FETCH_LIMIT", 220)))
+    )
+    four_h, daily = await asyncio.gather(four_h_task, daily_task)
+    if four_h is None or daily is None:
+        return None
+    closed_four_h = _closed_candles(four_h, regime_start.FOUR_H_MS)
+    closed_daily = _closed_candles(daily, regime_start.DAY_MS)
+    profile = regime_start.profile_from_config(config)
+    return regime_start.detect_latest_regime_start(closed_four_h, closed_daily, profile)
+
+
+async def _run_regime_start_scan(
+    session: aiohttp.ClientSession,
+    state: "MonitorState",
+    send: SendFn,
+) -> int:
+    if not bool(getattr(config, "REGIME_START_SHADOW_ENABLED", False)):
+        return 0
+    watchlist = config.load_watchlist()
+    if not watchlist:
+        return 0
+
+    matches = 0
+    batch_size = 12
+    for offset in range(0, len(watchlist), batch_size):
+        batch = watchlist[offset:offset + batch_size]
+        results = await asyncio.gather(
+            *[_regime_start_snapshot(session, sym) for sym in batch],
+            return_exceptions=True,
+        )
+        for sym, result in zip(batch, results):
+            if isinstance(result, Exception):
+                log.warning("regime-start snapshot failed for %s: %s", sym, result)
+                continue
+            if result is None:
+                continue
+            signal_ts = int(result.decision_ts_ms)
+            if state.regime_start_logged.get(sym) == signal_ts:
+                continue
+            state.regime_start_logged[sym] = signal_ts
+            payload = result.to_dict()
+            botlog.log_regime_start_shadow(sym=sym, signal=payload)
+            matches += 1
+            log.info(
+                "REGIME START SHADOW %s price=%.6g 4h_slope=%.3f ADX=%.1f 1d_RSI=%.1f",
+                sym,
+                result.price,
+                result.slope_pct_4h,
+                result.adx_4h,
+                result.daily_rsi,
+            )
+            if bool(getattr(config, "REGIME_START_TELEGRAM_ENABLED", False)):
+                try:
+                    await send(
+                        "🌱 *REGIME START — WATCH, не BUY*\n\n"
+                        f"*{sym}*  `[4h + 1d]`\n"
+                        f"Цена: `{result.price:.8g}`\n"
+                        f"4h: slope `{result.slope_pct_4h:+.2f}%`, ADX `{result.adx_4h:.1f}`, "
+                        f"RSI `{result.rsi_4h:.1f}`, vol× `{result.vol_x_4h:.2f}`\n"
+                        f"1d: RSI `{result.daily_rsi:.1f}`, 3d `{result.daily_return_3d_pct:+.2f}%`\n"
+                        f"Профиль: `{result.profile}`\n\n"
+                        "Наблюдение начала возможного многодневного режима. Позиция не открыта."
+                    )
+                except Exception as exc:
+                    log.warning("regime-start send failed for %s: %s", sym, exc)
+        await asyncio.sleep(0)
+    log.info("regime-start scan complete: symbols=%d matches=%d", len(watchlist), matches)
+    return matches
 
 
 # ── Per-coin polling ───────────────────────────────────────────────────────────
@@ -7324,6 +7413,19 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
                         state.last_wakeup_ts = now_ms
                         state.wakeup_task = asyncio.create_task(_run_wakeup())
 
+                regime_start_sec = int(getattr(config, "REGIME_START_SCAN_SEC", 0))
+                if getattr(config, "REGIME_START_SHADOW_ENABLED", False) and regime_start_sec > 0:
+                    regime_start_ms = regime_start_sec * 1000
+                    regime_start_busy = state.regime_start_task is not None and not state.regime_start_task.done()
+                    if not regime_start_busy and now_ms >= state.last_regime_start_ts + regime_start_ms:
+                        async def _run_regime_start() -> None:
+                            try:
+                                await _run_regime_start_scan(session, state, send)
+                            except Exception as exc:
+                                log.warning("regime-start scan failed: %s", exc)
+                        state.last_regime_start_ts = now_ms
+                        state.regime_start_task = asyncio.create_task(_run_regime_start())
+
                 # Heartbeat каждые ~10 минут (600с / POLL_SEC итераций)
                 _heartbeat_counter += 1
                 if _heartbeat_counter % max(1, 600 // config.POLL_SEC) == 0:
@@ -7343,6 +7445,9 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
     if state.wakeup_task is not None and not state.wakeup_task.done():
         state.wakeup_task.cancel()
     state.wakeup_task = None
+    if state.regime_start_task is not None and not state.regime_start_task.done():
+        state.regime_start_task.cancel()
+    state.regime_start_task = None
 
     if _aux_notifications_enabled():
         try:
