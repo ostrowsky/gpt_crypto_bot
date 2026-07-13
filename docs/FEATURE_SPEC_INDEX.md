@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-05-28 15:55 Europe/Budapest
+Last updated: 2026-07-13 22:20 Europe/Budapest
 
 ## Objective
 
@@ -16,6 +16,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Scout objective and metric contract | shipped | `SCOUT_OPTIMIZATION_SPEC.md` | `watchlist_top_bought`, `early_captures`, `false_positive_buys` | keep current |
 | Signal-quality evaluator | shipped | `skills/signal-quality-evaluator/SKILL.md` | `miss_rate`, `capture_ratio_at_entry`, `exit_efficiency`, `giveback_pct` | feed hypothesis queue |
 | Exit-quality auditor | shipped measurement-only | `docs/specs/exit-quality-auditor.md` | `exit_efficiency`, `giveback_pct`, `top_mover_exit_failure_count`, `negative_after_mfe_count` | choose SELL hypotheses for replay; no live SELL change |
+| Observable exit-tail selector | shipped shadow-only | `docs/specs/observable-tail-selector-replay.md` | selected-case delta, selected-case worse-rate, false-positive allow-rate, forward tail labels | collect independent live labels, then fee/slippage candle-path replay; no live SELL change |
 | Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
 | Watchlist-filtered top-mover denominator | shipped measurement correction | `docs/specs/watchlist-filtered-top-mover-denominator.md` | `watchlist_top_capture_rate_pct`, `watchlist_top_early_capture_rate_pct`, `exchange_top_in_watchlist` | use filtered denominator for operator reports |
 | Main top-gainer intraday feature parity | shipped bugfix | `docs/specs/main-top-gainer-intraday-feature-parity.md` | `top_gainer_score`, `today_change_pct`, `forecast_return_pct`, false-positive pressure | monitor next daily report; thresholds unchanged |

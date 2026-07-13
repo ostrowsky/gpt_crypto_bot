@@ -6241,6 +6241,63 @@ class TestNightSignalQualityGuards(unittest.TestCase):
         self.assertAlmostEqual(state.observable_tail_shadow_watch["NEARUSDT"]["giveback_pct"], 1.0)
         log_candidate.assert_called_once()
 
+    def test_observable_tail_shadow_exclude_ema_cleanup_requires_mfe_and_bounded_loss(self):
+        import monitor
+
+        with patch.object(monitor.config, "OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT", -0.5), \
+             patch.object(monitor.config, "OBSERVABLE_TAIL_SHADOW_MIN_MFE_PCT", 1.0):
+            self.assertTrue(monitor._observable_tail_shadow_selector_matches(
+                selector="exclude_ema_and_false_cleanup",
+                exit_reason="ATR trail",
+                pnl_pct=-0.4,
+                mfe_pct=1.2,
+                giveback_pct=1.6,
+            ))
+            self.assertFalse(monitor._observable_tail_shadow_selector_matches(
+                selector="exclude_ema_and_false_cleanup",
+                exit_reason="ATR trail",
+                pnl_pct=-0.4,
+                mfe_pct=0.99,
+                giveback_pct=1.39,
+            ))
+            self.assertFalse(monitor._observable_tail_shadow_selector_matches(
+                selector="exclude_ema_and_false_cleanup",
+                exit_reason="price below EMA20",
+                pnl_pct=1.0,
+                mfe_pct=2.0,
+                giveback_pct=1.0,
+            ))
+
+    def test_observable_tail_shadow_unknown_selector_is_rejected(self):
+        import monitor
+
+        self.assertFalse(monitor._observable_tail_shadow_selector_matches(
+            selector="unvalidated_selector",
+            exit_reason="ATR trail",
+            pnl_pct=2.0,
+            mfe_pct=3.0,
+            giveback_pct=1.0,
+        ))
+
+    def test_observable_tail_shadow_non_ema_mfe_selector_matches_replay_rule(self):
+        import monitor
+
+        with patch.object(monitor.config, "OBSERVABLE_TAIL_SHADOW_MIN_MFE_PCT", 1.5):
+            self.assertTrue(monitor._observable_tail_shadow_selector_matches(
+                selector="non_ema_mfe150",
+                exit_reason="ATR trail",
+                pnl_pct=-1.0,
+                mfe_pct=1.5,
+                giveback_pct=2.5,
+            ))
+            self.assertFalse(monitor._observable_tail_shadow_selector_matches(
+                selector="non_ema_mfe150",
+                exit_reason="ATR trail",
+                pnl_pct=2.0,
+                mfe_pct=1.49,
+                giveback_pct=0.0,
+            ))
+
     def test_blocked_learning_label_is_deduplicated_per_bar(self):
         import monitor
 

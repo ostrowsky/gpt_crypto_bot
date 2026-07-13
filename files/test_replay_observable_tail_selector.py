@@ -14,13 +14,20 @@ class ObservableTailSelectorReplayTests(unittest.TestCase):
         self.assertEqual(s['allowed_total'],1)
         self.assertEqual(s['false_positive_allowed_rate_pct'],0.0)
         self.assertEqual(s['avg_delta_pct'],1.0)
+        self.assertEqual(s['allowed_avg_delta_pct'],2.0)
+        self.assertEqual(s['allowed_median_delta_pct'],2.0)
+        self.assertEqual(s['allowed_worse_rate_pct'],0.0)
     def test_decision_requires_test_gate(self):
-        ranked=[{'name':'bad','test':{'n':10,'avg_delta_pct':0.2,'median_delta_pct':-0.1,'worse_rate_pct':10,'allowed_rate_pct':10,'false_positive_allowed_rate_pct':0}}]
+        ranked=[{'name':'bad','test':{'n':10,'avg_delta_pct':0.2,'allowed_avg_delta_pct':0.3,'allowed_median_delta_pct':-0.1,'allowed_worse_rate_pct':10,'allowed_rate_pct':10,'false_positive_allowed_rate_pct':0}}]
         self.assertEqual(obs._decision(ranked),'no_observable_selector_passed_test_gate')
 
     def test_decision_accepts_zero_false_positive_rate(self):
-        ranked=[{'name':'good','test':{'n':10,'avg_delta_pct':0.2,'median_delta_pct':0.0,'worse_rate_pct':10,'allowed_rate_pct':10,'false_positive_allowed_rate_pct':0.0}}]
+        ranked=[{'name':'good','test':{'n':10,'avg_delta_pct':0.2,'allowed_avg_delta_pct':0.3,'allowed_median_delta_pct':0.1,'allowed_worse_rate_pct':10,'allowed_rate_pct':10,'false_positive_allowed_rate_pct':0.0}}]
         self.assertEqual(obs._decision(ranked),'advance_good_to_shadow_observable_tail_selector')
+
+    def test_decision_rejects_non_positive_selected_median(self):
+        ranked=[{'name':'flat','test':{'n':10,'avg_delta_pct':0.2,'allowed_avg_delta_pct':0.3,'allowed_median_delta_pct':0.0,'allowed_worse_rate_pct':10,'allowed_rate_pct':10,'false_positive_allowed_rate_pct':0.0}}]
+        self.assertEqual(obs._decision(ranked),'no_observable_selector_passed_test_gate')
 
 if __name__ == '__main__':
     unittest.main()

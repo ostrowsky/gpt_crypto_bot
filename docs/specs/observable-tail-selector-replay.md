@@ -1,7 +1,8 @@
 ﻿# Observable Tail Selector Replay
 
 Date: 2026-06-01
-Status: research-only observable selector replay; no production SELL changes
+Last revalidated: 2026-07-13
+Status: `non_ema_mfe150` shipped shadow-only; no production SELL changes
 
 ## Problem
 
@@ -47,8 +48,9 @@ Candidate selectors are simple rules such as:
 
 Each candidate is scored on train and test for:
 
-- average / median delta;
-- worse-rate;
+- average delta across the full policy slice;
+- average / median delta among selected cases;
+- worse-rate among selected cases;
 - allowed-rate;
 - false-positive allowed-rate, diagnostic only;
 - early-exit delta, diagnostic only.
@@ -57,10 +59,51 @@ Each candidate is scored on train and test for:
 
 A selector may advance to shadow-only live scoring only if the test slice has:
 
-- positive average and median delta;
-- worse-rate <= 30%;
+- full-slice average delta `> 0.10%`;
+- selected-case average delta `> 0.10%` and median delta `> 0`;
+- selected-case worse-rate <= 30%;
 - allowed-rate >= 5%;
 - false-positive allowed-rate <= 10%;
 - at least 10 test rows or explicitly marked low confidence.
 
 No production SELL change is allowed from this replay alone.
+
+## Maximum-Period Revalidation (2026-07-13)
+
+The replay was rerun over every available final signal-quality report and its
+cached candle coverage:
+
+- exit-quality reports loaded: `58`;
+- selector rows: `668` across `55` labeled days;
+- chronological split: `468` train rows and `200` test rows.
+
+The initial full-slice ranking leader was `exclude_ema_and_false_cleanup`:
+
+- observable rule: non-EMA exit, MFE at SELL `>= 1.0%`, and current PnL
+  `> -0.5%`;
+- initial full-slice test average delta: `+0.2888%`;
+- test allowed-rate: `27.5%`;
+- test false-positive allowed-rate: `0.0%`.
+
+The corrected replay gate uses selected-case median and worse-rate rather than
+diluting them with zero deltas from unselected rows. On the rerun:
+
+- `exclude_ema_and_false_cleanup` was rejected because its selected-case
+  worse-rate was `30.91%`, above the `30%` limit;
+- `non_ema_mfe150` passed with full-slice average delta `+0.2792%`, selected-case
+  median delta `+0.6275%`, selected-case worse-rate `24.39%`, allowed-rate
+  `20.5%`, and false-positive allowed-rate `0.0%`.
+
+Decision: advance `non_ema_mfe150` to shadow telemetry only. Its observable rule
+is a non-EMA exit with MFE at SELL `>= 1.5%`. It may register a
+hypothetical 50% retained tail and collect forward labels at the configured
+horizons, but it must not delay, suppress, or resize a production SELL. Unknown
+selector names fail closed. Production adoption still requires independent live
+labels followed by a fee/slippage candle-path replay.
+
+## Rollback
+
+Set `OBSERVABLE_TAIL_SHADOW_ENABLED = False` to stop new shadow candidates
+without changing production exits. Restoring
+`OBSERVABLE_TAIL_SHADOW_SELECTOR = "non_ema_positive_giveback"` returns to the
+previous shadow cohort definition.

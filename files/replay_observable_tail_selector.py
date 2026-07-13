@@ -73,7 +73,8 @@ def render_text(report: dict[str, Any]) -> str:
         a = item.get("all") or {}
         lines.append(
             f"  {item.get('name')}: test n={t.get('n')} allow={t.get('allowed_rate_pct')}% "
-            f"avg={t.get('avg_delta_pct')} med={t.get('median_delta_pct')} worse={t.get('worse_rate_pct')}% "
+            f"avg={t.get('avg_delta_pct')} selected_med={t.get('allowed_median_delta_pct')} "
+            f"selected_worse={t.get('allowed_worse_rate_pct')}% "
             f"fp_allow={t.get('false_positive_allowed_rate_pct')}% | all avg={a.get('avg_delta_pct')} med={a.get('median_delta_pct')}"
         )
     return "\n".join(lines) + "\n"
@@ -109,14 +110,17 @@ def _candidate_selectors() -> list[tuple[str, str, Callable[[dict[str, Any]], bo
 
 
 def _score(rows: list[dict[str, Any]], name: str, fn: Callable[[dict[str, Any]], bool], tail_policy: str) -> dict[str, Any]:
-    deltas=[]; pnls=[]; allowed=[]
+    deltas=[]; pnls=[]; allowed=[]; allowed_deltas=[]
     for row in rows:
         baseline=_num(row.get("pnl_pct")); tail=_num(row.get(f"{tail_policy}_pnl_pct"))
         if baseline is None or tail is None: continue
-        use=bool(fn(row)); pnl=tail if use else baseline
-        pnls.append(pnl); deltas.append(round(pnl-baseline,4))
-        if use: allowed.append(row)
+        use=bool(fn(row)); pnl=tail if use else baseline; delta=round(pnl-baseline,4)
+        pnls.append(pnl); deltas.append(delta)
+        if use:
+            allowed.append(row)
+            allowed_deltas.append(delta)
     worse=[d for d in deltas if d < 0]
+    allowed_worse=[d for d in allowed_deltas if d < 0]
     fp=[r for r in rows if r.get("bucket") == "false_positive_buys"]
     fp_allowed=[r for r in fp if r in allowed]
     early=[r for r in rows if r.get("bucket") == "early_exits"]
@@ -126,6 +130,9 @@ def _score(rows: list[dict[str, Any]], name: str, fn: Callable[[dict[str, Any]],
         "avg_delta_pct": _avg(deltas), "median_delta_pct": _median(deltas), "total_delta_pct": round(sum(deltas),4) if deltas else None,
         "worse_rate_pct": round(len(worse)/len(deltas)*100,2) if deltas else 0.0,
         "allowed_total": len(allowed), "allowed_rate_pct": round(len(allowed)/len(rows)*100,2) if rows else 0.0,
+        "allowed_avg_delta_pct": _avg(allowed_deltas),
+        "allowed_median_delta_pct": _median(allowed_deltas),
+        "allowed_worse_rate_pct": round(len(allowed_worse)/len(allowed_deltas)*100,2) if allowed_deltas else 0.0,
         "false_positive_allowed_rate_pct": round(len(fp_allowed)/len(fp)*100,2) if fp else 0.0,
         "early_allowed_rate_pct": round(len(early_allowed)/len(early)*100,2) if early else 0.0,
     }
@@ -148,16 +155,25 @@ def _decision(ranked: list[dict[str, Any]]) -> str:
         if (n or 0) < 10:
             continue
         avg_delta = _num(t.get("avg_delta_pct"))
-        med_delta = _num(t.get("median_delta_pct"))
-        worse = _num(t.get("worse_rate_pct"))
+        allowed_avg_delta = _num(t.get("allowed_avg_delta_pct"))
+        allowed_med_delta = _num(t.get("allowed_median_delta_pct"))
+        allowed_worse = _num(t.get("allowed_worse_rate_pct"))
         allowed_rate = _num(t.get("allowed_rate_pct"))
         fp_allowed = _num(t.get("false_positive_allowed_rate_pct"))
         avg_delta = 0.0 if avg_delta is None else avg_delta
-        med_delta = 0.0 if med_delta is None else med_delta
-        worse = 100.0 if worse is None else worse
+        allowed_avg_delta = 0.0 if allowed_avg_delta is None else allowed_avg_delta
+        allowed_med_delta = 0.0 if allowed_med_delta is None else allowed_med_delta
+        allowed_worse = 100.0 if allowed_worse is None else allowed_worse
         allowed_rate = 0.0 if allowed_rate is None else allowed_rate
         fp_allowed = 100.0 if fp_allowed is None else fp_allowed
-        if avg_delta > 0.10 and med_delta >= 0 and worse <= 30 and allowed_rate >= 5 and fp_allowed <= 10:
+        if (
+            avg_delta > 0.10
+            and allowed_avg_delta > 0.10
+            and allowed_med_delta > 0.0
+            and allowed_worse <= 30
+            and allowed_rate >= 5
+            and fp_allowed <= 10
+        ):
             return f"advance_{item.get('name')}_to_shadow_observable_tail_selector"
     return "no_observable_selector_passed_test_gate"
 

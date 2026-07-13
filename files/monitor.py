@@ -4222,16 +4222,17 @@ def _register_observable_tail_shadow(
     if not bool(getattr(config, "OBSERVABLE_TAIL_SHADOW_ENABLED", False)):
         return
     selector = str(getattr(config, "OBSERVABLE_TAIL_SHADOW_SELECTOR", "non_ema_positive_giveback"))
-    if selector != "non_ema_positive_giveback" or _exit_reason_bucket(exit_reason) == "ema_break":
-        return
-    min_pnl = float(getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT", 0.0))
-    if float(pnl_pct) <= min_pnl:
-        return
     entry_price = float(getattr(pos, "entry_price", 0.0) or 0.0)
     peak_price = max(float(getattr(pos, "max_price_since_entry", 0.0) or 0.0), entry_price, float(exit_price))
     mfe_pct = (peak_price / entry_price - 1.0) * 100.0 if entry_price > 0.0 else 0.0
     giveback_pct = max(0.0, float(mfe_pct) - float(pnl_pct))
-    if giveback_pct < float(getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_GIVEBACK_PCT", 0.5)):
+    if not _observable_tail_shadow_selector_matches(
+        selector=selector,
+        exit_reason=exit_reason,
+        pnl_pct=float(pnl_pct),
+        mfe_pct=float(mfe_pct),
+        giveback_pct=float(giveback_pct),
+    ):
         return
     horizons = _normalize_forward_horizons(getattr(config, "OBSERVABLE_TAIL_SHADOW_HORIZONS", (2, 5, 10)))
     if not horizons:
@@ -4267,6 +4268,35 @@ def _register_observable_tail_shadow(
         exit_reason=str(exit_reason),
         sell_fraction=float(sell_fraction),
     )
+
+
+def _observable_tail_shadow_selector_matches(
+    *,
+    selector: str,
+    exit_reason: str,
+    pnl_pct: float,
+    mfe_pct: float,
+    giveback_pct: float,
+) -> bool:
+    if _exit_reason_bucket(exit_reason) == "ema_break":
+        return False
+    if selector == "non_ema_positive_giveback":
+        return float(pnl_pct) > float(
+            getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT", 0.0)
+        ) and float(giveback_pct) >= float(
+            getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_GIVEBACK_PCT", 0.5)
+        )
+    if selector == "exclude_ema_and_false_cleanup":
+        return float(pnl_pct) > float(
+            getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT", -0.5)
+        ) and float(mfe_pct) >= float(
+            getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_MFE_PCT", 1.0)
+        )
+    if selector == "non_ema_mfe150":
+        return float(mfe_pct) >= float(
+            getattr(config, "OBSERVABLE_TAIL_SHADOW_MIN_MFE_PCT", 1.5)
+        )
+    return False
 
 
 def _update_observable_tail_shadow(
