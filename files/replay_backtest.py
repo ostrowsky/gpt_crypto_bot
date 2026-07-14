@@ -24,7 +24,10 @@ from monitor import (
     _ml_candidate_ranker_components,
     _ml_candidate_ranker_runtime_bonus,
     _signal_priority,
+    _forecast_return_score_bonus,
+    _top_mover_score_bonus,
     _top_gainer_chase_guard_reason,
+    _top_gainer_live_score,
 )
 from strategy import (
     _early_15m_continuation_entry_ok,
@@ -152,6 +155,10 @@ class ReplayRunStats:
     temporal_rescue_admitted: int = 0
     suspicious_reentry_windows: int = 0
     suspicious_reentry_admitted: int = 0
+    btc_cluster_exemption_admitted: int = 0
+    btc_1h_leader_admitted: int = 0
+    btc_benchmark_policy_admitted: int = 0
+    btc_benchmark_replacements: int = 0
 
 
 def _load_ml_model_payload() -> dict:
@@ -268,7 +275,9 @@ def _build_bull_day_context(
         btc_data["v"],
     )
     ema50 = feat["ema_slow"]
-    ts_arr = btc_data["t"].astype(np.int64)
+    # Binance kline timestamps are candle opens. Context becomes observable only
+    # when the 1h candle closes.
+    ts_arr = btc_data["t"].astype(np.int64) + BAR_MS["1h"]
     state_arr = np.zeros(len(c_btc), dtype=bool)
     vs_arr = np.zeros(len(c_btc), dtype=float)
     confirm_bars = max(1, int(getattr(config, "BULL_DAY_CONFIRM_BARS", 2)))
@@ -446,6 +455,16 @@ def _find_last_closed_index(t_arr: np.ndarray, ts_ms: int) -> Optional[int]:
     return idx if idx >= 0 else None
 
 
+def _find_last_closed_candle_index(
+    t_arr: np.ndarray,
+    ts_ms: int,
+    bar_ms: int,
+) -> Optional[int]:
+    """Return the last candle whose close time is observable at ``ts_ms``."""
+    idx = int(np.searchsorted(t_arr, int(ts_ms) - int(bar_ms), side="right")) - 1
+    return idx if idx >= 0 else None
+
+
 def _mtf_relaxed_1h_candidate_ok(
     *,
     mode: Optional[str],
@@ -510,7 +529,7 @@ async def _mtf_ok_for_replay(
         return True, "no 15m data"
 
     data_15m, feat_15m = pack
-    i = _find_last_closed_index(data_15m["t"], ts_ms)
+    i = _find_last_closed_candle_index(data_15m["t"], ts_ms, BAR_MS["15m"])
     if i is None or i < 1:
         return True, "no closed 15m bar"
 
@@ -612,6 +631,33 @@ def _entry_candidate(feat: dict, i: int, c: np.ndarray, tf: str) -> Optional[Tup
         return "impulse", getattr(config, "ATR_TRAIL_K", 2.0), getattr(config, "MAX_HOLD_BARS_15M", 48), False
     if aln_ok and bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False)):
         return "alignment", getattr(config, "ATR_TRAIL_K", 2.0), getattr(config, "MAX_HOLD_BARS_15M", 48), False
+    return None
+
+
+def _discovery_catchup_replay_candidate(
+    feat: dict,
+    i: int,
+    c: np.ndarray,
+    tf: str,
+) -> Optional[Tuple[Tuple[str, float, int, bool], int, float]]:
+    """Reproduce the causal live discovery grace window for a vanished signal."""
+    grace_bars = int(getattr(config, "DISCOVERY_ENTRY_GRACE_BARS", 2))
+    max_slip = float(getattr(config, "DISCOVERY_ENTRY_MAX_SLIPPAGE_PCT", 0.45))
+    current_price = float(c[i]) if 0 <= i < len(c) else 0.0
+    for lookback in range(1, grace_bars + 1):
+        source_i = i - lookback
+        if source_i < 0:
+            break
+        picked = _entry_candidate(feat, source_i, c, tf)
+        if picked is None:
+            continue
+        signal_price = float(c[source_i])
+        if signal_price <= 0 or current_price <= 0:
+            continue
+        slippage_pct = (current_price / signal_price - 1.0) * 100.0
+        if slippage_pct > max_slip:
+            break
+        return picked, source_i, slippage_pct
     return None
 
 
@@ -1042,7 +1088,7 @@ def _continuation_micro_exit_signal(
         return None
     if bars_elapsed < int(getattr(config, "CONTINUATION_MICRO_EXIT_MIN_BARS", 3)):
         return None
-    idx = _find_last_closed_index(data_15m["t"], ts_ms)
+    idx = _find_last_closed_candle_index(data_15m["t"], ts_ms, BAR_MS["15m"])
     neg_bars = int(getattr(config, "CONTINUATION_MICRO_EXIT_MACD_NEG_BARS", 4))
     if idx is None or idx < neg_bars - 1:
         return None
@@ -1062,7 +1108,7 @@ def _continuation_micro_exit_signal(
     ):
         return None
     return (
-        int(data_15m["t"][idx]),
+        int(data_15m["t"][idx]) + BAR_MS["15m"],
         close_15m,
         f"15m micro-weakness after profit-lock: MACD<0 {neg_bars} bars, RSI {rsi_15m:.1f}",
     )
@@ -1621,26 +1667,19 @@ def _top_gainer_replay_score(
     ranker_final_score: float,
     ranker_top_gainer_prob: float,
 ) -> float:
-    score = 0.0
-    score += max(-8.0, min(45.0, intraday_change_pct * 6.0))
-    score += max(0.0, min(18.0, daily_range * 1.1))
-    score += max(0.0, min(14.0, (vol_x - 1.0) * 7.0))
-    score += max(0.0, min(14.0, (adx - 18.0) * 0.7))
-    score += max(-8.0, min(12.0, ranker_final_score * 6.0))
-    score += max(0.0, min(18.0, ranker_top_gainer_prob * 45.0))
-    if mode in ("trend_start", "impulse_speed", "strong_trend", "trend", "impulse"):
-        score += 5.0
-    elif mode in ("breakout", "retest"):
-        score += 1.5
-    if tf == "15m":
-        score += 1.5
-    if rsi > 76.0 and daily_range >= 8.0:
-        score -= min(16.0, (rsi - 76.0) * 1.2 + (daily_range - 8.0) * 0.4)
-    if daily_range > 25.0:
-        score -= min(18.0, (daily_range - 25.0) * 0.6)
-    if intraday_change_pct < 0.0:
-        score -= 8.0
-    return round(score, 4)
+    del tf  # The production score is timeframe-independent.
+    return _top_gainer_live_score(
+        mode=mode,
+        intraday_change_pct=intraday_change_pct,
+        daily_range=daily_range,
+        vol_x=vol_x,
+        adx=adx,
+        rsi=rsi,
+        ranker_info={
+            "final_score": ranker_final_score,
+            "top_gainer_prob": ranker_top_gainer_prob,
+        },
+    )
 
 
 def _signal_cluster_bucket_replay(tf: str, mode: str) -> str:
@@ -1779,6 +1818,56 @@ def _signal_cluster_cap_replay(bucket: str) -> int:
     return max(1, int(getattr(config, attr, 2))) if attr else 2
 
 
+BTC_CLUSTER_EXEMPT_VARIANTS = frozenset(
+    {"btc_cluster_exempt", "btc_benchmark_combined", "btc_benchmark_rotation"}
+)
+BTC_1H_LEADER_VARIANTS = frozenset(
+    {"btc_1h_leader_admission", "btc_benchmark_combined", "btc_benchmark_rotation"}
+)
+
+
+def _btc_cluster_exempt_replay(sym: str, variant: str) -> bool:
+    """Return whether BTC is outside altcoin cluster accounting in this replay."""
+    return str(sym).upper() == "BTCUSDT" and variant in BTC_CLUSTER_EXEMPT_VARIANTS
+
+
+def _btc_1h_leader_admission_replay_ok(
+    candidate: ReplayCandidate,
+    *,
+    normal_score_min: float,
+) -> bool:
+    """Frozen causal BTC breakout exception used only by benchmark replay variants."""
+    return (
+        candidate.sym.upper() == "BTCUSDT"
+        and candidate.tf == "1h"
+        and candidate.mode == "breakout"
+        and candidate.top_gainer_score < float(normal_score_min)
+        and candidate.top_gainer_score >= 32.0
+        and candidate.score >= 120.0
+        and 55.0 <= candidate.rsi <= 70.0
+        and candidate.adx >= 20.0
+        and candidate.vol_x >= 2.0
+        and candidate.intraday_change_pct >= 1.0
+        and candidate.daily_range <= 5.0
+    )
+
+
+def _btc_benchmark_rotation_replay_ok(candidate: ReplayCandidate) -> bool:
+    """Frozen pre-overbought BTC profile for losing-alt replacement research."""
+    return (
+        candidate.sym.upper() == "BTCUSDT"
+        and candidate.tf == "1h"
+        and candidate.mode == "breakout"
+        and candidate.top_gainer_score >= 32.0
+        and candidate.score >= 120.0
+        and candidate.rsi <= 72.0
+        and candidate.adx >= 18.0
+        and candidate.vol_x >= 2.0
+        and candidate.intraday_change_pct >= 1.0
+        and candidate.daily_range <= 5.0
+    )
+
+
 def _four_h_context_score_replay(
     sym: str,
     ts_ms: int,
@@ -1790,7 +1879,7 @@ def _four_h_context_score_replay(
     if not pack:
         return 0.0, "4h_missing"
     data, feat = pack
-    idx = _find_last_closed_index(data["t"], ts_ms)
+    idx = _find_last_closed_candle_index(data["t"], ts_ms, BAR_MS["4h"])
     if idx is None or idx < 50:
         return 0.0, "4h_insufficient"
     price = float(data["c"][idx])
@@ -1850,13 +1939,20 @@ async def _build_candidates_for_symbol(
     prev_btc_vs_ema50 = float(getattr(config, "_btc_vs_ema50", 0.0))
     try:
         for i in range(max(25, 5), len(c) - 1):
-            ts_ms = int(data["t"][i])
+            ts_ms = int(data["t"][i]) + BAR_MS[tf]
             is_bull_day, btc_vs_ema50 = _market_context_at(market_ctx, ts_ms)
             config._bull_day_active = is_bull_day
             config._btc_vs_ema50 = btc_vs_ema50
 
             picked = _trend_start_replay_candidate(feat, data, i, c, tf) if include_trend_start else None
             picked = picked or _entry_candidate(feat, i, c, tf)
+            catchup = False
+            move_feature_i = i
+            if picked is None:
+                catchup_candidate = _discovery_catchup_replay_candidate(feat, i, c, tf)
+                if catchup_candidate is not None:
+                    picked, move_feature_i, _ = catchup_candidate
+                    catchup = True
             if picked is None:
                 continue
             mode, trail_k, max_hold, early_15m_continuation = picked
@@ -1889,6 +1985,21 @@ async def _build_candidates_for_symbol(
             daily_range = float(dr_arr[i]) if dr_arr is not None and np.isfinite(dr_arr[i]) else 0.0
             ema20_arr = feat.get("ema20", feat.get("ema_fast"))
             preview_ema20 = float(ema20_arr[i]) if ema20_arr is not None and np.isfinite(ema20_arr[i]) else 0.0
+            move_slope = float(slope_arr[move_feature_i]) if slope_arr is not None and np.isfinite(slope_arr[move_feature_i]) else slope
+            move_adx = float(feat["adx"][move_feature_i]) if np.isfinite(feat["adx"][move_feature_i]) else adx
+            move_rsi = float(feat["rsi"][move_feature_i]) if np.isfinite(feat["rsi"][move_feature_i]) else rsi
+            move_vol = float(feat["vol_x"][move_feature_i]) if np.isfinite(feat["vol_x"][move_feature_i]) else preview_vol
+            score_intraday_change_pct = _intraday_change_pct_from_data(data, move_feature_i)
+            forecast_return_pct = _forecast_proxy_pct(
+                today_change_pct=score_intraday_change_pct,
+                slope=move_slope,
+                adx=move_adx,
+                vol_x=move_vol,
+                rsi=move_rsi,
+            )
+            candidate_score += _top_mover_score_bonus(score_intraday_change_pct)
+            candidate_score += _forecast_return_score_bonus(forecast_return_pct)
+            intraday_change_pct = _intraday_change_pct_from_data(data, i)
             mtf_ok, mtf_reason = await _mtf_ok_for_replay(
                 sym,
                 tf,
@@ -1975,14 +2086,6 @@ async def _build_candidates_for_symbol(
                             continue
             score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
             mtf_soft_penalty = _mtf_soft_penalty_from_reason(mtf_reason)
-            intraday_change_pct = _intraday_change_pct_from_data(data, i)
-            forecast_return_pct = _forecast_proxy_pct(
-                today_change_pct=intraday_change_pct,
-                slope=slope,
-                adx=adx,
-                vol_x=preview_vol,
-                rsi=rsi,
-            )
             ranker_info = _ml_candidate_ranker_components(
                 sym=sym,
                 tf=tf,
@@ -1995,11 +2098,11 @@ async def _build_candidates_for_symbol(
                 base_score=base_score,
                 score_floor=score_floor,
                 forecast_return_pct=forecast_return_pct,
-                today_change_pct=intraday_change_pct,
+                today_change_pct=score_intraday_change_pct,
                 ml_proba=ml_proba,
                 mtf_soft_penalty=mtf_soft_penalty,
                 fresh_priority=_is_fresh_priority_candidate(mode, None),
-                catchup=False,
+                catchup=catchup,
                 continuation_profile=continuation_profile,
                 signal_flags=signal_flags,
             )
@@ -2415,8 +2518,13 @@ def _chase_guard_reason_for_replay_variant(
     return _top_gainer_chase_guard_reason(tf=tf, mode=mode, rsi=rsi, daily_range=daily_range)
 
 
-def _series_price_at_or_before(data: np.ndarray, ts_ms: int) -> Optional[Tuple[int, float]]:
-    idx = _find_last_closed_index(data["t"], ts_ms)
+def _series_price_at_or_before(
+    data: np.ndarray,
+    ts_ms: int,
+    *,
+    tf: str,
+) -> Optional[Tuple[int, float]]:
+    idx = _find_last_closed_candle_index(data["t"], ts_ms, BAR_MS[tf])
     if idx is None:
         return None
     return idx, float(data["c"][idx])
@@ -2665,7 +2773,7 @@ def build_suggestions(summary: dict) -> List[str]:
     return suggestions
 
 
-async def simulate_portfolio(
+async def build_replay_candidate_snapshot(
     symbols: List[str],
     timeframes: List[str],
     cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
@@ -2673,15 +2781,12 @@ async def simulate_portfolio(
     cache_4h: Dict[str, Tuple[np.ndarray, dict]],
     market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
     *,
-    max_open_positions: int,
-    enable_replacement: bool,
-    replace_min_delta: float,
     variant: str = "baseline",
-    top_gainer_score_min: float = 0.0,
-) -> Tuple[List[ReplayTrade], ReplayRunStats]:
+) -> Tuple[Dict[int, List[ReplayCandidate]], set[int], int]:
+    """Build immutable candidate inputs once for policy variants with identical entry rules."""
     candidates_by_ts: Dict[int, List[ReplayCandidate]] = {}
     timestamps: set[int] = set()
-    stats = ReplayRunStats()
+    candidates_total = 0
 
     for sym in symbols:
         for tf in timeframes:
@@ -2701,9 +2806,39 @@ async def simulate_portfolio(
                 variant=variant,
                 include_trend_start=variant == "trend_start",
             )
-            stats.candidates_total += len(built)
+            candidates_total += len(built)
             for candidate in built:
                 candidates_by_ts.setdefault(candidate.ts_ms, []).append(candidate)
+    return candidates_by_ts, timestamps, candidates_total
+
+
+async def simulate_portfolio(
+    symbols: List[str],
+    timeframes: List[str],
+    cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
+    cache_15m: Dict[str, Tuple[np.ndarray, dict]],
+    cache_4h: Dict[str, Tuple[np.ndarray, dict]],
+    market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
+    *,
+    max_open_positions: int,
+    enable_replacement: bool,
+    replace_min_delta: float,
+    variant: str = "baseline",
+    top_gainer_score_min: float = 0.0,
+    candidate_snapshot: Optional[Tuple[Dict[int, List[ReplayCandidate]], set[int], int]] = None,
+) -> Tuple[List[ReplayTrade], ReplayRunStats]:
+    stats = ReplayRunStats()
+    if candidate_snapshot is None:
+        candidate_snapshot = await build_replay_candidate_snapshot(
+            symbols,
+            timeframes,
+            cache,
+            cache_15m,
+            cache_4h,
+            market_ctx,
+            variant=variant,
+        )
+    candidates_by_ts, timestamps, stats.candidates_total = candidate_snapshot
 
     min_ts = min(timestamps) if timestamps else None
     max_ts = max(timestamps) if timestamps else None
@@ -2722,7 +2857,7 @@ async def simulate_portfolio(
         to_close: List[Tuple[Tuple[str, str], ReplayTrade]] = []
         for key, trade in list(open_positions.items()):
             data, feat = cache[(trade.sym, trade.tf)]
-            idx = _find_last_closed_index(data["t"], ts_ms)
+            idx = _find_last_closed_candle_index(data["t"], ts_ms, BAR_MS[trade.tf])
             if idx is None or idx <= trade.entry_i:
                 continue
             micro_pack = cache_15m.get(trade.sym) if trade.tf == "1h" else None
@@ -2741,7 +2876,7 @@ async def simulate_portfolio(
             if not exit_reason:
                 continue
             if trade.exit_ts <= 0:
-                trade.exit_ts = int(data["t"][idx])
+                trade.exit_ts = ts_ms
             if trade.exit_price <= 0:
                 trade.exit_price = float(data["c"][idx])
             trade.exit_reason = exit_reason
@@ -2788,8 +2923,19 @@ async def simulate_portfolio(
             "exit_discriminator_shadow_policy",
             "suspicious_exit_reentry",
             "partial_profit_take",
+            "btc_cluster_exempt",
+            "btc_1h_leader_admission",
+            "btc_benchmark_combined",
+            "btc_benchmark_rotation",
         }
-        use_cluster_cap = variant in {"score_replace_cluster", "score_replace_cluster_non_losing"}
+        use_cluster_cap = variant in {
+            "score_replace_cluster",
+            "score_replace_cluster_non_losing",
+            "btc_cluster_exempt",
+            "btc_1h_leader_admission",
+            "btc_benchmark_combined",
+            "btc_benchmark_rotation",
+        }
         ts_candidates.sort(
             key=lambda item: (
                 item.top_gainer_score if use_top_gainer_score else item.score,
@@ -2800,6 +2946,8 @@ async def simulate_portfolio(
             reverse=True,
         )
         for candidate in ts_candidates:
+            btc_score_bypass = False
+            btc_cluster_bypass = False
             if variant == "agent_allowed" and not _agent_allowed_mode_replay(candidate.mode):
                 continue
             if variant == "agent_mode_rescue" and not _agent_mode_rescue_replay_candidate_ok(
@@ -2822,8 +2970,17 @@ async def simulate_portfolio(
                 top_gainer_score_min,
             )
             if use_top_gainer_score and candidate.top_gainer_score < candidate_top_gainer_score_min:
-                stats.skipped_top_gainer_score += 1
-                continue
+                if (
+                    variant in BTC_1H_LEADER_VARIANTS
+                    and _btc_1h_leader_admission_replay_ok(
+                        candidate,
+                        normal_score_min=candidate_top_gainer_score_min,
+                    )
+                ):
+                    btc_score_bypass = True
+                else:
+                    stats.skipped_top_gainer_score += 1
+                    continue
             sym_cooldown = cooldown_until.get(candidate.sym, 0)
             if ts_ms < sym_cooldown:
                 reentry_allowed = (
@@ -2844,11 +3001,24 @@ async def simulate_portfolio(
                 continue
             candidate_bucket = _signal_cluster_bucket_replay(candidate.tf, candidate.mode)
             if use_cluster_cap:
-                same_cluster = [
+                raw_same_cluster = [
                     key for key, trade in open_positions.items()
                     if _signal_cluster_bucket_replay(trade.tf, trade.mode) == candidate_bucket
                 ]
-                if len(same_cluster) >= _signal_cluster_cap_replay(candidate_bucket):
+                same_cluster = [
+                    key for key in raw_same_cluster
+                    if not _btc_cluster_exempt_replay(open_positions[key].sym, variant)
+                ]
+                cluster_cap = _signal_cluster_cap_replay(candidate_bucket)
+                candidate_cluster_exempt = _btc_cluster_exempt_replay(candidate.sym, variant)
+                btc_cluster_bypass = (
+                    candidate_cluster_exempt and len(raw_same_cluster) >= cluster_cap
+                ) or (
+                    not candidate_cluster_exempt
+                    and len(raw_same_cluster) >= cluster_cap
+                    and len(same_cluster) < cluster_cap
+                )
+                if not candidate_cluster_exempt and len(same_cluster) >= cluster_cap:
                     if not enable_replacement:
                         stats.skipped_cluster_cap += 1
                         continue
@@ -2889,7 +3059,15 @@ async def simulate_portfolio(
                 replaceable: List[Tuple[float, Tuple[str, str], ReplayTrade, int, float]] = []
                 candidate_min_delta = _replacement_min_delta_for_candidate(candidate.mode)
                 use_ranker_rotation = bool(getattr(config, "PORTFOLIO_REPLACE_RANKER_ENABLED", True))
-                if use_ranker_rotation and not _candidate_ranker_rotation_ok(candidate):
+                btc_rotation_override = (
+                    variant == "btc_benchmark_rotation"
+                    and _btc_benchmark_rotation_replay_ok(candidate)
+                )
+                if (
+                    use_ranker_rotation
+                    and not _candidate_ranker_rotation_ok(candidate)
+                    and not btc_rotation_override
+                ):
                     stats.skipped_portfolio_full += 1
                     continue
                 candidate_rotation_score = (
@@ -2898,16 +3076,29 @@ async def simulate_portfolio(
                     else (_candidate_rotation_score(candidate) if use_ranker_rotation else float(candidate.score))
                 )
                 for open_key, open_trade in open_positions.items():
-                    if use_cluster_cap and len([
-                        trade for trade in open_positions.values()
-                        if _signal_cluster_bucket_replay(trade.tf, trade.mode) == candidate_bucket
-                    ]) >= _signal_cluster_cap_replay(candidate_bucket):
+                    if (
+                        use_cluster_cap
+                        and not _btc_cluster_exempt_replay(candidate.sym, variant)
+                        and len(
+                            [
+                                trade
+                                for trade in open_positions.values()
+                                if _signal_cluster_bucket_replay(trade.tf, trade.mode) == candidate_bucket
+                                and not _btc_cluster_exempt_replay(trade.sym, variant)
+                            ]
+                        )
+                        >= _signal_cluster_cap_replay(candidate_bucket)
+                    ):
                         if _signal_cluster_bucket_replay(open_trade.tf, open_trade.mode) != candidate_bucket:
                             continue
                     if _signal_priority(candidate.mode) < _signal_priority(open_trade.mode):
                         continue
                     open_data, open_feat = cache[(open_trade.sym, open_trade.tf)]
-                    current_point = _series_price_at_or_before(open_data, ts_ms)
+                    current_point = _series_price_at_or_before(
+                        open_data,
+                        ts_ms,
+                        tf=open_trade.tf,
+                    )
                     if current_point is None:
                         continue
                     idx, price = current_point
@@ -2947,6 +3138,32 @@ async def simulate_portfolio(
                         continue
                     replaceable.append((baseline_score, open_key, open_trade, idx, price))
 
+                if not replaceable and btc_rotation_override:
+                    losing_alts: List[Tuple[float, Tuple[str, str], ReplayTrade, int, float]] = []
+                    for open_key, open_trade in open_positions.items():
+                        if open_trade.sym.upper() == "BTCUSDT":
+                            continue
+                        open_data, _ = cache[(open_trade.sym, open_trade.tf)]
+                        current_point = _series_price_at_or_before(
+                            open_data,
+                            ts_ms,
+                            tf=open_trade.tf,
+                        )
+                        if current_point is None:
+                            continue
+                        idx, price = current_point
+                        bars_held = idx - open_trade.entry_i
+                        if bars_held < 2 or open_trade.entry_price <= 0:
+                            continue
+                        current_pnl_pct = (price / open_trade.entry_price - 1.0) * 100.0
+                        if current_pnl_pct > -0.25:
+                            continue
+                        losing_alts.append((current_pnl_pct, open_key, open_trade, idx, price))
+                    if losing_alts:
+                        losing_alts.sort(key=lambda item: item[0])
+                        replaceable.append(losing_alts[0])
+                        stats.btc_benchmark_replacements += 1
+
                 if not replaceable:
                     stats.skipped_portfolio_full += 1
                     continue
@@ -2955,7 +3172,7 @@ async def simulate_portfolio(
                 _, weakest_key, weakest_trade, idx, price = replaceable[0]
                 weakest_data, _ = cache[(weakest_trade.sym, weakest_trade.tf)]
                 _update_trade_extrema(weakest_trade, weakest_data, idx)
-                weakest_trade.exit_ts = int(weakest_data["t"][idx])
+                weakest_trade.exit_ts = ts_ms
                 weakest_trade.exit_price = price
                 weakest_trade.exit_reason = f"replaced_by_{candidate.sym}_{candidate.mode}"
                 _finalize_trade_metrics(weakest_trade)
@@ -2969,6 +3186,13 @@ async def simulate_portfolio(
                 cooldown_until[weakest_trade.sym] = weakest_trade.exit_ts + cooldown_bars * BAR_MS[weakest_trade.tf]
                 last_closed_by_symbol[weakest_trade.sym] = weakest_trade
                 open_positions.pop(weakest_key, None)
+
+            if btc_cluster_bypass:
+                stats.btc_cluster_exemption_admitted += 1
+            if btc_score_bypass:
+                stats.btc_1h_leader_admitted += 1
+            if btc_cluster_bypass or btc_score_bypass:
+                stats.btc_benchmark_policy_admitted += 1
 
             data, feat = cache[(candidate.sym, candidate.tf)]
             atr_val = float(feat["atr"][candidate.i]) if np.isfinite(feat["atr"][candidate.i]) else 0.0
@@ -3003,9 +3227,16 @@ async def simulate_portfolio(
         data, feat = cache[(trade.sym, trade.tf)]
         idx = len(data["c"]) - 2
         micro_pack = cache_15m.get(trade.sym) if trade.tf == "1h" else None
-        _update_trade_progress(trade, data, feat, idx, ts_ms=int(data["t"][idx]), micro_pack=micro_pack)
+        _update_trade_progress(
+            trade,
+            data,
+            feat,
+            idx,
+            ts_ms=int(data["t"][idx]) + BAR_MS[trade.tf],
+            micro_pack=micro_pack,
+        )
         if trade.exit_ts <= 0:
-            trade.exit_ts = int(data["t"][idx])
+            trade.exit_ts = int(data["t"][idx]) + BAR_MS[trade.tf]
         if trade.exit_price <= 0:
             trade.exit_price = float(data["c"][idx])
         trade.exit_reason = "open_at_end"
@@ -3095,6 +3326,10 @@ def _make_report(
             "temporal_rescue_admitted": run_stats.temporal_rescue_admitted,
             "suspicious_reentry_windows": run_stats.suspicious_reentry_windows,
             "suspicious_reentry_admitted": run_stats.suspicious_reentry_admitted,
+            "btc_cluster_exemption_admitted": run_stats.btc_cluster_exemption_admitted,
+            "btc_1h_leader_admitted": run_stats.btc_1h_leader_admitted,
+            "btc_benchmark_policy_admitted": run_stats.btc_benchmark_policy_admitted,
+            "btc_benchmark_replacements": run_stats.btc_benchmark_replacements,
         },
         "summary": summary,
         "objective": objective,
@@ -3177,6 +3412,10 @@ async def run_replay(
         "chase_guard_off",
         "chase_guard_rsi_off",
         "chase_guard_rsi_82",
+        "btc_cluster_exempt",
+        "btc_1h_leader_admission",
+        "btc_benchmark_combined",
+        "btc_benchmark_rotation",
     } or (
         variant == "baseline" and bool(getattr(config, "PORTFOLIO_REPLACE_ENABLED", True))
     )
@@ -3369,6 +3608,10 @@ def parse_args() -> argparse.Namespace:
             "chase_guard_off",
             "chase_guard_rsi_off",
             "chase_guard_rsi_82",
+            "btc_cluster_exempt",
+            "btc_1h_leader_admission",
+            "btc_benchmark_combined",
+            "btc_benchmark_rotation",
         ],
         default="score_replace",
     )

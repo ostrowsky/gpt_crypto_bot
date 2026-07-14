@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-07-14 00:20 Europe/Budapest
+Last updated: 2026-07-14 20:00 Europe/Budapest
 
 ## Objective
 
@@ -103,6 +103,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
 | Unified portfolio replacement | planned | `SCOUT_OPTIMIZATION_SPEC.md` | opportunity cost, replacement uplift, capture under `10/10` | replay grid required |
 | GitHub-inspired portfolio controls | research-only replay harness | `docs/specs/github-inspired-portfolio-controls.md` | `pnl_total`, `trade_precision`, `capture_rate`, `exit_efficiency`, `giveback_pct` | 30d regime split before any live adoption |
+| BTC benchmark admission | research-only complete; not promoted | `docs/specs/btc-benchmark-admission-replay.md` | net PnL, BTC PnL, bypass admissions, holdout stability | collect four more frozen-profile rotation cases; no live change |
 | Why-no-signal traces | shipped first read-only version | `docs/specs/p0-observability-foundation.md` | blocker chain per missed top mover | connect to daily reports |
 | P0 observability foundation | shipped first additive slice | `docs/specs/p0-observability-foundation.md` | `blocked_reason_harm`, evaluator coverage | expand blocker context fields |
 | Canonical metrics map | shipped | `docs/specs/metrics-canonical.md` | objective decision consistency | use in roadmap reviews |
