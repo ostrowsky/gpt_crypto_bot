@@ -19,6 +19,7 @@ import config
 ROOT = Path(__file__).resolve().parent
 WORKSPACE_ROOT = ROOT.parent
 EVENTS_FILE = ROOT / "bot_events.jsonl"
+WATCHLIST_FILE = ROOT / "watchlist.json"
 REPORT_DIR = WORKSPACE_ROOT / ".runtime" / "reports"
 DEFAULT_OUTPUT_JSON = REPORT_DIR / "suspicious_reentry_scorecard_latest.json"
 DEFAULT_OUTPUT_TXT = REPORT_DIR / "suspicious_reentry_scorecard_latest.txt"
@@ -58,8 +59,13 @@ def build_scorecard(
     save: bool = True,
     kline_loader: Callable[[str, str, int, int], list[list[Any]]] | None = None,
     now_utc: datetime | None = None,
+    valid_symbols: set[str] | None = None,
 ) -> dict[str, Any]:
     rows, watch_decisions = _load_day_events(events_file, target_day, timezone_name)
+    if valid_symbols is None and events_file.resolve() == EVENTS_FILE.resolve():
+        valid_symbols = _load_runtime_watchlist()
+    rows, excluded_alerts = _filter_valid_symbols(rows, valid_symbols)
+    watch_decisions, excluded_watch_decisions = _filter_valid_symbols(watch_decisions, valid_symbols)
     labeled = [
         _label_event(row, kline_loader=kline_loader, now_utc=now_utc)
         for row in rows
@@ -69,6 +75,8 @@ def build_scorecard(
         timezone_name,
         labeled,
         watch_decisions=watch_decisions,
+        excluded_alerts=excluded_alerts,
+        excluded_watch_decisions=excluded_watch_decisions,
         events_file=events_file,
         now_utc=now_utc,
     )
@@ -105,6 +113,8 @@ def render_text(scorecard: dict[str, Any]) -> str:
         f"  • upstream watch funnel: total={summary.get('watch_decisions_total', 0)}; "
         f"registered={summary.get('watch_registered', 0)}; rejected exit score={summary.get('watch_rejected_exit_score', 0)}; "
         f"rejected MFE={summary.get('watch_rejected_mfe', 0)}.",
+        f"  • data quality: raw watch decisions={summary.get('watch_decisions_total_raw', 0)}; "
+        f"excluded non-watchlist telemetry={summary.get('excluded_non_watchlist_events', 0)}.",
         f"  • same-day alert/registered pressure: {_fmt_pct(summary.get('same_day_alert_per_registered_ratio'))}; "
         f"pending watch windows={summary.get('watch_pending', 0)}.",
         f"  • ret5 avg/median: {_fmt(summary.get('avg_ret5'))} / {_fmt(summary.get('median_ret5'))}; positive={_fmt_pct(summary.get('ret5_positive_rate'))}.",
@@ -133,6 +143,8 @@ def _payload(
     labeled: list[LabeledShadowReentry],
     *,
     watch_decisions: list[dict[str, Any]],
+    excluded_alerts: list[dict[str, Any]],
+    excluded_watch_decisions: list[dict[str, Any]],
     events_file: Path,
     now_utc: datetime | None,
 ) -> dict[str, Any]:
@@ -161,10 +173,13 @@ def _payload(
     status = "complete" if not coverage_reasons else "partial"
     summary = {
         "alerts_total": len(labeled),
+        "alerts_total_raw": len(labeled) + len(excluded_alerts),
         "labeled_ret5": len(ret5),
         "pending": len(pending),
         "missing": len(failed),
         "watch_decisions_total": len(watch_decisions),
+        "watch_decisions_total_raw": len(watch_decisions) + len(excluded_watch_decisions),
+        "excluded_non_watchlist_events": len(excluded_alerts) + len(excluded_watch_decisions),
         "watch_registered": watch_registered,
         "watch_pending": watch_pending,
         "watch_rejected_exit_score": int(watch_counts.get("rejected_exit_score", 0)),
@@ -210,6 +225,20 @@ def _payload(
                 if row.get("decision") == "registered"
             ][:12],
         },
+        "data_quality": {
+            "excluded_non_watchlist_alerts": [
+                {"sym": str(row.get("sym") or ""), "ts": str(row.get("ts") or "")}
+                for row in excluded_alerts[:12]
+            ],
+            "excluded_non_watchlist_watch_decisions": [
+                {
+                    "sym": str(row.get("sym") or ""),
+                    "decision": str(row.get("decision") or ""),
+                    "ts": str(row.get("ts") or ""),
+                }
+                for row in excluded_watch_decisions[:12]
+            ],
+        },
         "examples": _examples(mature),
         "interpretation": _interpretation(summary),
         "recommendation": _recommendation(summary, status),
@@ -250,6 +279,29 @@ def _load_day_events(
     alerts.sort(key=lambda r: str(r.get("ts") or ""))
     watch_decisions.sort(key=lambda r: str(r.get("ts") or ""))
     return alerts, watch_decisions
+
+
+def _load_runtime_watchlist() -> set[str] | None:
+    try:
+        raw = json.loads(WATCHLIST_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    symbols = {str(value) for value in raw if value}
+    return symbols or None
+
+
+def _filter_valid_symbols(
+    rows: list[dict[str, Any]],
+    valid_symbols: set[str] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not valid_symbols:
+        return rows, []
+    included: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    for row in rows:
+        target = included if str(row.get("sym") or "") in valid_symbols else excluded
+        target.append(row)
+    return included, excluded
 
 
 def _pending_registered_watch_count(

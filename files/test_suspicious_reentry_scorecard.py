@@ -204,6 +204,43 @@ class SuspiciousReentryScorecardTests(unittest.TestCase):
         self.assertEqual(payload["status"], "partial")
         self.assertTrue(any("no re-entry watch decisions" in reason for reason in payload["coverage_reasons"]))
 
+    def test_non_watchlist_telemetry_is_excluded_but_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "bot_events.jsonl"
+            rows = [
+                {
+                    "ts": "2026-05-30T08:00:00Z",
+                    "event": "suspicious_reentry_watch_decision",
+                    "sym": "AAAUSDT",
+                    "decision": "registered",
+                    "tf": "15m",
+                },
+                {
+                    "ts": "2026-05-30T09:00:00Z",
+                    "event": "suspicious_reentry_watch_decision",
+                    "sym": "REALUSDT",
+                    "decision": "rejected_exit_score",
+                    "tf": "15m",
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+            payload = scorecard.build_scorecard(
+                date(2026, 5, 30),
+                events_file=path,
+                reports_dir=Path(td),
+                output_json=Path(td) / "latest.json",
+                output_txt=Path(td) / "latest.txt",
+                save=False,
+                valid_symbols={"REALUSDT"},
+            )
+
+        summary = payload["summary"]
+        self.assertEqual(summary["watch_decisions_total_raw"], 2)
+        self.assertEqual(summary["watch_decisions_total"], 1)
+        self.assertEqual(summary["excluded_non_watchlist_events"], 1)
+        excluded = payload["data_quality"]["excluded_non_watchlist_watch_decisions"]
+        self.assertEqual(excluded[0]["sym"], "AAAUSDT")
+
 
 if __name__ == "__main__":
     unittest.main()

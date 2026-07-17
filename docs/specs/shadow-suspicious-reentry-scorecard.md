@@ -36,6 +36,7 @@ Produce a daily scorecard for `suspicious_reentry_shadow` events:
 8. A day with neither alerts nor upstream watch decisions is `partial`, not `complete`.
 9. Unit tests patch runtime telemetry writers so synthetic symbols cannot leak into `bot_events.jsonl`.
 10. A registered watch whose configured window has not expired at report time is pending and makes the scorecard `partial`.
+11. Runtime metrics include only symbols in the runtime watchlist. Raw and excluded non-watchlist counts remain visible under data quality so historical test contamination is not silently erased.
 
 ## Promotion Gate
 
@@ -43,6 +44,6 @@ A production re-entry policy can be proposed only after the shadow scorecard sho
 
 ## Maximum-History Validation — 2026-07-17
 
-The complete available event log contained 1,382 upstream watch decisions but zero final `suspicious_reentry_shadow` alerts. For 2026-07-16 specifically, the raw funnel contained 41 decisions: 38 rejected by exit score, one rejected by MFE, and two registered. One registered row was synthetic `AAAUSDT` telemetry leaked by a unit test; test isolation is now required by this specification. The real LDO 1h watch was registered at 17:04 local and its eight-bar window expired at 01:04, seven minutes after the original scorecard was generated, so that original report should have been `partial`.
+The complete available event log contained 1,382 raw upstream watch decisions but zero final `suspicious_reentry_shadow` alerts. For 2026-07-16 specifically, the raw funnel contained 41 decisions: 38 rejected by exit score, one rejected by MFE, and two registered. One registered row was synthetic `AAAUSDT` telemetry leaked by a unit test. After watchlist validation, the operational funnel is 40 decisions with one real registration. Test isolation and explicit non-watchlist filtering are now required by this specification. The real LDO 1h watch was registered at 17:04 local and its eight-bar window expired at 01:04, seven minutes after the original scorecard was generated, so that original report should have been `partial`.
 
 Because the live funnel has produced no forward-label candidates, the evidence does not support a production re-entry change or a threshold relaxation. The scorecard correction is measurement-only; cooldown and entry behavior remain unchanged.
