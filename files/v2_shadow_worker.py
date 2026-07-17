@@ -20,6 +20,14 @@ from v2.shadow_observer import (
     material_transition,
     telegram_eligible,
 )
+from v2.btc_trend_watch import (
+    find_latest_btc_watch_event,
+    find_recent_main_block,
+    format_watch_message,
+    is_btc_early_trend_event,
+    mark_sent,
+    was_sent,
+)
 
 
 log = logging.getLogger("v2_shadow_worker")
@@ -30,6 +38,8 @@ TRACE_FILE = ROOT / "v2_shadow_decisions.jsonl"
 STATE_FILE = RUNTIME / "v2_shadow_state.json"
 STATUS_FILE = RUNTIME / "v2_shadow_status.json"
 CHAT_IDS_FILE = ROOT / ".chat_ids"
+BOT_EVENTS_FILE = ROOT / "bot_events.jsonl"
+BTC_WATCH_STATE_FILE = RUNTIME / "btc_early_trend_watch_state.json"
 BAR_MS = {"15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000}
 
 
@@ -103,6 +113,63 @@ async def _send_shadow_alert(session: aiohttp.ClientSession, event: dict) -> Non
             log.warning("v2 shadow telegram failed for %s: %s", chat_id, exc)
 
 
+async def _send_btc_trend_watch(
+    session: aiohttp.ClientSession,
+    event: dict,
+    main_block: dict,
+) -> bool:
+    token = getattr(config, "TELEGRAM_BOT_TOKEN", "")
+    if not token or not bool(getattr(config, "V2_BTC_TREND_WATCH_TELEGRAM_ENABLED", False)):
+        return False
+    chat_ids = _load_chat_ids()
+    if not chat_ids:
+        return False
+    text = format_watch_message(event, main_block)
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    sent = False
+    for chat_id in chat_ids:
+        try:
+            async with session.post(url, json={"chat_id": chat_id, "text": text}, timeout=12) as resp:
+                resp.raise_for_status()
+                await resp.text()
+                sent = True
+        except Exception as exc:
+            log.warning("BTC early-trend WATCH telegram failed for %s: %s", chat_id, exc)
+    return sent
+
+
+async def _maybe_send_btc_trend_watch(session: aiohttp.ClientSession, event: dict) -> bool:
+    if not bool(getattr(config, "V2_BTC_TREND_WATCH_TELEGRAM_ENABLED", False)):
+        return False
+    if not is_btc_early_trend_event(event) or was_sent(BTC_WATCH_STATE_FILE, event):
+        return False
+    main_block = find_recent_main_block(
+        BOT_EVENTS_FILE,
+        signal_ts=event.get("ts"),
+        lookback_minutes=int(getattr(config, "V2_BTC_TREND_WATCH_V1_LOOKBACK_MINUTES", 30)),
+        min_candidate_score=float(getattr(config, "V2_BTC_TREND_WATCH_MIN_RAW_SCORE", 60.0)),
+        max_bytes=int(getattr(config, "V2_BTC_TREND_WATCH_MAIN_EVENT_TAIL_BYTES", 4_000_000)),
+    )
+    if main_block is None:
+        return False
+    if not await _send_btc_trend_watch(session, event, main_block):
+        return False
+    mark_sent(BTC_WATCH_STATE_FILE, event, sent_at=_now())
+    return True
+
+
+async def _catch_up_btc_trend_watch(session: aiohttp.ClientSession) -> bool:
+    event = find_latest_btc_watch_event(
+        EVENTS_FILE,
+        now=datetime.now(timezone.utc),
+        max_age_minutes=int(getattr(config, "V2_BTC_TREND_WATCH_CATCHUP_MINUTES", 90)),
+        max_bytes=int(getattr(config, "V2_BTC_TREND_WATCH_V2_EVENT_TAIL_BYTES", 1_000_000)),
+    )
+    if event is None:
+        return False
+    return await _maybe_send_btc_trend_watch(session, event)
+
+
 def _cycle_snapshot(
     *,
     started_at: str,
@@ -164,6 +231,7 @@ async def run_once() -> dict:
         ),
     )
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=max(30, scan_timeout_sec + 5))) as session:
+        await _catch_up_btc_trend_watch(session)
         for sym in config.load_watchlist():
             for tf in config.TIMEFRAMES:
                 try:
@@ -262,6 +330,7 @@ async def _scan_symbol_tf(session: aiohttp.ClientSession, state: dict, sym: str,
     emitted = 0
     if changed:
         append_shadow_event(EVENTS_FILE, event)
+        await _maybe_send_btc_trend_watch(session, event)
         if telegram_eligible(previous, decision):
             await _send_shadow_alert(session, event)
         emitted = 1

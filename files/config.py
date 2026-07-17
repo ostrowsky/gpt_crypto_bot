@@ -608,6 +608,14 @@ SUSPICIOUS_REENTRY_SCORECARD_TELEGRAM_ENABLED: bool = True
 V2_SHADOW_REALTIME_TELEGRAM_ENABLED: bool = False
 V2_SHADOW_SCAN_TIMEOUT_SEC: int = 20
 V2_SHADOW_STATUS_EVERY_SCANS: int = 10
+# Replay-validated operator WATCH for the narrow BTC 15m V2/V1 conjunction.
+# This does not generate a BUY and does not enable general V2 realtime alerts.
+V2_BTC_TREND_WATCH_TELEGRAM_ENABLED: bool = True
+V2_BTC_TREND_WATCH_MIN_RAW_SCORE: float = 60.0
+V2_BTC_TREND_WATCH_V1_LOOKBACK_MINUTES: int = 30
+V2_BTC_TREND_WATCH_CATCHUP_MINUTES: int = 90
+V2_BTC_TREND_WATCH_MAIN_EVENT_TAIL_BYTES: int = 4_000_000
+V2_BTC_TREND_WATCH_V2_EVENT_TAIL_BYTES: int = 1_000_000
 
 # Daily operator learning-progress report. Runs after final previous-day
 # top-gainer and signal-quality reports have landed. Reporting only.

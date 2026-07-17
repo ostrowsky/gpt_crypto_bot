@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-07-14 20:00 Europe/Budapest
+Last updated: 2026-07-17 20:15 Europe/Budapest
 
 ## Objective
 
@@ -30,6 +30,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | 1m wake-up scout | shipped shadow-assisted | `SCOUT_OPTIMIZATION_SPEC.md` | `wakeups`, `admitted`, `buy_conversion`, `top_mover_conversion` | live funnel review |
 | Early trend-start mode | replay-only research, first profile rejected | `docs/specs/trend-start-mode.md` | `capture_rate`, `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `trade_precision`, `PnL` | next narrower replay profile |
 | Multi-day regime-start watch | shipped shadow-only; WATCH rejected | `docs/specs/regime-start-watch.md` | holdout useful precision, 5d return/MFE/MAE, alerts per active day, POL detection time | collect independent shadow labels; Telegram remains disabled |
+| BTC early trend WATCH | shipped operator WATCH; no BUY change | `docs/specs/btc-early-trend-watch.md` | 6h/12h return stability, positive rate, alert deduplication | monitor forward WATCH labels; keep broad V2 realtime disabled |
 | Agent entry quality gates | shipped | `docs/specs/agent-entry-quality.md` | `trade_precision`, `false_positive_buys`, `blocked_winners` | replay before any relaxation |
 | Local control-plane reliability | shipped | `docs/specs/local-control-plane-reliability.md` | process health, duplicate-launch avoidance | keep operational-only |
 | Telegram positions freshness | shipped operational fix | `docs/specs/telegram-positions-freshness.md` | operator display correctness, stale-position avoidance | keep cache fallback-only |
