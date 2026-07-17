@@ -1,6 +1,6 @@
 ﻿# V2 Daily Scorecard
 
-Last updated: 2026-05-27
+Last updated: 2026-07-17
 
 ## Problem
 
@@ -26,6 +26,9 @@ The scorecard must report:
 - V2-to-V1 handoff among top movers, meaning V2 saw upside and V1 actually bought;
 - false-favorable pressure, meaning V2 upside symbols not present in same-day top movers;
 - day-over-day and 7d-vs-previous-7d deltas.
+- explicit primary-denominator metadata plus a separately labeled watchlist-relative diagnostic;
+- causal V2-to-V1 handoff, where the first same-day V2 upside event must precede the first V1 BUY;
+- event-stream coverage gaps and incomplete calendar windows.
 
 ## Out Of Scope
 
@@ -38,9 +41,15 @@ The scorecard must report:
 
 - `v2_top_recall_pct`: share of same-day watchlist top movers seen by V2 as `emerging_move` or `confirmed_trend`.
 - `v2_top_precision_pct`: share of V2 upside symbols that became same-day watchlist top movers.
-- `v2_confirmation_ratio`: confirmed trend events divided by V2 upside events.
-- `v2_handoff_bought_pct`: share of top movers with V2 upside that V1 bought.
+- `v2_confirmation_ratio`: `confirmed_trend` events divided by `emerging_move + confirmed_trend` events, matching the V2 daily summary.
+- `v2_handoff_bought_pct`: share of top movers with V2 upside whose first V1 BUY happened at or after the first same-day V2 upside event.
 - `v2_false_favorable_symbols`: V2 upside symbols absent from same-day watchlist top movers.
+
+The primary top-mover denominator remains `exchange Top-N ∩ watchlist`, as defined by the watchlist-filtered denominator spec. `watchlist_universe_top_gainers` is reported only as a diagnostic and must not replace the primary metric.
+
+Rates with a zero denominator are `null` / `n/a`, not zero. Day-over-day means the immediately preceding calendar day. Week-over-week means the exact target-day-minus-6 through target-day window versus the preceding seven calendar days; a window is not compared unless all seven days have complete coverage.
+
+For the V2 transition stream, any start, internal, or end-of-day gap above 90 minutes marks the day `partial`. The threshold was selected from the maximum available joined history: complete-looking days had maximum gaps at or below 52.2 minutes, while the next observed gap was 123.4 minutes.
 
 ## Acceptance Criteria
 
@@ -49,10 +58,25 @@ The scorecard must report:
 - Text output includes day-over-day and week-over-week progress.
 - RL worker sends the scorecard text instead of the old count-only V2 summary when daily V2 Telegram is enabled.
 - Unit tests cover objective joins and progress deltas.
+- Unit tests cover causal ordering, zero denominators, coverage gaps, and fixed calendar windows.
 
 ## Risk / Trade-offs
 
 The precision denominator is limited to the day’s top-mover report, not a full tradable-universe outcome table. Therefore false-favorable pressure is a diagnostic pressure metric, not a final PnL claim. This is acceptable because the scorecard is explicitly research-only.
+
+Tiny primary denominators must be flagged in operator text. A `1/1` result is valid arithmetic but is not sufficient promotion evidence.
+
+## Maximum-History Validation — 2026-07-17
+
+The corrected measurement was replayed over all 39 days with both V2 events and final top-gainer outcomes. The 90-minute continuity gate retained 27 complete days and marked 12 partial. Across complete days:
+
+- primary micro recall: 100.0%;
+- primary micro precision: 3.16%;
+- causal V2-to-V1 handoff: 84.0%;
+- watchlist-relative diagnostic recall: 97.14%;
+- watchlist-relative diagnostic causal handoff: 54.55%.
+
+The replay supports the measurement correction but does not support promoting V2 into production BUY. Trading gates remain unchanged.
 
 ## Verification Gate
 

@@ -24,10 +24,21 @@ class TestV2DailyScorecard(unittest.TestCase):
             ]
             events.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
             top = {
+                "phase": "final",
                 "target_day_local": "2026-05-26",
+                "summary": {
+                    "exchange_top_count": 20,
+                    "exchange_top_in_watchlist": 2,
+                    "watchlist_top_denominator": "exchange_top_filtered_to_watchlist",
+                },
                 "watchlist_top_gainers": [
-                    {"symbol": "AAAUSDT", "status": "bought"},
+                    {"symbol": "AAAUSDT", "status": "bought", "first_entry_time": "11:00"},
                     {"symbol": "BBBUSDT", "status": "missed"},
+                ],
+                "watchlist_universe_top_gainers": [
+                    {"symbol": "AAAUSDT", "status": "bought", "first_entry_time": "11:00"},
+                    {"symbol": "BBBUSDT", "status": "missed"},
+                    {"symbol": "CCCUSDT", "status": "missed"},
                 ],
             }
             (reports / "top_gainer_critic_2026-05-26_final.json").write_text(json.dumps(top), encoding="utf-8")
@@ -38,6 +49,7 @@ class TestV2DailyScorecard(unittest.TestCase):
                 reports_dir=reports,
                 output_json=root / "out.json",
                 output_txt=root / "out.txt",
+                max_coverage_gap_minutes=None,
             )
 
         latest = payload["latest"]
@@ -49,6 +61,9 @@ class TestV2DailyScorecard(unittest.TestCase):
         self.assertEqual(latest["v2_top_recall_pct"], 50.0)
         self.assertEqual(latest["v2_top_precision_pct"], 50.0)
         self.assertEqual(latest["v2_handoff_bought_pct"], 100.0)
+        self.assertEqual(latest["exchange_top_count"], 20)
+        self.assertEqual(latest["watchlist_universe_top_count"], 3)
+        self.assertEqual(latest["watchlist_universe_top_with_v2_upside"], 2)
         self.assertIn("BBBUSDT", latest["top_symbols_missed_by_v2"])
 
     def test_progress_has_day_and_week_deltas(self) -> None:
@@ -69,7 +84,7 @@ class TestV2DailyScorecard(unittest.TestCase):
                 top = {
                     "target_day_local": date_s,
                     "watchlist_top_gainers": [
-                        {"symbol": "AAAUSDT", "status": "bought"},
+                        {"symbol": "AAAUSDT", "status": "bought", "first_entry_time": "11:00"},
                         {"symbol": "BBBUSDT", "status": "missed"},
                     ],
                 }
@@ -82,6 +97,7 @@ class TestV2DailyScorecard(unittest.TestCase):
                 reports_dir=reports,
                 output_json=root / "out.json",
                 output_txt=root / "out.txt",
+                max_coverage_gap_minutes=None,
             )
 
         dod = payload["progress"]["day_over_day"]["v2_top_recall_pct"]
@@ -89,6 +105,8 @@ class TestV2DailyScorecard(unittest.TestCase):
         self.assertEqual(dod["previous"], 50.0)
         self.assertEqual(dod["current"], 100.0)
         self.assertIsNotNone(wow["v2_top_recall_pct"]["current"])
+        self.assertEqual(wow["v2_top_recall_pct"]["current_support_n"], 7)
+        self.assertEqual(wow["v2_top_recall_pct"]["previous_support_n"], 7)
         self.assertIn("День ко дню", mod.render_text(payload))
 
     def test_missing_outcome_report_is_partial(self) -> None:
@@ -104,9 +122,153 @@ class TestV2DailyScorecard(unittest.TestCase):
                 reports_dir=root / "reports",
                 output_json=root / "out.json",
                 output_txt=root / "out.txt",
+                max_coverage_gap_minutes=None,
             )
         self.assertEqual(payload["status"], "partial")
         self.assertIn("missing top-gainer outcome report", payload["coverage_reasons"])
+
+    def test_handoff_requires_v2_upside_before_buy(self) -> None:
+        import report_v2_daily_scorecard as mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            reports = root / "reports"
+            reports.mkdir()
+            events.write_text(
+                json.dumps({"ts": "2026-05-26T08:00:00Z", "sym": "AAAUSDT", "state": "emerging_move"}),
+                encoding="utf-8",
+            )
+            top = {
+                "phase": "final",
+                "watchlist_top_gainers": [
+                    {"symbol": "AAAUSDT", "status": "bought", "first_entry_time": "09:30"},
+                ],
+            }
+            (reports / "top_gainer_critic_2026-05-26_final.json").write_text(json.dumps(top), encoding="utf-8")
+            payload = mod.build_scorecard(
+                date(2026, 5, 26),
+                events_file=events,
+                reports_dir=reports,
+                output_json=root / "out.json",
+                output_txt=root / "out.txt",
+                max_coverage_gap_minutes=None,
+            )
+
+        latest = payload["latest"]
+        self.assertEqual(latest["top_with_v2_upside"], 1)
+        self.assertEqual(latest["top_with_v2_upside_bought"], 0)
+        self.assertEqual(latest["top_bought_before_v2_upside"], 1)
+        self.assertEqual(latest["v2_handoff_bought_pct"], 0.0)
+
+    def test_large_v2_event_gap_marks_day_partial(self) -> None:
+        import report_v2_daily_scorecard as mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            reports = root / "reports"
+            reports.mkdir()
+            events.write_text(
+                "\n".join(
+                    json.dumps(row)
+                    for row in [
+                        {"ts": "2026-05-25T22:05:00Z", "sym": "AAAUSDT", "state": "noise"},
+                        {"ts": "2026-05-26T02:00:00Z", "sym": "AAAUSDT", "state": "emerging_move"},
+                        {"ts": "2026-05-26T21:55:00Z", "sym": "AAAUSDT", "state": "noise"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (reports / "top_gainer_critic_2026-05-26_final.json").write_text(
+                json.dumps({"phase": "final", "watchlist_top_gainers": []}),
+                encoding="utf-8",
+            )
+            payload = mod.build_scorecard(
+                date(2026, 5, 26),
+                events_file=events,
+                reports_dir=reports,
+                output_json=root / "out.json",
+                output_txt=root / "out.txt",
+            )
+
+        self.assertEqual(payload["status"], "partial")
+        self.assertTrue(any("v2 event gap" in reason for reason in payload["coverage_reasons"]))
+
+    def test_zero_top_denominator_is_not_available(self) -> None:
+        import report_v2_daily_scorecard as mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            reports = root / "reports"
+            reports.mkdir()
+            events.write_text(
+                json.dumps({"ts": "2026-05-26T08:00:00Z", "sym": "AAAUSDT", "state": "emerging_move"}),
+                encoding="utf-8",
+            )
+            (reports / "top_gainer_critic_2026-05-26_final.json").write_text(
+                json.dumps({"phase": "final", "watchlist_top_gainers": []}),
+                encoding="utf-8",
+            )
+            payload = mod.build_scorecard(
+                date(2026, 5, 26),
+                events_file=events,
+                reports_dir=reports,
+                output_json=root / "out.json",
+                output_txt=root / "out.txt",
+                max_coverage_gap_minutes=None,
+            )
+
+        self.assertIsNone(payload["latest"]["v2_top_recall_pct"])
+        self.assertIsNone(payload["latest"]["v2_handoff_bought_pct"])
+
+    def test_confirmation_ratio_excludes_mature_state(self) -> None:
+        import report_v2_daily_scorecard as mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            reports = root / "reports"
+            reports.mkdir()
+            events.write_text(
+                "\n".join(
+                    json.dumps(row)
+                    for row in [
+                        {"ts": "2026-05-26T08:00:00Z", "sym": "AAAUSDT", "state": "emerging_move"},
+                        {"ts": "2026-05-26T08:15:00Z", "sym": "AAAUSDT", "state": "confirmed_trend"},
+                        {"ts": "2026-05-26T08:30:00Z", "sym": "BBBUSDT", "state": "mature_trend"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (reports / "top_gainer_critic_2026-05-26_final.json").write_text(
+                json.dumps(
+                    {
+                        "phase": "final",
+                        "watchlist_top_gainers": [
+                            {"symbol": "AAAUSDT", "status": "missed"},
+                            {"symbol": "BBBUSDT", "status": "missed"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            payload = mod.build_scorecard(
+                date(2026, 5, 26),
+                events_file=events,
+                reports_dir=reports,
+                output_json=root / "out.json",
+                output_txt=root / "out.txt",
+                max_coverage_gap_minutes=None,
+            )
+
+        latest = payload["latest"]
+        self.assertEqual(latest["upside_events"], 2)
+        self.assertEqual(latest["confirmed_events"], 1)
+        self.assertEqual(latest["confirmation_ratio"], 0.5)
+        self.assertEqual(latest["unique_upside_symbols"], 1)
+        self.assertIn("BBBUSDT", latest["top_symbols_missed_by_v2"])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import math
 import statistics
 import urllib.parse
 import urllib.request
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -58,12 +59,19 @@ def build_scorecard(
     kline_loader: Callable[[str, str, int, int], list[list[Any]]] | None = None,
     now_utc: datetime | None = None,
 ) -> dict[str, Any]:
-    rows = _load_shadow_events(events_file, target_day, timezone_name)
+    rows, watch_decisions = _load_day_events(events_file, target_day, timezone_name)
     labeled = [
         _label_event(row, kline_loader=kline_loader, now_utc=now_utc)
         for row in rows
     ]
-    payload = _payload(target_day, timezone_name, labeled, events_file=events_file)
+    payload = _payload(
+        target_day,
+        timezone_name,
+        labeled,
+        watch_decisions=watch_decisions,
+        events_file=events_file,
+        now_utc=now_utc,
+    )
     text = render_text(payload)
     if save:
         output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +102,11 @@ def render_text(scorecard: dict[str, Any]) -> str:
         "",
         "Главное:",
         f"  • shadow re-entry alerts: {summary.get('alerts_total', 0)}; labeled T+5: {summary.get('labeled_ret5', 0)}.",
+        f"  • upstream watch funnel: total={summary.get('watch_decisions_total', 0)}; "
+        f"registered={summary.get('watch_registered', 0)}; rejected exit score={summary.get('watch_rejected_exit_score', 0)}; "
+        f"rejected MFE={summary.get('watch_rejected_mfe', 0)}.",
+        f"  • same-day alert/registered pressure: {_fmt_pct(summary.get('same_day_alert_per_registered_ratio'))}; "
+        f"pending watch windows={summary.get('watch_pending', 0)}.",
         f"  • ret5 avg/median: {_fmt(summary.get('avg_ret5'))} / {_fmt(summary.get('median_ret5'))}; positive={_fmt_pct(summary.get('ret5_positive_rate'))}.",
         f"  • ret10 avg/median: {_fmt(summary.get('avg_ret10'))} / {_fmt(summary.get('median_ret10'))}; downside p50={_fmt(summary.get('median_drawdown10'))}.",
         f"  • exit context: avg exit pnl={_fmt(summary.get('avg_exit_pnl_pct'))}; avg prior MFE={_fmt(summary.get('avg_mfe_pct'))}.",
@@ -114,7 +127,15 @@ def render_text(scorecard: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
-def _payload(target_day: date, timezone_name: str, labeled: list[LabeledShadowReentry], *, events_file: Path) -> dict[str, Any]:
+def _payload(
+    target_day: date,
+    timezone_name: str,
+    labeled: list[LabeledShadowReentry],
+    *,
+    watch_decisions: list[dict[str, Any]],
+    events_file: Path,
+    now_utc: datetime | None,
+) -> dict[str, Any]:
     mature = [x for x in labeled if x.label_status == "labeled"]
     pending = [x for x in labeled if x.label_status == "pending"]
     failed = [x for x in labeled if x.label_status == "missing"]
@@ -123,6 +144,9 @@ def _payload(target_day: date, timezone_name: str, labeled: list[LabeledShadowRe
     ret10 = _vals(x.ret_10 for x in mature)
     drawdown10 = _vals(x.max_drawdown_10 for x in mature)
     runup10 = _vals(x.max_runup_10 for x in mature)
+    watch_counts = Counter(str(row.get("decision") or "unknown") for row in watch_decisions)
+    watch_registered = int(watch_counts.get("registered", 0))
+    watch_pending = _pending_registered_watch_count(watch_decisions, labeled, now_utc=now_utc)
     coverage_reasons: list[str] = []
     if not events_file.exists():
         coverage_reasons.append("missing bot_events.jsonl")
@@ -130,14 +154,27 @@ def _payload(target_day: date, timezone_name: str, labeled: list[LabeledShadowRe
         coverage_reasons.append(f"pending labels: {len(pending)}")
     if failed:
         coverage_reasons.append(f"missing market data: {len(failed)}")
+    if not labeled and not watch_decisions and events_file.exists():
+        coverage_reasons.append("no re-entry watch decisions or alerts for target day")
+    if watch_pending:
+        coverage_reasons.append(f"pending registered watch windows: {watch_pending}")
     status = "complete" if not coverage_reasons else "partial"
-    if not labeled:
-        status = "complete" if events_file.exists() else "partial"
     summary = {
         "alerts_total": len(labeled),
         "labeled_ret5": len(ret5),
         "pending": len(pending),
         "missing": len(failed),
+        "watch_decisions_total": len(watch_decisions),
+        "watch_registered": watch_registered,
+        "watch_pending": watch_pending,
+        "watch_rejected_exit_score": int(watch_counts.get("rejected_exit_score", 0)),
+        "watch_rejected_mfe": int(watch_counts.get("rejected_mfe", 0)),
+        "watch_other": len(watch_decisions)
+        - watch_registered
+        - int(watch_counts.get("rejected_exit_score", 0))
+        - int(watch_counts.get("rejected_mfe", 0)),
+        "registration_rate": _ratio(watch_registered, len(watch_decisions)),
+        "same_day_alert_per_registered_ratio": _ratio(len(labeled), watch_registered),
         "avg_ret2": _avg(ret2),
         "avg_ret5": _avg(ret5),
         "avg_ret10": _avg(ret10),
@@ -159,34 +196,91 @@ def _payload(target_day: date, timezone_name: str, labeled: list[LabeledShadowRe
         "coverage_reasons": coverage_reasons,
         "summary": summary,
         "rows": [asdict(x) for x in labeled],
+        "watch_funnel": {
+            "decision_counts": dict(sorted(watch_counts.items())),
+            "registered_examples": [
+                {
+                    "sym": str(row.get("sym") or ""),
+                    "tf": str(row.get("tf") or ""),
+                    "ts": str(row.get("ts") or ""),
+                    "exit_score": _float(row.get("exit_score")),
+                    "mfe_pct": _float(row.get("mfe_pct")),
+                }
+                for row in watch_decisions
+                if row.get("decision") == "registered"
+            ][:12],
+        },
         "examples": _examples(mature),
         "interpretation": _interpretation(summary),
         "recommendation": _recommendation(summary, status),
     }
 
 
-def _load_shadow_events(events_file: Path, target_day: date, timezone_name: str) -> list[dict[str, Any]]:
+def _load_day_events(
+    events_file: Path,
+    target_day: date,
+    timezone_name: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not events_file.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in events_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        return [], []
+    alerts: list[dict[str, Any]] = []
+    watch_decisions: list[dict[str, Any]] = []
+    timezone = ZoneInfo(timezone_name)
+    with events_file.open(encoding="utf-8", errors="ignore") as lines:
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            event = str(row.get("event") or "")
+            if event not in {"suspicious_reentry_shadow", "suspicious_reentry_watch_decision"}:
+                continue
+            ts = str(row.get("ts") or "")
+            if not ts:
+                continue
+            try:
+                local_day = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone).date()
+            except Exception:
+                continue
+            if local_day == target_day:
+                if event == "suspicious_reentry_shadow":
+                    alerts.append(row)
+                else:
+                    watch_decisions.append(row)
+    alerts.sort(key=lambda r: str(r.get("ts") or ""))
+    watch_decisions.sort(key=lambda r: str(r.get("ts") or ""))
+    return alerts, watch_decisions
+
+
+def _pending_registered_watch_count(
+    watch_decisions: list[dict[str, Any]],
+    labeled: list[LabeledShadowReentry],
+    *,
+    now_utc: datetime | None,
+) -> int:
+    now = now_utc or datetime.now(timezone.utc)
+    alert_times: dict[str, list[datetime]] = {}
+    for row in labeled:
         try:
-            row = json.loads(line)
+            alert_dt = datetime.fromisoformat(row.ts.replace("Z", "+00:00"))
         except Exception:
             continue
-        if row.get("event") != "suspicious_reentry_shadow":
-            continue
-        ts = str(row.get("ts") or "")
-        if not ts:
+        alert_times.setdefault(row.sym, []).append(alert_dt)
+    pending = 0
+    window_bars = int(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_WINDOW_BARS", 8))
+    for row in watch_decisions:
+        if row.get("decision") != "registered":
             continue
         try:
-            local_day = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(ZoneInfo(timezone_name)).date()
+            registered_at = datetime.fromisoformat(str(row.get("ts") or "").replace("Z", "+00:00"))
         except Exception:
             continue
-        if local_day == target_day:
-            rows.append(row)
-    rows.sort(key=lambda r: str(r.get("ts") or ""))
-    return rows
+        expires_at = registered_at + timedelta(milliseconds=window_bars * _bar_ms(str(row.get("tf") or "15m")))
+        symbol = str(row.get("sym") or "")
+        already_alerted = any(registered_at <= alert_at <= now for alert_at in alert_times.get(symbol, []))
+        if not already_alerted and now < expires_at:
+            pending += 1
+    return pending
 
 
 def _label_event(
@@ -290,7 +384,26 @@ def _examples(rows: list[LabeledShadowReentry]) -> dict[str, list[dict[str, Any]
 def _interpretation(summary: dict[str, Any]) -> str:
     n = int(summary.get("labeled_ret5") or 0)
     if n == 0:
-        return "пока нет mature labels; контур собирает данные, решений принимать нельзя."
+        watch_total = int(summary.get("watch_decisions_total") or 0)
+        registered = int(summary.get("watch_registered") or 0)
+        alerts = int(summary.get("alerts_total") or 0)
+        pending = int(summary.get("watch_pending") or 0)
+        if watch_total == 0:
+            return "нет upstream watch decisions и mature labels; coverage контура за день не доказан."
+        if pending:
+            return (
+                f"upstream работал, но pending registered watch windows: {pending}; "
+                "оценка final confirmation преждевременна."
+            )
+        if registered > 0 and alerts == 0:
+            return (
+                f"upstream работал: {registered}/{watch_total} watch зарегистрировано, "
+                "но ни один не прошёл final candidate confirmation; решений о production принимать нельзя."
+            )
+        return (
+            f"upstream работал, но все {watch_total} решений отклонены до регистрации watch; "
+            "mature labels нет."
+        )
     avg = summary.get("avg_ret5")
     pos = summary.get("ret5_positive_rate")
     if avg is not None and avg > 0.25 and pos is not None and pos >= 0.55:

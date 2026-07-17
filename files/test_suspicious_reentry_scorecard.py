@@ -105,6 +105,105 @@ class SuspiciousReentryScorecardTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["ret5_positive_rate"], 0.0)
             self.assertIn("шум", payload["interpretation"])
 
+    def test_zero_alert_day_exposes_upstream_watch_funnel(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "bot_events.jsonl"
+            rows = [
+                {
+                    "ts": "2026-05-30T08:00:00Z",
+                    "event": "suspicious_reentry_watch_decision",
+                    "sym": "AAAUSDT",
+                    "tf": "15m",
+                    "decision": "rejected_exit_score",
+                    "exit_score": 0.5,
+                    "mfe_pct": 2.0,
+                },
+                {
+                    "ts": "2026-05-30T09:00:00Z",
+                    "event": "suspicious_reentry_watch_decision",
+                    "sym": "BBBUSDT",
+                    "tf": "1h",
+                    "decision": "rejected_mfe",
+                    "exit_score": 0.72,
+                    "mfe_pct": 0.5,
+                },
+                {
+                    "ts": "2026-05-30T10:00:00Z",
+                    "event": "suspicious_reentry_watch_decision",
+                    "sym": "CCCUSDT",
+                    "tf": "15m",
+                    "decision": "registered",
+                    "exit_score": 0.8,
+                    "mfe_pct": 3.0,
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+            payload = scorecard.build_scorecard(
+                date(2026, 5, 30),
+                events_file=path,
+                reports_dir=Path(td),
+                output_json=Path(td) / "latest.json",
+                output_txt=Path(td) / "latest.txt",
+                save=False,
+            )
+
+        summary = payload["summary"]
+        self.assertEqual(payload["status"], "complete")
+        self.assertEqual(summary["alerts_total"], 0)
+        self.assertEqual(summary["watch_decisions_total"], 3)
+        self.assertEqual(summary["watch_registered"], 1)
+        self.assertEqual(summary["watch_rejected_exit_score"], 1)
+        self.assertEqual(summary["watch_rejected_mfe"], 1)
+        self.assertEqual(summary["same_day_alert_per_registered_ratio"], 0.0)
+        self.assertIn("final candidate confirmation", payload["interpretation"])
+
+    def test_open_registered_watch_marks_scorecard_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "bot_events.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "ts": "2026-05-30T10:00:00Z",
+                        "event": "suspicious_reentry_watch_decision",
+                        "sym": "AAAUSDT",
+                        "tf": "15m",
+                        "decision": "registered",
+                        "exit_score": 0.8,
+                        "mfe_pct": 3.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            payload = scorecard.build_scorecard(
+                date(2026, 5, 30),
+                events_file=path,
+                reports_dir=Path(td),
+                output_json=Path(td) / "latest.json",
+                output_txt=Path(td) / "latest.txt",
+                save=False,
+                now_utc=datetime(2026, 5, 30, 10, 30, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(payload["status"], "partial")
+        self.assertEqual(payload["summary"]["watch_pending"], 1)
+        self.assertIn("pending registered watch windows", payload["interpretation"])
+
+    def test_zero_alert_and_zero_watch_day_is_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "bot_events.jsonl"
+            path.write_text("", encoding="utf-8")
+            payload = scorecard.build_scorecard(
+                date(2026, 5, 30),
+                events_file=path,
+                reports_dir=Path(td),
+                output_json=Path(td) / "latest.json",
+                output_txt=Path(td) / "latest.txt",
+                save=False,
+            )
+
+        self.assertEqual(payload["status"], "partial")
+        self.assertTrue(any("no re-entry watch decisions" in reason for reason in payload["coverage_reasons"]))
+
 
 if __name__ == "__main__":
     unittest.main()

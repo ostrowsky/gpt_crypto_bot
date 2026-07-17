@@ -1,5 +1,7 @@
 ﻿import unittest
 
+from unittest.mock import patch
+
 import config
 import monitor
 from monitor import (
@@ -13,6 +15,12 @@ from monitor import (
 
 class SuspiciousReentryShadowTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._log_patchers = [
+            patch.object(monitor.botlog, "log_observable_tail_shadow_candidate"),
+            patch.object(monitor.botlog, "log_suspicious_reentry_watch_decision"),
+        ]
+        for patcher in self._log_patchers:
+            patcher.start()
         self._old = {
             "SUSPICIOUS_REENTRY_SHADOW_ENABLED": getattr(config, "SUSPICIOUS_REENTRY_SHADOW_ENABLED", None),
             "SUSPICIOUS_REENTRY_SHADOW_EXIT_SCORE_MIN": getattr(config, "SUSPICIOUS_REENTRY_SHADOW_EXIT_SCORE_MIN", None),
@@ -37,6 +45,8 @@ class SuspiciousReentryShadowTests(unittest.TestCase):
                     pass
             else:
                 setattr(config, name, value)
+        for patcher in reversed(self._log_patchers):
+            patcher.stop()
 
     def test_exit_score_marks_high_mfe_weak_exit_as_suspicious(self) -> None:
         score = _suspicious_reentry_exit_score(
