@@ -428,9 +428,9 @@ AGENT_MAX_POSITIONS_PER_GROUP: int = 2
 AGENT_REPLACEMENT_ENABLED: bool = True
 AGENT_REPLACEMENT_MIN_LEADER_DELTA: float = 0.0
 AGENT_MAX_REPLACEMENTS_PER_CYCLE: int = 10
-# Replay-confirmed replacement policy candidate. Default OFF: live behavior is
-# unchanged until shadow logs prove it does not block rare winners.
-AGENT_REPLACEMENT_BLOCK_NON_LOSING_ENABLED: bool = False
+# Replay- and shadow-confirmed replacement guard. A non-losing position is not
+# rotated out for another candidate; losing positions remain replaceable.
+AGENT_REPLACEMENT_BLOCK_NON_LOSING_ENABLED: bool = True
 AGENT_REPLACEMENT_BLOCK_NON_LOSING_SHADOW: bool = True
 
 # 4h context is not an entry trigger. It only adjusts ranking/leader score for

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+import config
 from market_signal_agent import AgentPosition, _replacement_block_non_losing_context
 
 
@@ -24,6 +25,10 @@ def _pos(*, mark_price: float, leader_score: float = 20.0) -> AgentPosition:
 
 
 class MarketSignalAgentReplacementPolicyTest(unittest.TestCase):
+    def test_replay_validated_guard_is_enabled_by_default(self) -> None:
+        self.assertTrue(config.AGENT_REPLACEMENT_BLOCK_NON_LOSING_ENABLED)
+        self.assertTrue(config.AGENT_REPLACEMENT_BLOCK_NON_LOSING_SHADOW)
+
     def test_block_non_losing_context_blocks_non_losing_position(self) -> None:
         ctx = _replacement_block_non_losing_context(
             {"symbol": "NEWUSDT", "tf": "15m", "mode": "trend", "leader_score": 35.0},

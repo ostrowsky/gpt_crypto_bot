@@ -101,6 +101,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Signal-quality feedback policy | shipped narrow auto-apply | `files/signal_quality_feedback.py` | `cooldown_harm`, replay-confirmed quality deltas | keep auto-apply limited to replay-confirmed cooldown |
 | Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
+| Agent non-losing replacement guard | shipped replay-validated | `docs/specs/portfolio-replacement-behavior-replay.md` | replacement uplift, Top-20 capture, precision, harmed replacements | monitor post-deploy shadow events; do not broaden the guard |
 | Unified portfolio replacement | planned | `SCOUT_OPTIMIZATION_SPEC.md` | opportunity cost, replacement uplift, capture under `10/10` | replay grid required |
 | GitHub-inspired portfolio controls | research-only replay harness | `docs/specs/github-inspired-portfolio-controls.md` | `pnl_total`, `trade_precision`, `capture_rate`, `exit_efficiency`, `giveback_pct` | 30d regime split before any live adoption |
 | BTC benchmark admission | research-only complete; not promoted | `docs/specs/btc-benchmark-admission-replay.md` | net PnL, BTC PnL, bypass admissions, holdout stability | collect four more frozen-profile rotation cases; no live change |
