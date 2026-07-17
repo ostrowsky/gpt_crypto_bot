@@ -196,7 +196,9 @@ BULL_DAY_RSI_HI:    float = 75.0  # RSI_BUY_HI РїСЂРё Р±С‹С‡СЊР
 ADX_SMA_BYPASS: float = 35.0  # ADX в‰Ґ СЌС‚РѕРіРѕ в†’ РїР»Р°С‚Рѕ СЃРёР»СЊРЅРѕРіРѕ С‚СЂРµРЅРґР°, bypass
 
 # в”Ђв”Ђ Рџ3: Cooldown (СѓР¶Рµ РёСЃРїРѕР»СЊР·РѕРІР°Р»СЃСЏ С‡РµСЂРµР· getattr) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-COOLDOWN_BARS: int = 8  # Р±Р°СЂРѕРІ С‚РёС€РёРЅС‹ РїРѕСЃР»Рµ РІС‹С…РѕРґР° (8 Г— 15m = 2 С‡Р°СЃР°)
+# Revalidated on 30d + fresh 14d portfolio replay (2026-07-17). Keep the
+# market-agent cross-layer cooldown separate until that path is replayed.
+COOLDOWN_BARS: int = 2  # 2 x 15m = 30 minutes after an exit
 AGENT_RESPECT_MAIN_EXIT_COOLDOWN: bool = True
 AGENT_MAIN_EXIT_COOLDOWN_BARS: int = 8  # agent must not re-enter right after main bot SELL
 

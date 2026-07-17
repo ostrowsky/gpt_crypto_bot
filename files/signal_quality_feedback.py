@@ -69,18 +69,27 @@ def feedback_path() -> Path:
     return (ROOT / raw).resolve()
 
 
-def _cooldown_validation_improves(validation: dict[str, Any]) -> bool:
-    if str(validation.get("status") or "") != "replay_confirmed":
-        return False
-    baseline = validation.get("baseline") or {}
-    variant = validation.get("variant") or {}
+def _cooldown_comparison_improves(comparison: dict[str, Any]) -> bool:
+    baseline = comparison.get("baseline") or {}
+    variant = comparison.get("variant") or {}
     pnl_ok = _safe_float(variant.get("pnl_total")) > _safe_float(baseline.get("pnl_total"))
     avg_ok = _safe_float(variant.get("pnl_avg")) >= _safe_float(baseline.get("pnl_avg"))
     win_ok = _safe_float(variant.get("win_rate")) >= _safe_float(baseline.get("win_rate"))
     precision_ok = _safe_float(variant.get("trade_precision")) >= _safe_float(baseline.get("trade_precision"))
-    recall_ok = _safe_float(variant.get("top15_recall")) >= _safe_float(baseline.get("top15_recall"))
+    baseline_recall = baseline.get("top20_recall", baseline.get("top15_recall", baseline.get("capture_rate")))
+    variant_recall = variant.get("top20_recall", variant.get("top15_recall", variant.get("capture_rate")))
+    recall_ok = _safe_float(variant_recall) >= _safe_float(baseline_recall)
     harm_ok = _safe_float(variant.get("cooldown_harm_pct")) < _safe_float(baseline.get("cooldown_harm_pct"))
     return pnl_ok and avg_ok and win_ok and precision_ok and recall_ok and harm_ok
+
+
+def _cooldown_validation_improves(validation: dict[str, Any]) -> bool:
+    if str(validation.get("status") or "") != "replay_confirmed":
+        return False
+    if not _cooldown_comparison_improves(validation):
+        return False
+    stability = validation.get("stability")
+    return not isinstance(stability, dict) or _cooldown_comparison_improves(stability)
 
 
 def build_feedback(report: dict[str, Any], *, report_path: str = "") -> dict[str, Any]:
@@ -127,26 +136,47 @@ def build_feedback(report: dict[str, Any], *, report_path: str = "") -> dict[str
 
     cooldown_validation = {
         "status": "replay_confirmed",
-        "window": "7d ending 2026-05-06",
+        "window": "30d ending 2026-07-17",
         "baseline": {
             "cooldown_bars": 8,
-            "pnl_total": 8.7857,
-            "pnl_avg": 0.0446,
-            "win_rate": 0.4315,
-            "trade_precision": 0.3401,
-            "top15_recall": 1.0,
-            "cooldown_harm_pct": 78.4354,
+            "pnl_total": -294.0253,
+            "pnl_avg": -0.2121,
+            "win_rate": 0.3709,
+            "trade_precision": 0.2778,
+            "top20_recall": 1.0,
+            "cooldown_harm_pct": 1896.7100,
         },
         "variant": {
             "cooldown_bars": 2,
-            "pnl_total": 15.8008,
-            "pnl_avg": 0.0728,
-            "win_rate": 0.4378,
-            "trade_precision": 0.3641,
-            "top15_recall": 1.0,
-            "cooldown_harm_pct": 50.6918,
+            "pnl_total": -180.7267,
+            "pnl_avg": -0.1137,
+            "win_rate": 0.3814,
+            "trade_precision": 0.2914,
+            "top20_recall": 1.0,
+            "cooldown_harm_pct": 646.1536,
         },
-        "report": ".runtime/reports/feedback_policy_hypothesis_sweep_7d_20260506.json",
+        "stability": {
+            "window": "14d ending 2026-07-17",
+            "baseline": {
+                "cooldown_bars": 8,
+                "pnl_total": -149.8721,
+                "pnl_avg": -0.2316,
+                "win_rate": 0.3709,
+                "trade_precision": 0.3385,
+                "top20_recall": 1.0,
+                "cooldown_harm_pct": 863.6801,
+            },
+            "variant": {
+                "cooldown_bars": 2,
+                "pnl_total": -87.2356,
+                "pnl_avg": -0.1180,
+                "win_rate": 0.3884,
+                "trade_precision": 0.3613,
+                "top20_recall": 1.0,
+                "cooldown_harm_pct": 293.3765,
+            },
+        },
+        "report": "docs/specs/cooldown-relaxation-replay.md",
     }
     cooldown_replay_confirmed = _cooldown_validation_improves(cooldown_validation)
 
