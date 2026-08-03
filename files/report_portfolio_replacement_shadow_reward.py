@@ -9,6 +9,8 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
+import research_artifact_provenance as artifact_provenance
+
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ROOT / "files"
 REPORTS = ROOT / ".runtime" / "reports"
@@ -51,6 +53,15 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
         "top_positive": sorted(closed, key=lambda r: r.get("replacement_delta_pct") or 0.0, reverse=True)[:12],
         "top_negative": sorted(closed, key=lambda r: r.get("replacement_delta_pct") or 0.0)[:12],
         "decision": "",
+        "provenance": artifact_provenance.build_provenance(
+            builder="portfolio_replacement_shadow_reward_v1",
+            research_config=cfg,
+            input_paths=[
+                files_dir / "bot_events.jsonl",
+                files_dir / "agent_events.jsonl",
+                *([latest_critic] if (latest_critic := artifact_provenance.latest_path(reports_dir, "top_gainer_critic_*_final.json")) else []),
+            ],
+        ),
     }
     payload["decision"] = _decision(payload["summary"], cfg)
     text = render_text(payload)

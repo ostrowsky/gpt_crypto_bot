@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import audit_early_block_rescue_event_replay as event_replay
+import research_artifact_provenance as artifact_provenance
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ROOT / "files"
@@ -51,6 +52,15 @@ def build_report(
         "reason_table": table,
         "top_harmful_reasons": [r for r in table if r["decision"] == "advance_to_behavior_replay"][:10],
         "decision": _decision(table),
+        "provenance": artifact_provenance.build_provenance(
+            builder="blocked_winner_causal_reward_v1",
+            research_config=cfg,
+            input_paths=[
+                files_dir / "bot_events.jsonl",
+                files_dir / "agent_events.jsonl",
+                *([latest_critic] if (latest_critic := artifact_provenance.latest_path(reports_dir, "top_gainer_critic_*_final.json")) else []),
+            ],
+        ),
     }
     text = render_text(payload)
     if save:

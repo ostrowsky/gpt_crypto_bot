@@ -139,6 +139,13 @@ TONUSDT gap was a stale local `TRADING` status; Binance reports `BREAK` and the
 series is now an explicit inactive exclusion. The seven-day operational
 acceptance window remains open.
 
+Freshness/provenance checkpoint (2026-08-03): the four decision-bearing cached
+research replays in the morning report now carry builder, live-policy hash,
+research-config hash, generation time, and input watermarks. A stale or
+policy-mismatched artifact is diagnostic-only and cannot produce a current
+relaxation recommendation. Extending this contract to non-decision telemetry
+remains follow-up hardening.
+
 ### P1: refresh the evidence under current production policy
 
 Run every comparison on the maximum available historical period, with

@@ -9,6 +9,7 @@ from statistics import mean, median
 from typing import Any, Callable, Iterable
 
 import replay_trailing_tail_after_partial_exit as tail_replay
+import research_artifact_provenance as artifact_provenance
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORTS = ROOT / ".runtime" / "reports"
@@ -49,6 +50,13 @@ def build_replay(*, reports_dir: Path = REPORTS, cache_dir: Path = CACHE_DIR, cf
         "baseline": _baseline(rows),
         "ranked_selectors": ranked,
         "decision": _decision(ranked),
+        "provenance": artifact_provenance.build_provenance(
+            builder="observable_tail_selector_replay_v1",
+            research_config=cfg,
+            input_paths=[
+                *([latest_signal] if (latest_signal := artifact_provenance.latest_path(reports_dir, "signal_quality_*_final.json")) else []),
+            ],
+        ),
     }
     text = render_text(payload)
     if save:

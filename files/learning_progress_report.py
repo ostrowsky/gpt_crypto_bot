@@ -14,6 +14,7 @@ import report_entry_admission_shadow_reward
 import report_blocked_winner_causal_reward
 import report_portfolio_replacement_shadow_reward
 import replay_observable_tail_selector
+import research_artifact_provenance as artifact_provenance
 
 
 ROOT = Path(__file__).resolve().parent
@@ -24,6 +25,10 @@ FEEDBACK_FILE = WORKSPACE_ROOT / ".runtime" / "signal_quality_feedback.json"
 DEFAULT_OUTPUT_JSON = REPORT_DIR / "learning_progress_latest.json"
 DEFAULT_OUTPUT_TXT = REPORT_DIR / "learning_progress_latest.txt"
 SHADOW_REENTRY_SCORECARD_LATEST = REPORT_DIR / "suspicious_reentry_scorecard_latest.json"
+TAIL_SELECTOR_RESEARCH_CONFIG = replay_observable_tail_selector.ObservableSelectorConfig()
+ENTRY_ADMISSION_RESEARCH_CONFIG = report_entry_admission_shadow_reward.RewardConfig()
+BLOCKER_REWARD_RESEARCH_CONFIG = report_blocked_winner_causal_reward.BlockerRewardConfig()
+PORTFOLIO_REPLACEMENT_RESEARCH_CONFIG = report_portfolio_replacement_shadow_reward.ReplacementConfig()
 
 
 @dataclass(frozen=True)
@@ -585,6 +590,8 @@ def _next_actions(
         actions.append("⏳ Shadow tail selector прошёл replay-gate: собирать daily labels, production SELL не менять.")
     elif tail.get("status") == "failed_gate":
         actions.append("▶️ Shadow tail selector пока не проходит gate: продолжить observable feature search для exit monetization.")
+    elif tail.get("status") == "stale":
+        actions.append("▶️ Пересобрать shadow tail selector с current-policy provenance; stale evidence не использовать для решений.")
     elif tail.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить shadow tail selector report: exit-learning контур неполный.")
     entry = shadow_entry_admission or {}
@@ -592,6 +599,8 @@ def _next_actions(
         actions.append("▶️ Entry admission shadow reward положительный: готовить candle-level behavior replay, BUY не менять.")
     elif entry.get("status") == "no_positive_reward":
         actions.append("⏸️ Entry admission: текущие rescue-гипотезы не дают positive reward; BUY-гейты не расширять.")
+    elif entry.get("status") == "stale":
+        actions.append("▶️ Пересобрать entry admission на текущей policy; stale evidence не расширяет BUY-гейты.")
     elif entry.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить entry admission shadow reward report: admission-learning контур неполный.")
     blocker = blocker_reward or {}
@@ -610,6 +619,8 @@ def _next_actions(
             )
     elif blocker.get("status") == "monitor":
         actions.append("⏸️ Blocker reward: явного вредного blocker-а нет; не расслаблять blockers без targeted replay.")
+    elif blocker.get("status") == "stale":
+        actions.append("▶️ Пересобрать blocker reward на текущей policy; stale evidence не расслабляет blockers.")
     elif blocker.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить blocker reward report: blocker-learning контур неполный.")
     replacement = portfolio_replacement or {}
@@ -621,6 +632,8 @@ def _next_actions(
         actions.append("⚠️ Portfolio replacement выглядит вредным: разобрать rotation outcomes перед любыми новыми заменами.")
     elif replacement.get("status") == "collecting":
         actions.append("⏳ Portfolio replacement: мало закрытых replacement outcomes; продолжить сбор без изменения live rotation.")
+    elif replacement.get("status") == "stale":
+        actions.append("▶️ Пересобрать portfolio replacement на текущей policy; stale evidence не меняет live rotation.")
     elif replacement.get("status") in {"missing", "error"}:
         actions.append("▶️ Починить portfolio replacement report: rotation-learning контур неполный.")
     if not actions:
@@ -629,7 +642,11 @@ def _next_actions(
 
 
 def _build_shadow_tail_selector_summary(reports_dir: Path) -> dict[str, Any]:
-    cached, stale = _load_cached_json_with_staleness(reports_dir / "observable_tail_selector_replay_latest.json")
+    cached, stale = _load_cached_json_with_staleness(
+        reports_dir / "observable_tail_selector_replay_latest.json",
+        expected_builder="observable_tail_selector_replay_v1",
+        expected_research_config=TAIL_SELECTOR_RESEARCH_CONFIG,
+    )
     if cached:
         return _with_cache_staleness(_shadow_tail_selector_summary_from_report(cached), stale)
     try:
@@ -671,12 +688,17 @@ def _shadow_tail_selector_summary_from_report(report: dict[str, Any]) -> dict[st
         "top_selector": top.get("name"),
         "test": test,
         "files": report.get("files") or {},
+        "artifact_freshness": report.get("_artifact_freshness") or {},
     }
 
 
 def _build_shadow_entry_admission_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
-    cached, stale = _load_cached_json_with_staleness(reports_dir / "entry_admission_shadow_reward_latest.json")
+    cached, stale = _load_cached_json_with_staleness(
+        reports_dir / "entry_admission_shadow_reward_latest.json",
+        expected_builder="entry_admission_shadow_reward_v1",
+        expected_research_config=ENTRY_ADMISSION_RESEARCH_CONFIG,
+    )
     if cached:
         return _with_cache_staleness(_shadow_entry_admission_summary_from_report(cached), stale)
     try:
@@ -713,12 +735,17 @@ def _shadow_entry_admission_summary_from_report(report: dict[str, Any]) -> dict[
         "decision": decision,
         "best_variant": best,
         "files": report.get("files") or {},
+        "artifact_freshness": report.get("_artifact_freshness") or {},
     }
 
 
 def _build_blocker_reward_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
-    cached, stale = _load_cached_json_with_staleness(reports_dir / "blocked_winner_causal_reward_latest.json")
+    cached, stale = _load_cached_json_with_staleness(
+        reports_dir / "blocked_winner_causal_reward_latest.json",
+        expected_builder="blocked_winner_causal_reward_v1",
+        expected_research_config=BLOCKER_REWARD_RESEARCH_CONFIG,
+    )
     if cached:
         return _with_cache_staleness(_blocker_reward_summary_from_report(cached), stale)
     try:
@@ -756,12 +783,17 @@ def _blocker_reward_summary_from_report(report: dict[str, Any]) -> dict[str, Any
         "top_reason": top.get("reason_code"),
         "top": top,
         "files": report.get("files") or {},
+        "artifact_freshness": report.get("_artifact_freshness") or {},
     }
 
 
 def _build_portfolio_replacement_summary(reports_dir: Path) -> dict[str, Any]:
     workspace_dir = reports_dir.parent.parent
-    cached, stale = _load_cached_json_with_staleness(reports_dir / "portfolio_replacement_shadow_reward_latest.json")
+    cached, stale = _load_cached_json_with_staleness(
+        reports_dir / "portfolio_replacement_shadow_reward_latest.json",
+        expected_builder="portfolio_replacement_shadow_reward_v1",
+        expected_research_config=PORTFOLIO_REPLACEMENT_RESEARCH_CONFIG,
+    )
     if cached:
         return _with_cache_staleness(_portfolio_replacement_summary_from_report(cached), stale)
     try:
@@ -820,6 +852,7 @@ def _portfolio_replacement_summary_from_report(report: dict[str, Any]) -> dict[s
         "summary": summary,
         "advanced_policy": advanced_policy or {},
         "files": report.get("files") or {},
+        "artifact_freshness": report.get("_artifact_freshness") or {},
     }
 
 
@@ -896,7 +929,13 @@ def _load_fresh_cached_json(path: Path, max_age_hours: float = 36.0) -> dict[str
         return {}
 
 
-def _load_cached_json_with_staleness(path: Path, max_age_hours: float = 36.0) -> tuple[dict[str, Any], bool]:
+def _load_cached_json_with_staleness(
+    path: Path,
+    max_age_hours: float = 36.0,
+    *,
+    expected_builder: str = "",
+    expected_research_config: Any = None,
+) -> tuple[dict[str, Any], bool]:
     """Load cached research artifact without blocking the daily report on recompute.
 
     The morning learning report must be a fast aggregation layer. If an expensive
@@ -906,8 +945,17 @@ def _load_cached_json_with_staleness(path: Path, max_age_hours: float = 36.0) ->
     try:
         if not path.exists():
             return {}, False
-        age_seconds = datetime.now(timezone.utc).timestamp() - path.stat().st_mtime
         data = _load_json(path)
+        if expected_builder:
+            freshness = artifact_provenance.artifact_freshness(
+                data,
+                expected_builder=expected_builder,
+                expected_research_config=expected_research_config,
+                max_age_hours=max_age_hours,
+            )
+            data["_artifact_freshness"] = freshness
+            return data, freshness.get("status") != "fresh"
+        age_seconds = datetime.now(timezone.utc).timestamp() - path.stat().st_mtime
         return data, age_seconds > max_age_hours * 3600
     except Exception:
         return {}, False
@@ -917,9 +965,15 @@ def _with_cache_staleness(summary: dict[str, Any], stale: bool) -> dict[str, Any
     if not stale:
         return summary
     out = dict(summary)
+    out["cached_status"] = out.get("status")
+    out["status"] = "stale"
     out["stale"] = True
+    freshness = out.get("artifact_freshness") or {}
+    reasons = list(freshness.get("reasons") or [])
+    out["stale_reasons"] = reasons
     detail = str(out.get("detail") or "")
-    out["detail"] = f"stale cache; {detail}" if detail else "stale cache"
+    reason_piece = f" ({', '.join(reasons)})" if reasons else ""
+    out["detail"] = f"stale cache{reason_piece}; {detail}" if detail else f"stale cache{reason_piece}"
     return out
 
 

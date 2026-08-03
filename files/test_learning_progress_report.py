@@ -195,6 +195,10 @@ class LearningProgressReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             reports = Path(td)
             (reports / "observable_tail_selector_replay_latest.json").write_text(json.dumps({
+                "provenance": lpr.artifact_provenance.build_provenance(
+                    builder="observable_tail_selector_replay_v1",
+                    research_config=lpr.replay_observable_tail_selector.ObservableSelectorConfig(),
+                ),
                 "decision": "no_selector_passed_observable_shadow_gate",
                 "ranked_selectors": [
                     {
@@ -260,10 +264,31 @@ class LearningProgressReportTest(unittest.TestCase):
             finally:
                 lpr.replay_observable_tail_selector = original
 
-        self.assertEqual(summary["status"], "failed_gate")
+        self.assertEqual(summary["status"], "stale")
+        self.assertEqual(summary["cached_status"], "failed_gate")
         self.assertTrue(summary["stale"])
         self.assertIn("stale cache", summary["detail"])
         self.assertIn("stale_selector", summary["detail"])
+
+    def test_current_mtime_does_not_override_policy_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            reports = Path(td)
+            provenance = lpr.artifact_provenance.build_provenance(
+                builder="observable_tail_selector_replay_v1",
+                research_config=lpr.replay_observable_tail_selector.ObservableSelectorConfig(),
+            )
+            provenance["source_policy_hash"] = "old-policy"
+            (reports / "observable_tail_selector_replay_latest.json").write_text(json.dumps({
+                "provenance": provenance,
+                "decision": "advance_selector_to_shadow_observable_tail_selector",
+                "ranked_selectors": [{"name": "selector", "test": {"n": 20, "avg_delta_pct": 1.0}}],
+            }), encoding="utf-8")
+
+            summary = lpr._build_shadow_tail_selector_summary(reports)
+
+        self.assertEqual(summary["status"], "stale")
+        self.assertEqual(summary["cached_status"], "passed_shadow_gate")
+        self.assertIn("source_policy_hash_mismatch", summary["stale_reasons"])
 
     def test_shadow_entry_admission_summary_and_actions(self) -> None:
         class FakeAdmission:
