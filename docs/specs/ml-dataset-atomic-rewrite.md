@@ -31,6 +31,11 @@ only the rows it saw. On 2026-08-03 this reduced a 257.6 MB dataset to one row.
   timestamp gaps into continuous bars changes its sampling distribution. The
   accepted recovery is the latest validated snapshot plus normal forward
   collection; rejected reconstruction outputs remain runtime-only evidence.
+- The detached RL launcher defaults its main collector off when the Telegram
+  bot owns `ml_dataset.jsonl`; this avoids duplicate full-file label rewrites
+  and cross-process lock starvation. Standalone/headless recovery may opt in
+  explicitly with `-EnableCollector`. Research-universe shadow collection is a
+  separate worker task and remains enabled.
 
 ## Guardrails
 

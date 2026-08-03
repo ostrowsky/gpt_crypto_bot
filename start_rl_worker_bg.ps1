@@ -1,5 +1,6 @@
 param(
-    [switch]$ForceRestart = $true
+    [switch]$ForceRestart = $true,
+    [switch]$EnableCollector = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -119,9 +120,14 @@ Remove-Item $heartbeatFile -Force -ErrorAction SilentlyContinue
 $env:PYTHONNOUSERSITE = "1"
 Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
 
+$wrapperArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $loopScript)
+if ($EnableCollector) {
+    $wrapperArgs += "--enable-collector"
+}
+
 $wrapperProc = Start-Process `
     -FilePath "powershell.exe" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $loopScript, "--enable-collector") `
+    -ArgumentList $wrapperArgs `
     -WindowStyle Hidden `
     -PassThru
 
