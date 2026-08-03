@@ -10,6 +10,7 @@ from statistics import mean, median
 from typing import Any
 
 import research_artifact_provenance as artifact_provenance
+import research_event_cohort_store as cohort_store
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ROOT / "files"
@@ -27,7 +28,8 @@ class ReplacementConfig:
 
 
 def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_json: Path = DEFAULT_OUTPUT_JSON, output_txt: Path = DEFAULT_OUTPUT_TXT, cfg: ReplacementConfig = ReplacementConfig(), save: bool = True) -> dict[str, Any]:
-    events = _load_events(files_dir)
+    cohort_db = reports_dir.parent / "research_event_cohorts.sqlite3"
+    events, cohort_sync = cohort_store.load_trade_events(files_dir=files_dir, db_path=cohort_db)
     labels = _load_watchlist_labels(reports_dir)
     replacements = _replacement_rows(events, labels, cfg)
     closed = [r for r in replacements if r.get("incoming_exit_pnl_pct") is not None]
@@ -36,7 +38,12 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "status": "research_only",
         "config": cfg.__dict__,
-        "coverage": {"events_loaded": len(events), "replacement_events": len(replacements), "closed_incoming": len(closed)},
+        "coverage": {
+            "events_loaded": len(events),
+            "replacement_events": len(replacements),
+            "closed_incoming": len(closed),
+            "cohort_store": cohort_sync,
+        },
         "summary": {
             "replacement_count": len(replacements),
             "closed_incoming_count": len(closed),
@@ -59,6 +66,7 @@ def build_report(files_dir: Path = FILES, reports_dir: Path = REPORTS, output_js
             input_paths=[
                 files_dir / "bot_events.jsonl",
                 files_dir / "agent_events.jsonl",
+                cohort_db,
                 *([latest_critic] if (latest_critic := artifact_provenance.latest_path(reports_dir, "top_gainer_critic_*_final.json")) else []),
             ],
         ),

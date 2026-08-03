@@ -146,6 +146,31 @@ policy-mismatched artifact is diagnostic-only and cannot produce a current
 relaxation recommendation. Extending this contract to non-decision telemetry
 remains follow-up hardening.
 
+Incremental-cohort checkpoint (2026-08-03): entry-admission, blocker-reward,
+and portfolio-replacement research now share a transactional SQLite event
+cohort store. The first sync backfills maximum available history; later runs
+consume only appended log bytes. Compact blocker cohorts replace repeated
+multi-million-row Python groupings. Runtime population completed over 2,373,955
+lines / 746.6 MB; the next sync processed only 40 KB / 103 appended lines in
+1.29 seconds. The store is operational; tail-label caching remains a separate
+performance follow-up.
+
+Exit-selector checkpoint (2026-08-03): `exclude_ema_and_false_cleanup` passed
+both the 76-day maximum-period chronological holdout and the recent 14-day
+stability window. It replaces the rejected `non_ema_mfe150` profile in the
+existing observable-tail collector, shadow-only. Production SELL remains
+unchanged until an independent mature forward cohort passes the promotion
+guardrails.
+
+Current-policy reward checkpoint (2026-08-03): maximum available blocker/event
+history now covers 89 critic days, 1,787,853 blocked events, and 21,203 compact
+cohorts. Entry admission remains rejected (`cooldown_only`: 1 top / 18 false,
+5.3% precision, `-18%` net reward). No blocker passed the harm gate. Portfolio
+replacement is now neutral over 505 closed cases (average delta `+0.043%`,
+median `-0.149%`, positive rate `44.0%`); the best causal filter still has
+`35.77%` regret and is not promotable. No BUY, blocker, or rotation relaxation
+was applied.
+
 ### P1: refresh the evidence under current production policy
 
 Run every comparison on the maximum available historical period, with

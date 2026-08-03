@@ -10,6 +10,7 @@ from typing import Any
 
 import audit_early_block_rescue_event_replay as event_replay
 import research_artifact_provenance as artifact_provenance
+import research_event_cohort_store as cohort_store
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ROOT / "files"
@@ -35,8 +36,12 @@ def build_report(
     save: bool = True,
 ) -> dict[str, Any]:
     labels = event_replay._load_labels(reports_dir)
-    events = event_replay._load_blocked_events(files_dir, labels)
-    entries = event_replay._load_entries(files_dir, labels)
+    cohort_db = reports_dir.parent / "research_event_cohorts.sqlite3"
+    events, entries, cohort_sync = cohort_store.load_replay_inputs(
+        files_dir=files_dir,
+        allowed_days={day for day, _ in labels},
+        db_path=cohort_db,
+    )
     rows = _case_rows(events, entries, labels, cfg)
     table = _reason_table(rows, cfg)
     payload = {
@@ -46,8 +51,10 @@ def build_report(
         "coverage": {
             "label_days": len({day for day, _ in labels}),
             "labeled_day_symbols": len(labels),
-            "blocked_events_loaded": len(events),
+            "blocked_events_loaded": sum(int(row.get("block_count") or 1) for row in events),
+            "blocked_cohorts_loaded": len(events),
             "case_rows": len(rows),
+            "cohort_store": cohort_sync,
         },
         "reason_table": table,
         "top_harmful_reasons": [r for r in table if r["decision"] == "advance_to_behavior_replay"][:10],
@@ -58,6 +65,7 @@ def build_report(
             input_paths=[
                 files_dir / "bot_events.jsonl",
                 files_dir / "agent_events.jsonl",
+                cohort_db,
                 *([latest_critic] if (latest_critic := artifact_provenance.latest_path(reports_dir, "top_gainer_critic_*_final.json")) else []),
             ],
         ),
@@ -108,7 +116,7 @@ def _case_rows(events: list[dict], entries: dict, labels: dict, cfg: BlockerRewa
             "reason_code": reason,
             "first_ts": first.get("ts"),
             "first_hour": first.get("hour"),
-            "block_count": len(evs),
+            "block_count": sum(int(event.get("block_count") or 1) for event in evs),
             "is_top15": bool(label.get("is_top15")),
             "critic_status": label.get("status"),
             "capture_ratio_at_entry": label.get("capture_ratio_at_entry"),

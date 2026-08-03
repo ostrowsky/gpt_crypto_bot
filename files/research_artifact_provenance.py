@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,9 +16,12 @@ POLICY_VERSION = "live-config-v1"
 POLICY_PREFIXES = (
     "AGENT_",
     "COOLDOWN_",
+    "EXIT_",
+    "OBSERVABLE_",
     "OPEN_SIGNAL_",
     "REGIME_START_",
     "SIGNAL_QUALITY_",
+    "SUSPICIOUS_REENTRY_",
     "TOP_GAINER_",
     "UNIFIED_PORTFOLIO_",
 )
@@ -110,8 +114,11 @@ def artifact_freshness(
 
 
 def latest_path(directory: Path, pattern: str) -> Path | None:
-    paths = sorted(directory.glob(pattern))
-    return paths[-1] if paths else None
+    paths = list(directory.glob(pattern))
+    def key(path: Path) -> tuple[str, int, str]:
+        dates = re.findall(r"20\d{2}-\d{2}-\d{2}", path.name)
+        return (max(dates) if dates else "", path.stat().st_mtime_ns, path.name)
+    return max(paths, key=key) if paths else None
 
 
 def _normalize(value: Any) -> Any:

@@ -9,6 +9,7 @@ from typing import Any
 
 import audit_early_block_rescue_event_replay as event_replay
 import research_artifact_provenance as artifact_provenance
+import research_event_cohort_store as cohort_store
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ROOT / "files"
@@ -45,8 +46,12 @@ def build_report(
     save: bool = True,
 ) -> dict[str, Any]:
     labels = event_replay._load_labels(reports_dir)
-    events = event_replay._load_blocked_events(files_dir, labels)
-    entries = event_replay._load_entries(files_dir, labels)
+    cohort_db = reports_dir.parent / "research_event_cohorts.sqlite3"
+    events, entries, cohort_sync = cohort_store.load_replay_inputs(
+        files_dir=files_dir,
+        allowed_days={day for day, _ in labels},
+        db_path=cohort_db,
+    )
     variants = []
     for reason_name, reasons in REASON_SETS.items():
         for max_hour in (2, 4, 6, 8, 12):
@@ -61,8 +66,10 @@ def build_report(
         "coverage": {
             "label_days": len({day for day, _ in labels}),
             "labeled_day_symbols": len(labels),
-            "blocked_events_loaded": len(events),
+            "blocked_events_loaded": sum(int(row.get("block_count") or 1) for row in events),
+            "blocked_cohorts_loaded": len(events),
             "entries_loaded": sum(len(v) for v in entries.values()),
+            "cohort_store": cohort_sync,
         },
         "best_variant": best,
         "top_variants": variants[:20],
@@ -73,6 +80,7 @@ def build_report(
             input_paths=[
                 files_dir / "bot_events.jsonl",
                 files_dir / "agent_events.jsonl",
+                cohort_db,
                 *([latest_critic] if (latest_critic := artifact_provenance.latest_path(reports_dir, "top_gainer_critic_*_final.json")) else []),
             ],
         ),
@@ -122,7 +130,8 @@ def _evaluate(events: list[dict], entries: dict, labels: dict, reason_name: str,
         grouped.setdefault((event["day"], event["symbol"]), []).append(event)
     candidates = []
     for key, rows in grouped.items():
-        if len(rows) < min_blocks:
+        block_count = sum(int(row.get("block_count") or 1) for row in rows)
+        if block_count < min_blocks:
             continue
         rows = sorted(rows, key=lambda r: str(r.get("ts") or ""))
         label = labels.get(key, {"is_top15": False, "status": "not_top15"})
@@ -136,7 +145,7 @@ def _evaluate(events: list[dict], entries: dict, labels: dict, reason_name: str,
             "first_ts": first.get("ts"),
             "first_hour": first.get("hour"),
             "first_reason_code": first.get("reason_code"),
-            "block_count": len(rows),
+            "block_count": block_count,
             "is_top15": bool(label.get("is_top15")),
             "critic_status": label.get("status"),
             "capture_ratio_at_entry": label.get("capture_ratio_at_entry"),

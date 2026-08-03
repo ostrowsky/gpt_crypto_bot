@@ -42,6 +42,22 @@ class EntryAdmissionShadowRewardTests(unittest.TestCase):
         item = {"net_reward_pct": 9.0, "top_precision": 0.5, "rewarded_top_candidates": 1, "candidate_count": 2}
         self.assertEqual(rep._decision(item, cfg), "advance_to_entry_admission_behavior_replay")
 
+    def test_evaluate_uses_compact_blocked_cohort_counts(self) -> None:
+        events = [{
+            "day": "2026-05-30",
+            "symbol": "AAAUSDT",
+            "hour": 3,
+            "ts": "a",
+            "reason_code": "agent_mode_disabled",
+            "block_count": 50,
+        }]
+        labels = {("2026-05-30", "AAAUSDT"): {"is_top15": True, "status": "missed", "opportunity_from_first_block_pct": 10.0}}
+
+        item = rep._evaluate(events, {}, labels, "agent_only", {"agent_mode_disabled"}, 4, 50, rep.RewardConfig())
+
+        self.assertEqual(item["candidate_count"], 1)
+        self.assertEqual(item["top_examples"][0]["block_count"], 50)
+
 
 if __name__ == "__main__":
     unittest.main()

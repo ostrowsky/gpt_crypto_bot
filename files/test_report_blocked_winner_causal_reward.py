@@ -26,8 +26,9 @@ class BlockedWinnerCausalRewardTests(unittest.TestCase):
         self.assertEqual(table[0]["net_harm_pct"], 12.0)
 
     def test_case_rows_credit_false_candidate_protection(self) -> None:
-        events = [{"day": "2026-05-30", "symbol": "AAAUSDT", "reason_code": "score", "ts": "t", "hour": 1}]
+        events = [{"day": "2026-05-30", "symbol": "AAAUSDT", "reason_code": "score", "ts": "t", "hour": 1, "block_count": 12}]
         rows = rep._case_rows(events, {}, {}, rep.BlockerRewardConfig(false_candidate_credit_pct=1.5))
+        self.assertEqual(rows[0]["block_count"], 12)
         self.assertEqual(rows[0]["protection_credit_pct"], 1.5)
         self.assertEqual(rows[0]["net_harm_pct"], -1.5)
 

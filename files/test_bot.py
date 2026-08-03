@@ -6268,6 +6268,14 @@ class TestNightSignalQualityGuards(unittest.TestCase):
                 giveback_pct=1.0,
             ))
 
+    def test_observable_tail_shadow_defaults_match_promoted_shadow_profile(self):
+        import config
+
+        self.assertTrue(config.OBSERVABLE_TAIL_SHADOW_ENABLED)
+        self.assertEqual(config.OBSERVABLE_TAIL_SHADOW_SELECTOR, "exclude_ema_and_false_cleanup")
+        self.assertEqual(config.OBSERVABLE_TAIL_SHADOW_MIN_PNL_PCT, -0.5)
+        self.assertEqual(config.OBSERVABLE_TAIL_SHADOW_MIN_MFE_PCT, 1.0)
+
     def test_observable_tail_shadow_unknown_selector_is_rejected(self):
         import monitor
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import tempfile
 
 import research_artifact_provenance as provenance
 
@@ -57,6 +59,23 @@ class ResearchArtifactProvenanceTests(unittest.TestCase):
 
         self.assertTrue(snapshot)
         self.assertFalse(any("TOKEN" in key or "SECRET" in key or "KEY" in key for key in snapshot))
+
+    def test_latest_path_uses_source_freshness_not_lexicographic_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old = root / "top_gainer_critic_manual_2026-05-07_final.json"
+            current = root / "top_gainer_critic_2026-08-02_final.json"
+            old.write_text("{}", encoding="utf-8")
+            current.write_text("{}", encoding="utf-8")
+            old.touch()
+            current.touch()
+            old_time = current.stat().st_mtime + 60
+            import os
+            os.utime(old, (old_time, old_time))
+
+            selected = provenance.latest_path(root, "top_gainer_critic_*_final.json")
+
+        self.assertEqual(selected.name, current.name)
 
 
 if __name__ == "__main__":
