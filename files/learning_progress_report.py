@@ -528,8 +528,7 @@ def _alerts(
     if blocked_focus:
         out.append({"severity": "warn", "text": "focus top movers blocked/missed: " + ", ".join(blocked_focus[:8])})
     reentry_summary = shadow_reentry.get("summary") or {}
-    reentry_labeled = int(reentry_summary.get("labeled_ret5") or 0)
-    reentry_avg = _maybe_float(reentry_summary.get("avg_ret5"))
+    _, reentry_labeled, reentry_avg, _ = _reentry_outcome_cohort(reentry_summary)
     if reentry_labeled >= 5 and reentry_avg is not None and reentry_avg < 0:
         out.append({"severity": "warn", "text": f"shadow re-entry noisy: labeled={reentry_labeled}, avg_ret5={reentry_avg:+.2f}%"})
     tail = shadow_tail_selector or {}
@@ -576,11 +575,15 @@ def _next_actions(
     ):
         actions.append("▶️ Запустить exit monetization replay по вчерашним watchlist top movers: high-MFE/giveback, re-entry и partial-exit гипотезы без production SELL changes.")
     reentry_summary = shadow_reentry.get("summary") or {}
-    reentry_labeled = int(reentry_summary.get("labeled_ret5") or 0)
-    reentry_avg = _maybe_float(reentry_summary.get("avg_ret5"))
-    reentry_positive = _maybe_float(reentry_summary.get("ret5_positive_rate"))
+    reentry_cohort, reentry_labeled, reentry_avg, reentry_positive = _reentry_outcome_cohort(reentry_summary)
     if reentry_labeled < 10:
-        actions.append("⏳ Shadow re-entry: продолжать сбор labels; production re-entry не включать.")
+        cohort_piece = " registered-watch" if reentry_cohort == "registered_watch" else ""
+        actions.append(f"⏳ Shadow re-entry: продолжать сбор{cohort_piece} labels; production re-entry не включать.")
+    elif reentry_cohort == "registered_watch":
+        actions.append(
+            "⏸️ Shadow re-entry: registered-watch cohort измерим, но final confirmation не создаёт alerts; "
+            "production re-entry не включать без отдельного replay-гейта."
+        )
     elif reentry_avg is not None and reentry_positive is not None and reentry_avg > 0.25 and reentry_positive >= 0.55:
         actions.append("▶️ Shadow re-entry выглядит promising: подготовить replay-gated production spec, но не включать напрямую.")
     elif reentry_avg is not None and reentry_avg < 0:
@@ -856,6 +859,26 @@ def _portfolio_replacement_summary_from_report(report: dict[str, Any]) -> dict[s
     }
 
 
+def _reentry_outcome_cohort(summary: dict[str, Any]) -> tuple[str, int, float | None, float | None]:
+    labeled = int(summary.get("labeled_ret5") or 0)
+    if labeled > 0:
+        return (
+            "alert",
+            labeled,
+            _maybe_float(summary.get("avg_ret5")),
+            _maybe_float(summary.get("ret5_positive_rate")),
+        )
+    registered_labeled = int(summary.get("registered_labeled_ret5") or 0)
+    if registered_labeled > 0:
+        return (
+            "registered_watch",
+            registered_labeled,
+            _maybe_float(summary.get("registered_avg_ret5")),
+            _maybe_float(summary.get("registered_ret5_positive_rate")),
+        )
+    return "none", 0, None, None
+
+
 def _shadow_reentry_summary(scorecard: dict[str, Any]) -> dict[str, str]:
     if not scorecard:
         return {"status": "missing", "detail": "scorecard ещё не создан"}
@@ -863,10 +886,17 @@ def _shadow_reentry_summary(scorecard: dict[str, Any]) -> dict[str, str]:
     alerts = int(summary.get("alerts_total") or 0)
     labeled = int(summary.get("labeled_ret5") or 0)
     pending = int(summary.get("pending") or 0)
-    avg_ret5 = _maybe_float(summary.get("avg_ret5"))
-    pos_rate = _maybe_float(summary.get("ret5_positive_rate"))
+    cohort, outcome_labeled, avg_ret5, pos_rate = _reentry_outcome_cohort(summary)
     status = str(scorecard.get("status") or "unknown")
-    if alerts == 0:
+    if alerts == 0 and cohort == "registered_watch":
+        registered = int(summary.get("watch_registered") or outcome_labeled)
+        pos_piece = "н/д" if pos_rate is None else f"{pos_rate * 100:.1f}%"
+        ret_piece = "н/д" if avg_ret5 is None else f"{avg_ret5:+.2f}%"
+        detail = (
+            f"alerts=0; registered={registered}, labeled={outcome_labeled}, "
+            f"avg_ret5={ret_piece}, positive={pos_piece}; final confirmation conversions=0"
+        )
+    elif alerts == 0:
         detail = "alerts=0; данных для оценки re-entry пока нет"
     elif labeled == 0:
         detail = f"alerts={alerts}, pending={pending}; ждём mature T+5/T+10 labels"

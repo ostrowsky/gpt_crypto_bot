@@ -151,6 +151,36 @@ class LearningProgressReportTest(unittest.TestCase):
         )
         self.assertTrue(any("Shadow re-entry выглядит promising" in x for x in actions))
 
+    def test_shadow_reentry_uses_registered_counterfactual_labels_when_alerts_are_zero(self) -> None:
+        scorecard = {
+            "status": "complete",
+            "summary": {
+                "alerts_total": 0,
+                "labeled_ret5": 0,
+                "watch_registered": 6,
+                "registered_labeled_ret5": 6,
+                "registered_avg_ret5": -0.31,
+                "registered_ret5_positive_rate": 0.3333,
+            },
+        }
+
+        summary = lpr._shadow_reentry_summary(scorecard)
+        self.assertIn("registered=6, labeled=6", summary["detail"])
+        self.assertIn("avg_ret5=-0.31%", summary["detail"])
+        self.assertNotIn("данных для оценки re-entry пока нет", summary["detail"])
+
+        latest = lpr.DayMetrics(day="2026-08-02", coverage_status="complete")
+        alerts = lpr._alerts(latest, {}, {}, [], scorecard)
+        self.assertTrue(any("shadow re-entry noisy" in item["text"] for item in alerts))
+        actions = lpr._next_actions(
+            latest,
+            {"training": {"last_finished_at": "2026-08-03T00:00:00Z"}},
+            {},
+            [],
+            scorecard,
+        )
+        self.assertTrue(any("registered-watch labels" in item for item in actions))
+
     def test_shadow_tail_selector_summary_and_actions(self) -> None:
         class FakeReplay:
             @staticmethod

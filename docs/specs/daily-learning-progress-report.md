@@ -47,6 +47,10 @@ from final reports.
 - A `watchlist_top=0` day is valid only when the final top-gainer critic for the
   target day exists. If the critic is missing, the denominator is unknown and the
   report must be `СТАТУС НЕПОЛНЫЙ`, not `ДЕНЬ НЕИНФОРМАТИВЕН`.
+- Shadow re-entry reporting must not say that outcome data is absent merely
+  because final alert confirmation produced zero alerts. When registered-watch
+  counterfactual T+5 labels exist, the report must show that upstream cohort,
+  keep it distinct from final alerts, and keep production re-entry disabled.
 
 ## Required Output
 
