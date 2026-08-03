@@ -7,10 +7,31 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ml_dataset
+from backfill_ml_dataset_tail import _scan_latest_bar_ts
 from backfill_history import _load_bull_day_cache
 
 
 class TestMLDatasetAtomicRewrite(unittest.TestCase):
+    def test_tail_recovery_starts_after_each_pairs_latest_bar(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "ml_dataset.jsonl"
+            dataset.write_text(
+                '\n'.join(
+                    [
+                        '{"sym":"BTCUSDT","tf":"15m","bar_ts":100}',
+                        '{"sym":"BTCUSDT","tf":"15m","bar_ts":200}',
+                        '{"sym":"ETHUSDT","tf":"1h","bar_ts":150}',
+                        'not-json',
+                    ]
+                )
+                + '\n',
+                encoding="utf-8",
+            )
+            latest, bad_rows = _scan_latest_bar_ts(dataset)
+
+        self.assertEqual(latest, {("BTCUSDT", "15m"): 200, ("ETHUSDT", "1h"): 150})
+        self.assertEqual(bad_rows, 1)
+
     def test_recovery_event_scan_streams_utf8_and_ignores_bad_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             events = Path(td) / "bot_events.jsonl"
