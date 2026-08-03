@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 
 class TestAgentWakeupRescueReplay(unittest.TestCase):
+    def test_cli_accepts_paired_agent_allowed_control(self) -> None:
+        import replay_backtest as rb
+
+        with patch("sys.argv", ["replay_backtest.py", "--compare-variant", "agent_allowed"]):
+            args = rb.parse_args()
+
+        self.assertEqual(args.compare_variant, "agent_allowed")
+
     def _candidate(self):
         import replay_backtest as rb
 

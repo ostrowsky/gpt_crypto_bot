@@ -3670,6 +3670,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--compare-variant",
         choices=[
+            "agent_allowed",
             "score_replace",
             "score_replace_cluster",
             "score_replace_cluster_non_losing",

@@ -1,7 +1,7 @@
 # Wake-up Confirmed Agent Rescue
 
-Status: research-only  
-Last updated: 2026-05-17
+Status: rejected for promotion
+Last updated: 2026-08-03
 
 ## Purpose
 
@@ -74,6 +74,14 @@ Advance only if, on windows with sufficient event coverage:
 - No change to `AGENT_ALLOWED_MODES`.
 - No live BUY effect.
 
+## Paired-control refresh contract
+
+Deferred revalidation uses `agent_allowed` as `--compare-variant` in the same
+process. Candidate and control therefore share identical candle downloads,
+window timestamps, symbols, fees, portfolio capacity, and objective labels.
+The maximum wake-up coverage window and a separate recent 14-day stability
+window are mandatory before revisiting the May decision.
+
 ## First Profile Result
 
 Executed on 2026-05-17 with:
@@ -112,3 +120,25 @@ Next gate:
 - collect a longer wake-up history;
 - evaluate only on coverage-valid windows;
 - inspect the 10 admitted rescue events individually before trying a second temporal profile.
+
+## Accumulated-data revalidation
+
+The deferred gate was rerun on 2026-08-03 with a same-process paired
+`agent_allowed` control, score floor `34`, 10 portfolio slots, and the full
+105-symbol watchlist.
+
+| Window | Variant | Trades | Rescue admissions | PnL total | Win rate | Top-15 capture | Trade precision | Portfolio-full skips |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 80d | `agent_allowed` | 3,604 | 0 | -559.5019% | 41.62% | 100.00% | 18.87% | 8,227 |
+| 80d | `agent_wakeup_rescue` | 3,716 | 704 | -575.4140% | 41.33% | 100.00% | 18.86% | 8,586 |
+| recent 14d | `agent_allowed` | 676 | 0 | -59.8033% | 44.53% | 93.33% | 26.04% | 312 |
+| recent 14d | `agent_wakeup_rescue` | 704 | 135 | -62.1270% | 42.47% | 93.33% | 25.00% | 365 |
+
+The candidate-control PnL delta is `-15.9121pp` over 80 days and `-2.3237pp`
+over recent 14 days. Capture is unchanged in both windows, while trade count,
+capacity pressure, and false-candidate pressure increase.
+
+Decision: reject and retire this profile as a promotion candidate. Keep
+`AGENT_ALLOWED_MODES` unchanged. Any future agent-mode rescue must be materially
+different and must use these accumulated cases as a frozen holdout; threshold
+retuning of this wake-up profile is not a valid next step.

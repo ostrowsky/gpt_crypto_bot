@@ -258,6 +258,15 @@ is an explicit research run and cannot block the daily scheduler. The casebook
 ranks only net movement remaining after an actual blocker/shadow/entry/exit
 decision price and deduplicates day/symbol/stage. No trading policy changed.
 
+Deferred agent wake-up checkpoint (2026-08-03): the May
+`agent_wakeup_rescue` hypothesis now has sufficient temporal coverage and is
+rejected. A paired 80-day replay admitted 704 rescue candidates but left Top-15
+capture unchanged at 100%, added 112 trades, worsened total PnL by `-15.9121pp`,
+and increased portfolio-full skips by 359. The independent recent 14-day window
+also left capture unchanged at 93.33%, worsened PnL by `-2.3237pp`, reduced
+trade precision `26.04% -> 25.00%`, and added 53 portfolio-full skips. Keep
+`AGENT_ALLOWED_MODES` unchanged and do not retune the same profile.
+
 ## 2026-08-03 Early-Trend Discriminator Checkpoint
 
 The maximum-period research-universe replay rejected all 648 transparent
