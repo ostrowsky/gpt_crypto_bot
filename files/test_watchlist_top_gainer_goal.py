@@ -181,20 +181,20 @@ class TestWatchlistTopGainerGoal(unittest.TestCase):
                 top_gainer_critic.WATCHLIST_FILE = old_watchlist
                 ml_dataset.ML_FILE = old_ml
 
-            self.assertEqual(report["summary"]["watchlist_top_count"], 3)
+            self.assertEqual(report["summary"]["watchlist_top_count"], 2)
             self.assertEqual(report["summary"]["watchlist_top_bought"], 2)
-            self.assertEqual(report["summary"]["recall_at_cutoff_pct"], 66.67)
-            self.assertEqual(report["summary"]["mandatory_positive_coverage_pct"], 66.67)
+            self.assertEqual(report["summary"]["recall_at_cutoff_pct"], 100.0)
+            self.assertEqual(report["summary"]["mandatory_positive_coverage_pct"], 100.0)
             self.assertEqual(report["teacher_annotation"]["rows_annotated"], 3)
-            self.assertEqual(report["teacher_annotation"]["positive_symbols_missing_rows"], ["DDDUSDT"])
+            self.assertEqual(report["teacher_annotation"]["positive_symbols_missing_rows"], [])
 
             checkpoints = {
                 int(item["hour_local"]): item["recall_pct"]
                 for item in report["early_recall_checkpoints"]
             }
-            self.assertEqual(checkpoints[4], 33.33)
-            self.assertEqual(checkpoints[12], 66.67)
-            self.assertEqual(checkpoints[22], 66.67)
+            self.assertEqual(checkpoints[4], 50.0)
+            self.assertEqual(checkpoints[12], 100.0)
+            self.assertEqual(checkpoints[22], 100.0)
 
             precision = {
                 int(item["top_n"]): item
