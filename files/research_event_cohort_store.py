@@ -20,6 +20,8 @@ TZ = ZoneInfo("Europe/Budapest")
 SOURCE_NAMES = ("bot_events.jsonl", "agent_events.jsonl")
 FLUSH_LINES = 50_000
 LOCK_TIMEOUT_SECONDS = 120.0
+SCHEMA_VERSION = 2
+BLOCK_INTERVAL_MS = 15 * 60 * 1000
 
 
 def sync_event_cohorts(
@@ -138,10 +140,39 @@ def load_trade_events(
         conn.close()
 
 
+def load_blocked_intervals(
+    *,
+    files_dir: Path,
+    allowed_days: Iterable[str],
+    db_path: Path,
+    sync: bool = True,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load compact 15-minute blocker intervals for causal episode joins."""
+    sync_summary = sync_event_cohorts(files_dir, db_path) if sync else {"status": "not_requested", "db_path": str(db_path)}
+    days = sorted({str(day) for day in allowed_days if str(day)})
+    if not days:
+        return [], sync_summary
+    conn = sqlite3.connect(db_path, timeout=60)
+    conn.row_factory = sqlite3.Row
+    try:
+        placeholders = ",".join("?" for _ in days)
+        rows = conn.execute(
+            f"SELECT day, symbol, reason_code, bucket_ms, block_count, first_ts, last_ts, "
+            f"first_price, first_source, first_tf, first_signal_type "
+            f"FROM blocked_intervals WHERE day IN ({placeholders}) "
+            "ORDER BY day, symbol, bucket_ms, reason_code",
+            days,
+        ).fetchall()
+        return [dict(row) for row in rows], sync_summary
+    finally:
+        conn.close()
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=60000")
+    previous_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS source_state (
@@ -166,6 +197,23 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (source_file, day, symbol, reason_code)
         );
         CREATE INDEX IF NOT EXISTS idx_blocked_day ON blocked_cohorts(day);
+        CREATE TABLE IF NOT EXISTS blocked_intervals (
+            source_file TEXT NOT NULL,
+            day TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            reason_code TEXT NOT NULL,
+            bucket_ms INTEGER NOT NULL,
+            block_count INTEGER NOT NULL,
+            first_ts TEXT NOT NULL,
+            last_ts TEXT NOT NULL,
+            first_price REAL,
+            first_source TEXT,
+            first_tf TEXT,
+            first_signal_type TEXT,
+            PRIMARY KEY (source_file, symbol, reason_code, bucket_ms)
+        );
+        CREATE INDEX IF NOT EXISTS idx_blocked_interval_day_symbol
+            ON blocked_intervals(day, symbol, bucket_ms);
         CREATE TABLE IF NOT EXISTS trade_events (
             source_file TEXT NOT NULL,
             byte_offset INTEGER NOT NULL,
@@ -186,6 +234,13 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_trade_symbol_ts ON trade_events(symbol, ts);
         """
     )
+    existing_sources = int(conn.execute("SELECT COUNT(*) FROM source_state").fetchone()[0])
+    if previous_version < SCHEMA_VERSION and existing_sources:
+        conn.execute("DELETE FROM blocked_cohorts")
+        conn.execute("DELETE FROM blocked_intervals")
+        conn.execute("DELETE FROM trade_events")
+        conn.execute("DELETE FROM source_state")
+    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     conn.commit()
 
 
@@ -240,6 +295,7 @@ def _sync_source(conn: sqlite3.Connection, path: Path) -> dict[str, Any]:
     if reset:
         with conn:
             conn.execute("DELETE FROM blocked_cohorts WHERE source_file=?", (source_file,))
+            conn.execute("DELETE FROM blocked_intervals WHERE source_file=?", (source_file,))
             conn.execute("DELETE FROM trade_events WHERE source_file=?", (source_file,))
             conn.execute("DELETE FROM source_state WHERE source_file=?", (source_file,))
         offset = 0
@@ -256,6 +312,7 @@ def _sync_source(conn: sqlite3.Connection, path: Path) -> dict[str, Any]:
         }
 
     blocked: dict[tuple[str, str, str], dict[str, Any]] = {}
+    blocked_intervals: dict[tuple[str, str, int], dict[str, Any]] = {}
     trades: list[tuple[Any, ...]] = []
     start_offset = offset
     lines_processed = 0
@@ -278,13 +335,15 @@ def _sync_source(conn: sqlite3.Connection, path: Path) -> dict[str, Any]:
                         relevant_events += 1
                         if event_type == "blocked":
                             _accumulate_blocked(blocked, normalized)
+                            _accumulate_blocked_interval(blocked_intervals, normalized)
                         else:
                             trades.append(normalized)
             if lines_processed % FLUSH_LINES == 0:
-                _flush(conn, source_file, blocked, trades, offset, stat)
+                _flush(conn, source_file, blocked, blocked_intervals, trades, offset, stat)
                 blocked.clear()
+                blocked_intervals.clear()
                 trades.clear()
-        _flush(conn, source_file, blocked, trades, offset, stat)
+        _flush(conn, source_file, blocked, blocked_intervals, trades, offset, stat)
     return {
         "source_file": source_file,
         "status": "rebuilt" if start_offset == 0 else "appended",
@@ -335,6 +394,7 @@ def _normalize_event(
             "source": source,
             "tf": str(row.get("tf") or ""),
             "signal_type": str(row.get("signal_type") or ""),
+            "ts_ms": _ts_ms(ts),
         }
     price = row.get("price") if row.get("price") is not None else row.get("exit_price")
     return (
@@ -366,10 +426,37 @@ def _accumulate_blocked(target: dict[tuple[str, str, str], dict[str, Any]], row:
         target[key] = {**row, "block_count": count}
 
 
+def _accumulate_blocked_interval(
+    target: dict[tuple[str, str, int], dict[str, Any]],
+    row: dict[str, Any],
+) -> None:
+    ts_ms = int(row.get("ts_ms") or 0)
+    if ts_ms <= 0:
+        return
+    bucket_ms = ts_ms - (ts_ms % BLOCK_INTERVAL_MS)
+    key = (row["symbol"], row["reason_code"], bucket_ms)
+    current = target.get(key)
+    if current is None:
+        target[key] = {**row, "bucket_ms": bucket_ms, "block_count": 1, "last_ts": row["ts"]}
+        return
+    current["block_count"] += 1
+    if row["ts"] < current["ts"]:
+        current.update({
+            "ts": row["ts"],
+            "price": row["price"],
+            "source": row["source"],
+            "tf": row["tf"],
+            "signal_type": row["signal_type"],
+        })
+    if row["ts"] > current["last_ts"]:
+        current["last_ts"] = row["ts"]
+
+
 def _flush(
     conn: sqlite3.Connection,
     source_file: str,
     blocked: dict[tuple[str, str, str], dict[str, Any]],
+    blocked_intervals: dict[tuple[str, str, int], dict[str, Any]],
     trades: list[tuple[Any, ...]],
     offset: int,
     stat: Any,
@@ -391,6 +478,23 @@ def _flush(
         )
         for row in blocked.values()
     ]
+    interval_values = [
+        (
+            source_file,
+            row["day"],
+            row["symbol"],
+            row["reason_code"],
+            row["bucket_ms"],
+            row["block_count"],
+            row["ts"],
+            row["last_ts"],
+            row["price"],
+            row["source"],
+            row["tf"],
+            row["signal_type"],
+        )
+        for row in blocked_intervals.values()
+    ]
     with conn:
         if blocked_values:
             conn.executemany(
@@ -409,6 +513,24 @@ def _flush(
                     first_ts = MIN(blocked_cohorts.first_ts, excluded.first_ts)
                 """,
                 blocked_values,
+            )
+        if interval_values:
+            conn.executemany(
+                """
+                INSERT INTO blocked_intervals (
+                    source_file, day, symbol, reason_code, bucket_ms, block_count,
+                    first_ts, last_ts, first_price, first_source, first_tf, first_signal_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_file, symbol, reason_code, bucket_ms) DO UPDATE SET
+                    block_count = blocked_intervals.block_count + excluded.block_count,
+                    first_price = CASE WHEN excluded.first_ts < blocked_intervals.first_ts THEN excluded.first_price ELSE blocked_intervals.first_price END,
+                    first_source = CASE WHEN excluded.first_ts < blocked_intervals.first_ts THEN excluded.first_source ELSE blocked_intervals.first_source END,
+                    first_tf = CASE WHEN excluded.first_ts < blocked_intervals.first_ts THEN excluded.first_tf ELSE blocked_intervals.first_tf END,
+                    first_signal_type = CASE WHEN excluded.first_ts < blocked_intervals.first_ts THEN excluded.first_signal_type ELSE blocked_intervals.first_signal_type END,
+                    first_ts = MIN(blocked_intervals.first_ts, excluded.first_ts),
+                    last_ts = MAX(blocked_intervals.last_ts, excluded.last_ts)
+                """,
+                interval_values,
             )
         if trades:
             conn.executemany(
@@ -435,6 +557,16 @@ def _local_day_hour(value: str) -> tuple[str, int | None]:
         parsed = parsed.replace(tzinfo=timezone.utc)
     local = parsed.astimezone(TZ)
     return local.date().isoformat(), local.hour
+
+
+def _ts_ms(value: str) -> int:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
 
 
 def _num(value: Any) -> float | None:

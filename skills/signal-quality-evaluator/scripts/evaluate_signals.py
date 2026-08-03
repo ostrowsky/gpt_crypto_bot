@@ -819,6 +819,12 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         key=lambda x: -(x.get("giveback_pct") or 0.0),
     )
 
+    detail_rows, detail_coverage = _export_failure_details(
+        late_entries=late_entry_rows,
+        early_exits=early_exit_rows,
+        missed_trends=missed,
+        false_positive_buys=false_positive_rows,
+    )
     report = {
         "window": {"start": _iso(start_ms), "end": _iso(end_ms), "timezone": args.timezone},
         "scope": {
@@ -847,14 +853,33 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             tfs=tfs,
             candles_by_key=candles_by_key,
         ),
+        "detail_coverage": detail_coverage,
         "summary": _summarize(evaluated, missed),
-        "late_entries": late_entry_rows[:50],
-        "early_exits": early_exit_rows[:50],
-        "missed_trends": [asdict(x) for x in missed[:100]],
-        "false_positive_buys": false_positive_rows[:100],
+        **detail_rows,
         "trades": evaluated if args.include_trades else [],
     }
     return report
+
+
+def _export_failure_details(
+    *,
+    late_entries: list[dict[str, Any]],
+    early_exits: list[dict[str, Any]],
+    missed_trends: list[TrendEpisode],
+    false_positive_buys: list[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    """Export every failure row so downstream attribution has a complete denominator."""
+    rows = {
+        "late_entries": list(late_entries),
+        "early_exits": list(early_exits),
+        "missed_trends": [asdict(row) for row in missed_trends],
+        "false_positive_buys": list(false_positive_buys),
+    }
+    coverage = {
+        name: {"total": len(values), "exported": len(values), "complete": True}
+        for name, values in rows.items()
+    }
+    return rows, coverage
 
 
 def _build_coverage(

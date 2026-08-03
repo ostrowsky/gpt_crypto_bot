@@ -25,6 +25,7 @@ import ml_dataset
 import report_candidate_ranker_shadow
 import report_critic_dataset
 import report_suspicious_reentry_scorecard
+import report_trend_lifecycle_attribution
 import report_v2_daily_scorecard
 import report_research_universe_shadow_scorecard
 import research_universe_shadow_collector
@@ -1004,6 +1005,10 @@ def _run_signal_quality_report(
     return report
 
 
+def _run_trend_lifecycle_attribution_report(lookback_days: int) -> Dict[str, Any]:
+    return report_trend_lifecycle_attribution.build(lookback_days=max(1, int(lookback_days)))
+
+
 def _render_signal_quality_telegram(result: Dict[str, Any]) -> str:
     report = result or {}
     summary = report.get("summary") or {}
@@ -1592,6 +1597,19 @@ async def _signal_quality_loop(state: WorkerState) -> None:
                 result,
                 report_path=state.signal_quality_last_report_json,
             )
+            if bool(getattr(config, "TREND_LIFECYCLE_ATTRIBUTION_ENABLED", True)):
+                try:
+                    attribution = await asyncio.to_thread(
+                        _run_trend_lifecycle_attribution_report,
+                        int(getattr(config, "TREND_LIFECYCLE_ATTRIBUTION_LOOKBACK_DAYS", 14)),
+                    )
+                    log.info(
+                        "Trend lifecycle attribution done: status=%s stages=%s",
+                        attribution.get("status"),
+                        (attribution.get("attribution") or {}).get("missed_stage_counts"),
+                    )
+                except Exception:
+                    log.exception("Trend lifecycle attribution failed after signal-quality completion")
             log.info(
                 "Signal quality done: day=%s buys=%s missed=%s fp=%s early_exits=%s feedback=%s",
                 target_day.isoformat(),

@@ -43,3 +43,14 @@ watermarks. The database is runtime state and must not be committed.
 - No live trading behavior changes.
 - The bounded morning report does not trigger a maximum-period rebuild; stale
   artifacts remain diagnostic until an explicit research refresh completes.
+
+## 15-minute blocker intervals
+
+Schema v2 also stores compact blocker intervals keyed by source, symbol,
+normalized reason, and 15-minute UTC bucket. Each row preserves exact first and
+last event timestamps, first observed price/context, and count. This supports
+causal trend-episode attribution without rescanning the raw event archive or
+using an entire day of blockers as if they happened before the episode peak.
+
+The schema migration rebuilds the runtime-only index once. A normal append sync
+remains incremental; source truncation triggers the same safe full rebuild.

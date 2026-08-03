@@ -17,6 +17,7 @@ from rl_headless_worker import (
     _release_learning_progress_telegram_slot,
     build_status_snapshot,
     _render_top_gainer_telegram,
+    _run_trend_lifecycle_attribution_report,
     _restore_daily_report_state,
     _restore_latest_top_gainer_artifact,
     _scheduled_top_gainer_slot,
@@ -27,6 +28,17 @@ from rl_headless_worker import (
 
 
 class TestDailyCriticSchedulerRecovery(unittest.TestCase):
+    def test_trend_attribution_runner_enforces_bounded_positive_lookback(self) -> None:
+        with patch.object(
+            rl_headless_worker.report_trend_lifecycle_attribution,
+            "build",
+            return_value={"status": "complete"},
+        ) as build:
+            result = _run_trend_lifecycle_attribution_report(0)
+
+        self.assertEqual(result["status"], "complete")
+        build.assert_called_once_with(lookback_days=1)
+
     def test_status_dataset_scans_do_not_read_whole_jsonl_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             dataset = Path(td) / "critic.jsonl"

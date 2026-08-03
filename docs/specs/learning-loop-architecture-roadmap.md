@@ -240,6 +240,24 @@ P1 promotion gate:
    correlation/exposure learners only after P0 is stable and their training
    labels carry current-policy provenance.
 
+P2 attribution checkpoint (2026-08-03): implemented complete failure-detail
+export for new signal-quality reports, causal 15-minute blocker intervals, and
+a lifecycle report that keeps watchlist-top early capture separate from broad
+trend episodes. The maximum available artifact spans 73 signal-quality days and
+contains 6,913 unique exported missed episodes, 1,924 late entries, and 598
+early exits. Missed-stage attribution is dominated by `signaled_but_rejected`
+(`4,731`), followed by `blocked_by_portfolio_capacity` (`985`), `not_observed`
+inside observer coverage (`742`), `observation_coverage_unavailable` (`375`),
+and `observed_but_not_signaled` (`80`).
+
+The historical aggregate remains `partial_historical_detail`: 60 of 73 old
+signal-quality reports were produced under former 100/50-row detail caps. The
+latest day is complete and all new reports carry explicit detail coverage.
+The nightly worker uses a bounded 14-report window; maximum-period attribution
+is an explicit research run and cannot block the daily scheduler. The casebook
+ranks only net movement remaining after an actual blocker/shadow/entry/exit
+decision price and deduplicates day/symbol/stage. No trading policy changed.
+
 ## 2026-08-03 Early-Trend Discriminator Checkpoint
 
 The maximum-period research-universe replay rejected all 648 transparent

@@ -594,6 +594,8 @@ RL_TRAIN_TELEGRAM_REPORTS_ENABLED: bool = False
 # Post-factum signal quality evaluator. It reads already emitted BUY/SELL
 # events and historical candles; it never generates live signals.
 SIGNAL_QUALITY_EVALUATOR_ENABLED: bool = True
+TREND_LIFECYCLE_ATTRIBUTION_ENABLED: bool = True
+TREND_LIFECYCLE_ATTRIBUTION_LOOKBACK_DAYS: int = 14
 SIGNAL_QUALITY_EVALUATOR_TELEGRAM_REPORTS_ENABLED: bool = True
 SIGNAL_QUALITY_EVALUATOR_TIMEZONE: str = "Europe/Budapest"
 SIGNAL_QUALITY_EVALUATOR_RUN_HOUR_LOCAL: int = 0

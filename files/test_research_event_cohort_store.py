@@ -46,6 +46,16 @@ class ResearchEventCohortStoreTests(unittest.TestCase):
             self.assertEqual(blocked[0]["block_count"], 3)
             self.assertEqual(blocked[0]["ts"], "2026-08-02T09:00:00Z")
             self.assertEqual(entries[("2026-08-02", "AAAUSDT")][0]["price"], 10.0)
+            intervals, _ = store.load_blocked_intervals(
+                files_dir=files,
+                allowed_days={"2026-08-02"},
+                db_path=db,
+                sync=False,
+            )
+            self.assertEqual(sum(row["block_count"] for row in intervals), 3)
+            bot_interval = next(row for row in intervals if row["first_source"] == "bot")
+            self.assertEqual(bot_interval["first_ts"], "2026-08-02T10:00:00Z")
+            self.assertEqual(bot_interval["last_ts"], "2026-08-02T10:05:00Z")
 
             with bot.open("a", encoding="utf-8") as handle:
                 handle.write(_line(event="blocked", sym="AAAUSDT", signal_type="chase_guard", reason="late", ts="2026-08-02T13:00:00Z"))

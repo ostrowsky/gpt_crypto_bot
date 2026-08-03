@@ -34,6 +34,37 @@ class SignalQualityEvaluatorCacheTest(unittest.TestCase):
             self.assertEqual(rows[0]["c"], 1.5)
             urlopen.assert_called_once()
 
+    def test_failure_detail_export_is_complete(self) -> None:
+        missed = [
+            EVALUATOR.TrendEpisode(
+                sym=f"S{index}USDT",
+                tf="15m",
+                start_i=0,
+                peak_i=4,
+                end_i=5,
+                start_ts="2026-08-02T10:00:00Z",
+                peak_ts="2026-08-02T11:00:00Z",
+                end_ts="2026-08-02T11:15:00Z",
+                start_price=1.0,
+                peak_price=1.1,
+                end_price=1.05,
+                move_pct=10.0,
+                duration_bars=5,
+            )
+            for index in range(140)
+        ]
+
+        rows, coverage = EVALUATOR._export_failure_details(
+            late_entries=[],
+            early_exits=[],
+            missed_trends=missed,
+            false_positive_buys=[],
+        )
+
+        self.assertEqual(len(rows["missed_trends"]), 140)
+        self.assertEqual(coverage["missed_trends"]["exported"], 140)
+        self.assertTrue(coverage["missed_trends"]["complete"])
+
 
 if __name__ == "__main__":
     unittest.main()
