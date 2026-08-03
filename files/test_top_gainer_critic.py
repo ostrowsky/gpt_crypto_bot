@@ -440,7 +440,8 @@ class TestTopGainerCritic(unittest.TestCase):
                     min_quote_volume=0.0,
                     day_performance=perf,
                 )
-                summary = critic_dataset.annotate_top_gainer_teacher(report)
+                with patch.object(Path, "read_text", side_effect=AssertionError("whole-file read")):
+                    summary = critic_dataset.annotate_top_gainer_teacher(report)
             finally:
                 top_gainer_critic.BOT_EVENTS_FILE = old_bot
                 top_gainer_critic.AGENT_EVENTS_FILE = old_agent

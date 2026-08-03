@@ -33,6 +33,9 @@ never due again, and a restart erased the in-memory slot state.
 - Worker heartbeat summaries and ranker row counters likewise scan critic and
   ML JSONL inputs incrementally. Routine status writes must remain bounded in
   memory as those datasets grow.
+- Top-gainer teacher preview and atomic critic-dataset rewrite are streaming
+  passes under the existing dataset lock. They preserve malformed-row cleanup
+  and atomic replace semantics without retaining the rewritten dataset in RAM.
 
 ## Guardrails
 
@@ -46,3 +49,5 @@ precedence, independent goal scheduling, and state restoration from a restart
 snapshot. A regression test also rejects whole-file event-log reads while
 preserving malformed-line and non-object filtering. Status aggregation and row
 count tests reject whole-file reads and preserve the existing counters.
+Teacher-annotation coverage rejects whole-file reads and verifies the persisted
+labels after atomic replacement.

@@ -182,25 +182,49 @@ def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
         raise last_error
 
 
-def _collect_mutated_lines(mutator):
-    updated: List[str] = []
+def _scan_mutations(mutator) -> tuple[bool, bool]:
     changed = False
     had_bad_rows = False
-    for line in CRITIC_FILE.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            had_bad_rows = True
-            continue
-        if not isinstance(rec, dict):
-            had_bad_rows = True
-            continue
-        rec_changed = bool(mutator(rec))
-        changed = changed or rec_changed
-        updated.append(json.dumps(rec, ensure_ascii=False, cls=_Enc))
-    return updated, changed, had_bad_rows
+    with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source:
+        for line in source:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                had_bad_rows = True
+                continue
+            if not isinstance(rec, dict):
+                had_bad_rows = True
+                continue
+            changed = bool(mutator(rec)) or changed
+    return changed, had_bad_rows
+
+
+def _write_mutated_stream(mutator, tmp: Path) -> tuple[bool, bool]:
+    changed = False
+    had_bad_rows = False
+    try:
+        with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source, tmp.open(
+            "w", encoding="utf-8"
+        ) as destination:
+            for line in source:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    had_bad_rows = True
+                    continue
+                if not isinstance(rec, dict):
+                    had_bad_rows = True
+                    continue
+                changed = bool(mutator(rec)) or changed
+                destination.write(json.dumps(rec, ensure_ascii=False, cls=_Enc) + "\n")
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    return changed, had_bad_rows
 
 
 def _append(record: Dict[str, Any]) -> None:
@@ -215,15 +239,16 @@ def get_record(record_id: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         with _dataset_io_lock():
-            for line in CRITIC_FILE.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(rec, dict) and rec.get("id") == record_id:
-                    return rec
+            with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source:
+                for line in source:
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(rec, dict) and rec.get("id") == record_id:
+                        return rec
     except Exception as e:
         _pylog.warning("critic_dataset get_record error for %s: %s", record_id, e)
     return None
@@ -233,21 +258,20 @@ def _rewrite_records(mutator) -> None:
     if not CRITIC_FILE.exists():
         return
     try:
-        _, maybe_changed, maybe_bad_rows = _collect_mutated_lines(mutator)
+        maybe_changed, maybe_bad_rows = _scan_mutations(mutator)
         if not (maybe_changed or maybe_bad_rows):
             return
 
         with _dataset_io_lock():
-            updated, changed, had_bad_rows = _collect_mutated_lines(mutator)
-            if not (changed or had_bad_rows):
-                return
-
             CRITIC_FILE.parent.mkdir(parents=True, exist_ok=True)
             tmp = CRITIC_FILE.with_name(
                 f"{CRITIC_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp"
             )
-            tmp.write_text("\n".join(updated) + "\n", encoding="utf-8")
-            _atomic_replace_with_retry(tmp, CRITIC_FILE)
+            changed, had_bad_rows = _write_mutated_stream(mutator, tmp)
+            if changed or had_bad_rows:
+                _atomic_replace_with_retry(tmp, CRITIC_FILE)
+            else:
+                tmp.unlink(missing_ok=True)
     except Exception as e:
         _pylog.warning("critic_dataset rewrite error: %s", e)
 
@@ -716,7 +740,7 @@ def annotate_top_gainer_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
         rows_scanned += 1
         return _annotate(rec, count_scan=False)
 
-    _, maybe_changed, maybe_bad_rows = _collect_mutated_lines(_mutate_preview)
+    maybe_changed, maybe_bad_rows = _scan_mutations(_mutate_preview)
     rows_annotated = 0
     if maybe_changed or maybe_bad_rows:
         def _mutate_commit(rec: Dict[str, Any]) -> bool:
@@ -728,14 +752,15 @@ def annotate_top_gainer_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             with _dataset_io_lock():
-                updated, changed, had_bad_rows = _collect_mutated_lines(_mutate_commit)
+                CRITIC_FILE.parent.mkdir(parents=True, exist_ok=True)
+                tmp = CRITIC_FILE.with_name(
+                    f"{CRITIC_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                )
+                changed, had_bad_rows = _write_mutated_stream(_mutate_commit, tmp)
                 if changed or had_bad_rows:
-                    CRITIC_FILE.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = CRITIC_FILE.with_name(
-                        f"{CRITIC_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-                    )
-                    tmp.write_text("\n".join(updated) + "\n", encoding="utf-8")
                     _atomic_replace_with_retry(tmp, CRITIC_FILE)
+                else:
+                    tmp.unlink(missing_ok=True)
         except Exception as e:
             _pylog.warning("critic_dataset rewrite error: %s", e)
             rows_annotated = 0
