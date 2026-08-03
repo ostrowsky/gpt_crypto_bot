@@ -36,6 +36,9 @@ never due again, and a restart erased the in-memory slot state.
 - Top-gainer teacher preview and atomic critic-dataset rewrite are streaming
   passes under the existing dataset lock. They preserve malformed-row cleanup
   and atomic replace semantics without retaining the rewritten dataset in RAM.
+- `--json` CLI output is emitted as UTF-8 bytes so a successfully saved report
+  cannot fail afterward on a Windows cp1251 console when reasons contain
+  non-ASCII text.
 
 ## Guardrails
 

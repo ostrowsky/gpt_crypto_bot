@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import unittest
 from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import critic_dataset
@@ -14,6 +16,13 @@ from rl_headless_worker import _scheduled_top_gainer_slot, _scheduled_watchlist_
 
 
 class TestTopGainerCritic(unittest.TestCase):
+    def test_json_cli_output_is_utf8_even_for_non_ascii_text(self) -> None:
+        buffer = io.BytesIO()
+        with patch.object(top_gainer_critic.sys, "stdout", SimpleNamespace(buffer=buffer)):
+            top_gainer_critic._write_json_stdout({"reason": "защита"})
+
+        self.assertEqual(json.loads(buffer.getvalue().decode("utf-8")), {"reason": "защита"})
+
     def test_iter_jsonl_streams_instead_of_reading_the_whole_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             event_file = Path(tmpdir) / "events.jsonl"

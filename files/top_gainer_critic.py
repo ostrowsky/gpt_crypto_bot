@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -78,6 +79,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timezone", default=DEFAULT_TZ)
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
+
+
+def _write_json_stdout(payload: dict[str, Any]) -> None:
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+        return
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
 
 
 def _iter_jsonl(
@@ -892,7 +903,7 @@ def main() -> int:
         min_quote_volume=args.min_quote_volume,
     )
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        _write_json_stdout(report)
     else:
         print(render_text(report))
         print("")
