@@ -123,6 +123,8 @@ Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
 $wrapperArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $loopScript)
 if ($EnableCollector) {
     $wrapperArgs += "--enable-collector"
+} else {
+    $wrapperArgs += "--disable-collector"
 }
 
 $wrapperProc = Start-Process `

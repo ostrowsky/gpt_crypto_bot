@@ -13,6 +13,7 @@ class TestRLLauncherConfig(unittest.TestCase):
         self.assertIn("[switch]$EnableCollector = $false", launcher)
         self.assertIn("if ($EnableCollector)", launcher)
         self.assertIn('$wrapperArgs += "--enable-collector"', launcher)
+        self.assertIn('$wrapperArgs += "--disable-collector"', launcher)
         self.assertNotIn('$loopScript, "--enable-collector"', launcher)
 
 
