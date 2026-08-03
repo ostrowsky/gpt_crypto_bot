@@ -26,10 +26,11 @@ only the rows it saw. On 2026-08-03 this reduced a 257.6 MB dataset to one row.
 - Recovery backfill scans `bot_events.jsonl` line by line as UTF-8 with invalid
   bytes ignored; a host cp1251 default or one damaged byte cannot abort gap
   reconstruction before writes begin.
-- Emergency tail recovery starts strictly after the latest stored timestamp of
-  each current watchlist/timeframe pair. It does not reinterpret intentionally
-  sparse historical snapshots as missing continuous candles. Available T+3,
-  T+5, and T+10 labels are filled in one atomic dataset pass.
+- Automatic candle-gap reconstruction is not used for incident recovery: this
+  dataset intentionally contains sparse observation snapshots, so converting
+  timestamp gaps into continuous bars changes its sampling distribution. The
+  accepted recovery is the latest validated snapshot plus normal forward
+  collection; rejected reconstruction outputs remain runtime-only evidence.
 
 ## Guardrails
 
