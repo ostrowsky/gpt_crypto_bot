@@ -35,6 +35,31 @@ Consequently, no BUY/SELL threshold is relaxed from this checkpoint. The next
 cycle restores trustworthy measurement first, then refreshes policy evidence on
 the maximum available historical period and chronological forward slices.
 
+## 2026-08-03 Accumulation Audit
+
+The policies and shadow contours that were explicitly waiting for forward data
+were re-audited through 2026-08-03. Raw event counts were deduplicated into
+decision episodes where repeated scans emitted the same candidate.
+
+| Contour | New evidence | Decision |
+|---|---|---|
+| Base cooldown `2` | equal 16-day before/after windows: false positives `25.08% -> 19.35%`, broad miss rate `81.13% -> 76.67%`, watchlist-top early capture `65.91% -> 70.97%` | keep `2`; no further relaxation; before/after evidence is supportive but not causal |
+| Non-losing replacement guard | `118` unique blocked candidate/protected-position pairs; candidate minus protected 12h return averaged `+0.3542pp`, candidate won `57.76%` | forward warning; do not broaden or roll back until the frozen portfolio replay completes |
+| Observable tail `non_ema_mfe150` | `147` live candidates and `100` mature T+10 labels; average partial delta `-0.1239%`, median `-0.2881%`, worse rate `59%`, before costs | reject production promotion; retire or replace this shadow selector |
+| `regime_start/base_recovery_v1` | `51` mature post-deploy T+5 cases; useful precision `9.80%` vs `35%` gate, median return `-3.2704%`, median MFE `1.9665%` vs `6%` gate | live data confirms rejection; Telegram remains disabled; stop waiting on this profile |
+| BTC early-trend WATCH | `18` raw matches / `11` 12h-deduplicated episodes; 6h average `-0.1788%`, median `-0.2082%`, positive `36.36%`; 12h average `+0.0068%` | post-deploy gate failed; disable/recalibrate the dedicated WATCH, retain general V2 shadow data |
+| Peak-risk shadow | `40` paired events overall, `9` post-deploy; exit-minus-alert average `-0.1026pp` overall and `-0.1753pp` post-deploy, median approximately zero | no tighter exit or alert promotion; current profile has no demonstrated edge |
+| Suspicious re-entry | `798` post-deploy upstream decisions, `43` registered watches, zero final alerts | waiting longer will not create labels; label registered watches counterfactually before considering threshold changes |
+| V2 broad upside | `14` complete days, top recall `31/31`, precision `2.60%`, confirmation ratio `13.94%`, handoff `87.10%` | keep detector/shadow role; do not promote broad V2 to BUY |
+| Score gate `34` | one blocked winner across `14` final critics; score gate was only one link and final blocker was agent mode/alignment | keep gate; test the complete blocker chain rather than lowering one threshold |
+| Research universe | `130,693` valid rows but no recent mature labels; one malformed JSONL row makes the all-or-nothing label rewrite return zero | status is `labeling_broken`, not `collect_more_labels`; repair and backfill before analysis |
+
+The fresh maximum-period tail replay did not complete within five minutes. The
+fresh replacement comparison did not complete in a 15-minute parallel attempt
+or a 20-minute sequential guard attempt. These runs produced no result and must
+not be treated as positive or negative evidence. Replay caching/incremental
+execution is now an operational prerequisite for the frozen replacement audit.
+
 ## Current Gaps
 
 ### Entry / early capture
@@ -83,6 +108,13 @@ Missing: correlation/exposure learner in shadow mode, then replay-gated cap adju
    coverage rather than as equivalent live-data failures.
 5. Add freshness budgets for every research cache and report the source-policy
    version/config hash used to build it.
+6. Make research-universe labeling tolerant of malformed rows, quarantine bad
+   records, and backfill the accumulated dataset. A single invalid row must not
+   cancel labels for the entire file.
+7. Replace full JSONL rewrites and repeated full-file-per-symbol scans with an
+   incremental cohort store. The daily loop must not run maximum-period replay.
+8. Label every registered suspicious re-entry watch at T+2/T+5/T+10, including
+   watches that never pass final alert confirmation.
 
 P0 acceptance gate:
 
@@ -95,6 +127,10 @@ P0 acceptance gate:
 - no critic-dataset permission/rename failure occurs during the observation
   window;
 - stale research artifacts cannot produce a current production recommendation.
+- research-universe scorecards contain recent mature labels and explicitly
+  report quarantined rows;
+- registered re-entry watches accumulate counterfactual labels even when final
+  alert count remains zero.
 
 ### P1: refresh the evidence under current production policy
 
@@ -102,26 +138,33 @@ Run every comparison on the maximum available historical period, with
 chronological splits and a separate post-deployment forward slice. Include fees,
 slippage, portfolio capacity, and the canonical watchlist-top denominator.
 
-1. Re-run cooldown `2` versus the former `8` control. Compare early capture,
-   cooldown harm, false positives, precision, realized PnL, and capacity cost.
-   Do not relax cooldown further from a before/after comparison alone.
+1. Keep cooldown `2`; its first forward window is supportive. Re-run it versus
+   the former `8` control only when a causal rollback warning appears. Do not
+   relax cooldown further from a before/after comparison alone.
 2. Re-run the guarded non-losing replacement policy against no replacement and
-   the former replacement behavior. The stale June report must not be used to
-   describe the guarded policy shipped in July.
+   the former replacement behavior after replay caching is fixed. Until both
+   maximum-period and fresh stability windows finish, treat the live cohort as
+   a warning and keep the current guard unchanged.
 3. Audit the score-34 near-miss band with a frozen control: attribute candidates
    to detection, score admission, other blockers, portfolio capacity, and later
    outcome. Test score `32-33` first as WATCH/shadow and promote to BUY only if
    objective uplift survives all chronological windows without unacceptable
    precision or PnL loss.
-4. Refresh observable exit-tail labels and replay the selector against the
-   current SELL control. The relevant pressure is `22` early exits, median exit
-   efficiency `0.00`, median giveback `70.56%`, and negative median closed PnL;
-   lower giveback alone is not sufficient if realized reward falls.
+4. Reject `non_ema_mfe150` for production from its negative independent live
+   labels. Search a materially different observable exit hypothesis; do not
+   retune thresholds on the same failed cohort.
 5. Rebuild entry-admission and blocker-reward reports only after final-critic
    backfill is complete. Keep all admission/blocker relaxations shadow-only
    until a targeted replay passes.
-6. Continue suspicious re-entry label collection. Zero alerts and zero mature
-   labels provide no promotion evidence.
+6. Repair suspicious re-entry measurement before more collection. Zero alerts
+   after `43` registrations is a zero-conversion funnel, not a request for more
+   of the same unlabeled data.
+7. Disable or recalibrate the dedicated BTC WATCH after its post-deploy forward
+   gate failure; retain V2 shadow observation and use at least 12h episode
+   deduplication in the next replay.
+8. Retire `base_recovery_v1` as a promotion candidate. Any next regime-start
+   hypothesis must be materially different and use the failed live cases as a
+   frozen holdout.
 
 P1 promotion gate:
 

@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-07-17 20:15 Europe/Budapest
+Last updated: 2026-08-03 11:06 Europe/Budapest
 
 ## Objective
 
@@ -16,7 +16,9 @@ earlier capture of same-day watchlist top movers with a single unified
 | Scout objective and metric contract | shipped | `SCOUT_OPTIMIZATION_SPEC.md` | `watchlist_top_bought`, `early_captures`, `false_positive_buys` | keep current |
 | Signal-quality evaluator | shipped | `skills/signal-quality-evaluator/SKILL.md` | `miss_rate`, `capture_ratio_at_entry`, `exit_efficiency`, `giveback_pct` | feed hypothesis queue |
 | Exit-quality auditor | shipped measurement-only | `docs/specs/exit-quality-auditor.md` | `exit_efficiency`, `giveback_pct`, `top_mover_exit_failure_count`, `negative_after_mfe_count` | choose SELL hypotheses for replay; no live SELL change |
-| Observable exit-tail selector | shipped shadow-only | `docs/specs/observable-tail-selector-replay.md` | selected-case delta, selected-case worse-rate, false-positive allow-rate, forward tail labels | collect independent live labels, then fee/slippage candle-path replay; no live SELL change |
+| Observable exit-tail selector | shadow profile failed live-forward gate | `docs/specs/observable-tail-selector-replay.md` | selected-case delta, selected-case worse-rate, false-positive allow-rate, forward tail labels | reject `non_ema_mfe150`; search a materially different selector; no live SELL change |
+| Shadow suspicious re-entry | measurement blocked at zero-conversion funnel | `docs/specs/shadow-suspicious-reentry-scorecard.md` | registered watches, T+2/T+5/T+10 returns, final alerts | label every registered watch counterfactually before changing thresholds |
+| Research-universe shadow labels | labeling broken | `docs/specs/research-universe-shadow-collector.md` | mature label coverage, malformed-row quarantine, label freshness | repair tolerant incremental backfill before using the accumulated rows |
 | Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
 | Watchlist-filtered top-mover denominator | shipped measurement correction | `docs/specs/watchlist-filtered-top-mover-denominator.md` | `watchlist_top_capture_rate_pct`, `watchlist_top_early_capture_rate_pct`, `exchange_top_in_watchlist` | use filtered denominator for operator reports |
 | Main top-gainer intraday feature parity | shipped bugfix | `docs/specs/main-top-gainer-intraday-feature-parity.md` | `top_gainer_score`, `today_change_pct`, `forecast_return_pct`, false-positive pressure | monitor next daily report; thresholds unchanged |
@@ -29,8 +31,8 @@ earlier capture of same-day watchlist top movers with a single unified
 | Watchlist rescue admission replay | research-only implementation | `docs/specs/watchlist-rescue-admission-replay.md` | early watchlist capture, ret5 precision, missed-winner rescue candidates | advance only if holdout profile passes gate |
 | 1m wake-up scout | shipped shadow-assisted | `SCOUT_OPTIMIZATION_SPEC.md` | `wakeups`, `admitted`, `buy_conversion`, `top_mover_conversion` | live funnel review |
 | Early trend-start mode | replay-only research, first profile rejected | `docs/specs/trend-start-mode.md` | `capture_rate`, `capture_ratio_at_entry`, `lead_time_to_final_top_min`, `trade_precision`, `PnL` | next narrower replay profile |
-| Multi-day regime-start watch | shipped shadow-only; WATCH rejected | `docs/specs/regime-start-watch.md` | holdout useful precision, 5d return/MFE/MAE, alerts per active day, POL detection time | collect independent shadow labels; Telegram remains disabled |
-| BTC early trend WATCH | shipped operator WATCH; no BUY change | `docs/specs/btc-early-trend-watch.md` | 6h/12h return stability, positive rate, alert deduplication | monitor forward WATCH labels; keep broad V2 realtime disabled |
+| Multi-day regime-start watch | shadow profile rejected offline and live-forward | `docs/specs/regime-start-watch.md` | holdout useful precision, 5d return/MFE/MAE, alerts per active day, POL detection time | retire `base_recovery_v1`; Telegram remains disabled |
+| BTC early trend WATCH | shipped operator WATCH; post-deploy forward gate failed | `docs/specs/btc-early-trend-watch.md` | 6h/12h return stability, positive rate, alert deduplication | disable/recalibrate dedicated WATCH; keep broad V2 realtime disabled |
 | Agent entry quality gates | shipped | `docs/specs/agent-entry-quality.md` | `trade_precision`, `false_positive_buys`, `blocked_winners` | replay before any relaxation |
 | Local control-plane reliability | shipped | `docs/specs/local-control-plane-reliability.md` | process health, duplicate-launch avoidance | keep operational-only |
 | Telegram positions freshness | shipped operational fix | `docs/specs/telegram-positions-freshness.md` | operator display correctness, stale-position avoidance | keep cache fallback-only |
@@ -100,9 +102,9 @@ earlier capture of same-day watchlist top movers with a single unified
 | V2 wake-up to V1 bridge replay | research-only diagnostic | `docs/specs/v2-wakeup-v1-bridge-replay.md` | top precision/recall, ret5 precision, candidate pressure, V2→V1 delay | advance only to portfolio-aware replay if gate passes |
 | V2 unified runtime integration | planned | `docs/specs/v2-unified-runtime-integration.md` | one-command startup, runtime health, release parity | required before any live-shadow worker |
 | Signal-quality feedback policy | shipped narrow auto-apply | `docs/specs/cooldown-relaxation-replay.md` | `cooldown_harm`, PnL, precision, Top-20 capture | base cooldown `2`; require max-period + stability evidence |
-| Peak-risk lifecycle telemetry | shipped shadow-only | `docs/specs/peak-risk-shadow.md` | event count, `peak_within_n_bars`, false-positive continuation rate | collect shadow rows before any exit change |
+| Peak-risk lifecycle telemetry | shadow-only; accumulated cohort has no edge | `docs/specs/peak-risk-shadow.md` | event count, exit-minus-alert delta, false-positive continuation rate | no exit change; require a materially different profile |
 | Hypothesis queue | shipped diagnostic-only | `docs/specs/hypothesis-queue.md` | ranked hypotheses, linked evidence, replay status | no auto-apply |
-| Agent non-losing replacement guard | shipped replay-validated | `docs/specs/portfolio-replacement-behavior-replay.md` | replacement uplift, Top-20 capture, precision, harmed replacements | monitor post-deploy shadow events; do not broaden the guard |
+| Agent non-losing replacement guard | shipped replay-validated; post-deploy warning | `docs/specs/portfolio-replacement-behavior-replay.md` | replacement uplift, Top-20 capture, precision, harmed replacements | optimize frozen replay, rerun 30d/14d; keep current guard pending result |
 | Unified portfolio replacement | planned | `SCOUT_OPTIMIZATION_SPEC.md` | opportunity cost, replacement uplift, capture under `10/10` | replay grid required |
 | GitHub-inspired portfolio controls | research-only replay harness | `docs/specs/github-inspired-portfolio-controls.md` | `pnl_total`, `trade_precision`, `capture_rate`, `exit_efficiency`, `giveback_pct` | 30d regime split before any live adoption |
 | BTC benchmark admission | research-only complete; not promoted | `docs/specs/btc-benchmark-admission-replay.md` | net PnL, BTC PnL, bypass admissions, holdout stability | collect four more frozen-profile rotation cases; no live change |
