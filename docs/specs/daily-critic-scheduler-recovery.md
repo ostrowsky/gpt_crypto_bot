@@ -39,6 +39,10 @@ never due again, and a restart erased the in-memory slot state.
 - `--json` CLI output is emitted as UTF-8 bytes so a successfully saved report
   cannot fail afterward on a Windows cp1251 console when reasons contain
   non-ASCII text.
+- On startup, the newest valid critic artifact overrides an older status-file
+  snapshot (for example, a CLI-produced final replaces the same day's stale
+  midday state). Artifact recovery updates observability only and does not
+  increment run counters or resend Telegram output.
 
 ## Guardrails
 

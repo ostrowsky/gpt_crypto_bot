@@ -18,6 +18,7 @@ from rl_headless_worker import (
     build_status_snapshot,
     _render_top_gainer_telegram,
     _restore_daily_report_state,
+    _restore_latest_top_gainer_artifact,
     _scheduled_top_gainer_slot,
     _scheduled_watchlist_goal_slot,
     _should_send_top_gainer_telegram,
@@ -123,13 +124,42 @@ class TestDailyCriticSchedulerRecovery(unittest.TestCase):
             original = rl_headless_worker.STATUS_FILE
             try:
                 rl_headless_worker.STATUS_FILE = status_file
-                self.assertTrue(_restore_daily_report_state(state))
+                self.assertTrue(_restore_daily_report_state(state, Path(td) / "reports"))
             finally:
                 rl_headless_worker.STATUS_FILE = original
 
         self.assertEqual(state.top_gainer_runs_total, 7)
         self.assertEqual(state.top_gainer_last_slot_key, "2026-08-02::final")
         self.assertEqual(state.watchlist_goal_last_slot_key, "2026-08-02::goal_22h")
+
+    def test_latest_final_artifact_overrides_stale_midday_status(self) -> None:
+        state = WorkerState(60, 60, 1, 1, False)
+        state.top_gainer_last_target_day_local = "2026-08-02"
+        state.top_gainer_last_phase = "midday"
+        state.top_gainer_last_slot_key = "2026-08-02::midday"
+        with tempfile.TemporaryDirectory() as td:
+            reports = Path(td)
+            report_path = reports / "top_gainer_critic_2026-08-02_final.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "target_day_local": "2026-08-02",
+                        "phase": "final",
+                        "summary": {
+                            "watchlist_top_capture_rate_pct": 75.0,
+                            "watchlist_top_early_capture_rate_pct": 50.0,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(_restore_latest_top_gainer_artifact(state, reports))
+
+        self.assertEqual(state.top_gainer_last_slot_key, "2026-08-02::final")
+        self.assertEqual(state.top_gainer_last_phase, "final")
+        self.assertEqual(state.top_gainer_last_capture_rate_pct, 75.0)
+        self.assertEqual(state.top_gainer_last_early_capture_rate_pct, 50.0)
 
 
 class TestLearningProgressTelegramSlot(unittest.TestCase):

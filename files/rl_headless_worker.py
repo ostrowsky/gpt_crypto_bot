@@ -479,7 +479,56 @@ def _restore_training_state(state: "WorkerState") -> bool:
     return bool(restored or latest_restored)
 
 
-def _restore_daily_report_state(state: "WorkerState") -> bool:
+def _restore_latest_top_gainer_artifact(
+    state: "WorkerState",
+    reports_dir: Path = REPORT_DIR,
+) -> bool:
+    candidates: list[tuple[tuple[str, int, float], Path, Dict[str, Any]]] = []
+    for path in reports_dir.glob("top_gainer_critic_*_*.json"):
+        report = _load_json_file(path)
+        target_day = str(report.get("target_day_local") or "")
+        phase = str(report.get("phase") or "").lower()
+        if not target_day or phase not in {"midday", "final"}:
+            continue
+        try:
+            date.fromisoformat(target_day)
+        except ValueError:
+            continue
+        candidates.append(((target_day, int(phase == "final"), path.stat().st_mtime), path, report))
+    if not candidates:
+        return False
+
+    artifact_key, path, report = max(candidates, key=lambda item: item[0])
+    current_day = str(state.top_gainer_last_target_day_local or "")
+    current_phase = str(state.top_gainer_last_phase or "").lower()
+    current_key = (current_day, int(current_phase == "final"), 0.0)
+    if artifact_key <= current_key:
+        return False
+
+    target_day = str(report["target_day_local"])
+    phase = str(report["phase"]).lower()
+    summary = report.get("summary") or {}
+    state.top_gainer_last_slot_key = f"{target_day}::{phase}"
+    state.top_gainer_last_finished_at = datetime.fromtimestamp(
+        path.stat().st_mtime, tz=timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state.top_gainer_last_error = ""
+    state.top_gainer_last_phase = phase
+    state.top_gainer_last_target_day_local = target_day
+    state.top_gainer_last_report_json = str(path)
+    txt_path = path.with_suffix(".txt")
+    state.top_gainer_last_report_txt = str(txt_path) if txt_path.exists() else ""
+    state.top_gainer_last_capture_rate_pct = summary.get("watchlist_top_capture_rate_pct")
+    state.top_gainer_last_early_capture_rate_pct = summary.get(
+        "watchlist_top_early_capture_rate_pct"
+    )
+    return True
+
+
+def _restore_daily_report_state(
+    state: "WorkerState",
+    reports_dir: Path = REPORT_DIR,
+) -> bool:
     payload = _load_status_snapshot()
     restored = False
     sections = (
@@ -532,7 +581,8 @@ def _restore_daily_report_state(state: "WorkerState") -> bool:
                 continue
             setattr(state, f"{state_prefix}_{state_suffix}", section[snapshot_key])
             restored = True
-    return restored
+    artifact_restored = _restore_latest_top_gainer_artifact(state, reports_dir)
+    return bool(restored or artifact_restored)
 
 
 def _try_acquire_train_lock(stale_after_sec: int = DEFAULT_TRAIN_LOCK_STALE_SEC) -> bool:
