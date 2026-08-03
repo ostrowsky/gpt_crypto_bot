@@ -26,6 +26,9 @@ never due again, and a restart erased the in-memory slot state.
   on the selected day's events, not on the total multi-month log size; the
   worker must not materialize complete `bot_events.jsonl` or
   `agent_events.jsonl` files.
+- Worker heartbeat summaries and ranker row counters likewise scan critic and
+  ML JSONL inputs incrementally. Routine status writes must remain bounded in
+  memory as those datasets grow.
 
 ## Guardrails
 
@@ -37,4 +40,5 @@ entry/exit gates, positions, watchlist membership, or Telegram BUY semantics.
 Focused tests cover missed-final catch-up outside the nominal window, final
 precedence, independent goal scheduling, and state restoration from a restart
 snapshot. A regression test also rejects whole-file event-log reads while
-preserving malformed-line and non-object filtering.
+preserving malformed-line and non-object filtering. Status aggregation and row
+count tests reject whole-file reads and preserve the existing counters.

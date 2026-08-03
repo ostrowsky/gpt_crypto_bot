@@ -122,9 +122,10 @@ def _count_jsonl_rows(path: Path) -> int:
     if not path.exists():
         return 0
     rows = 0
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if line.strip():
-            rows += 1
+    with path.open("r", encoding="utf-8", errors="ignore") as source:
+        for line in source:
+            if line.strip():
+                rows += 1
     return rows
 
 
@@ -132,21 +133,22 @@ def _count_ranker_rows(path: Path) -> int:
     if not path.exists():
         return 0
     rows = 0
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if not isinstance(rec, dict):
-            continue
-        if str(rec.get("signal_type", "none")) == "none":
-            continue
-        labels = rec.get("labels") or {}
-        if labels.get("ret_5") is None:
-            continue
-        rows += 1
+    with path.open("r", encoding="utf-8", errors="ignore") as source:
+        for line in source:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("signal_type", "none")) == "none":
+                continue
+            labels = rec.get("labels") or {}
+            if labels.get("ret_5") is None:
+                continue
+            rows += 1
     return rows
 
 

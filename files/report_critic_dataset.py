@@ -4,31 +4,29 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable
 
 import critic_dataset
 
 
-def _load_rows(path: Path) -> List[Dict[str, Any]]:
+def _iter_rows(path: Path) -> Iterable[Dict[str, Any]]:
     if not path.exists():
-        return []
-    rows: List[Dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(rec, dict):
-            rows.append(rec)
-    return rows
+        return
+    with path.open("r", encoding="utf-8", errors="ignore") as source:
+        for line in source:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(rec, dict):
+                yield rec
 
 
 def build_report(now: datetime | None = None) -> Dict[str, Any]:
     now = now or datetime.utcnow()
     path = critic_dataset.CRITIC_FILE
-    rows = _load_rows(path)
     last_24h_cutoff = now - timedelta(hours=24)
 
     def _parse_ts(rec: Dict[str, Any]) -> datetime | None:
@@ -40,18 +38,32 @@ def build_report(now: datetime | None = None) -> Dict[str, Any]:
         except Exception:
             return None
 
-    last_24h_rows = [r for r in rows if (_parse_ts(r) or datetime.min) >= last_24h_cutoff]
-    actions = Counter(str(r.get("decision", {}).get("action", "")) for r in rows)
-    signals = Counter(str(r.get("signal_type", "")) for r in rows)
-    labeled = sum(1 for r in rows if r.get("labels", {}).get("ret_3") is not None)
-    taken = sum(1 for r in rows if bool(r.get("labels", {}).get("trade_taken")))
-    outcomes = sum(1 for r in rows if r.get("labels", {}).get("trade_exit_pnl") is not None)
+    rows_total = 0
+    rows_last_24h = 0
+    labeled = 0
+    taken = 0
+    outcomes = 0
+    actions: Counter[str] = Counter()
+    signals: Counter[str] = Counter()
+    for rec in _iter_rows(path):
+        rows_total += 1
+        if (_parse_ts(rec) or datetime.min) >= last_24h_cutoff:
+            rows_last_24h += 1
+        actions[str(rec.get("decision", {}).get("action", ""))] += 1
+        signals[str(rec.get("signal_type", ""))] += 1
+        labels = rec.get("labels", {})
+        if labels.get("ret_3") is not None:
+            labeled += 1
+        if bool(labels.get("trade_taken")):
+            taken += 1
+        if labels.get("trade_exit_pnl") is not None:
+            outcomes += 1
 
     return {
         "path": str(path),
         "exists": path.exists(),
-        "rows_total": len(rows),
-        "rows_last_24h": len(last_24h_rows),
+        "rows_total": rows_total,
+        "rows_last_24h": rows_last_24h,
         "size_bytes": path.stat().st_size if path.exists() else 0,
         "last_write_time": path.stat().st_mtime if path.exists() else 0,
         "labeled_rows": labeled,

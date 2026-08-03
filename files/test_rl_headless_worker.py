@@ -5,9 +5,11 @@ import unittest
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import config
+import report_critic_dataset
 import rl_headless_worker
 from rl_headless_worker import (
     WorkerState,
@@ -24,6 +26,50 @@ from rl_headless_worker import (
 
 
 class TestDailyCriticSchedulerRecovery(unittest.TestCase):
+    def test_status_dataset_scans_do_not_read_whole_jsonl_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "critic.jsonl"
+            dataset.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts_signal": "2026-08-03T10:00:00Z",
+                                "signal_type": "trend",
+                                "decision": {"action": "take"},
+                                "labels": {"ret_3": 1.0, "ret_5": 1.0, "trade_taken": True},
+                            }
+                        ),
+                        "not-json",
+                        json.dumps(
+                            {
+                                "ts_signal": "2026-08-01T10:00:00Z",
+                                "signal_type": "none",
+                                "decision": {"action": "blocked"},
+                                "labels": {},
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            old_critic_file = report_critic_dataset.critic_dataset.CRITIC_FILE
+            try:
+                report_critic_dataset.critic_dataset.CRITIC_FILE = dataset
+                with patch.object(Path, "read_text", side_effect=AssertionError("whole-file read")):
+                    report = report_critic_dataset.build_report(datetime(2026, 8, 3, 12, 0))
+                    rows_total = rl_headless_worker._count_jsonl_rows(dataset)
+                    ranker_rows = rl_headless_worker._count_ranker_rows(dataset)
+            finally:
+                report_critic_dataset.critic_dataset.CRITIC_FILE = old_critic_file
+
+        self.assertEqual(report["rows_total"], 2)
+        self.assertEqual(report["rows_last_24h"], 1)
+        self.assertEqual(report["actions"], {"take": 1, "blocked": 1})
+        self.assertEqual(rows_total, 3)
+        self.assertEqual(ranker_rows, 1)
+
     def test_missing_previous_final_is_due_after_nominal_window(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             slot = _scheduled_top_gainer_slot(
