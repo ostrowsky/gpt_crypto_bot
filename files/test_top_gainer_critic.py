@@ -19,12 +19,18 @@ class TestTopGainerCritic(unittest.TestCase):
             event_file = Path(tmpdir) / "events.jsonl"
             event_file.write_text(
                 '{"event":"entry","sym":"BTCUSDT"}\nnot-json\n[]\n'
+                '{"event":"entry","sym":"ETHUSDT"}\n'
                 '{"event":"exit","sym":"BTCUSDT"}\n',
                 encoding="utf-8",
             )
 
             with patch.object(Path, "read_text", side_effect=AssertionError("whole-file read")):
-                rows = list(top_gainer_critic._iter_jsonl(event_file))
+                rows = list(
+                    top_gainer_critic._iter_jsonl(
+                        event_file,
+                        raw_required_tokens=("BTCUSDT",),
+                    )
+                )
 
         self.assertEqual([row["event"] for row in rows], ["entry", "exit"])
 

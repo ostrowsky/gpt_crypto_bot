@@ -5,7 +5,7 @@ import asyncio
 import json
 from collections import Counter
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
@@ -80,12 +80,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
+def _iter_jsonl(
+    path: Path,
+    *,
+    raw_required_tokens: tuple[str, ...] = (),
+) -> Iterable[Dict[str, Any]]:
     """Yield JSON objects without materializing a potentially large event log."""
     if not path.exists():
         return
     with path.open("r", encoding="utf-8", errors="ignore") as source:
         for line in source:
+            if raw_required_tokens and not any(token in line for token in raw_required_tokens):
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -326,8 +332,15 @@ async def fetch_day_performance(
 
 def _load_day_events(start_local: datetime, end_local: datetime, tz: ZoneInfo) -> dict[str, dict[str, list[dict[str, Any]]]]:
     rows: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    start_utc_day = start_local.astimezone(timezone.utc).date()
+    end_utc_day = end_local.astimezone(timezone.utc).date()
+    utc_date_tokens: list[str] = []
+    cursor = start_utc_day
+    while cursor <= end_utc_day:
+        utc_date_tokens.append(cursor.isoformat())
+        cursor += timedelta(days=1)
     for event_file, default_source in _event_log_files():
-        for rec in _iter_jsonl(event_file):
+        for rec in _iter_jsonl(event_file, raw_required_tokens=tuple(utc_date_tokens)):
             sym = str(rec.get("sym", ""))
             if not sym:
                 continue

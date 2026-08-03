@@ -26,6 +26,10 @@ never due again, and a restart erased the in-memory slot state.
   on the selected day's events, not on the total multi-month log size; the
   worker must not materialize complete `bot_events.jsonl` or
   `agent_events.jsonl` files.
+- Before JSON decoding, event lines are filtered by every UTC calendar date
+  touched by the requested local-day window. The scan makes no ordering
+  assumption, so late-appended records remain eligible while unrelated months
+  avoid JSON parsing cost.
 - Worker heartbeat summaries and ranker row counters likewise scan critic and
   ML JSONL inputs incrementally. Routine status writes must remain bounded in
   memory as those datasets grow.
