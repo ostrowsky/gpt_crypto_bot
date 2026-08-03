@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -408,7 +409,7 @@ def _fill_mature_labels_batch(
                 source_stat.st_mtime_ns,
             ):
                 raise RuntimeError("research dataset changed during label pass")
-            temp_file.replace(dataset_file)
+            _replace_dataset_with_retry(temp_file, dataset_file, source_stat)
             if malformed:
                 quarantine_file.parent.mkdir(parents=True, exist_ok=True)
                 with quarantine_file.open("a", encoding="utf-8") as target:
@@ -425,6 +426,29 @@ def _fill_mature_labels_batch(
         "malformed_rows_quarantined": len(malformed),
         "rows_scanned": rows_scanned,
     }
+
+
+def _replace_dataset_with_retry(
+    temp_file: Path,
+    dataset_file: Path,
+    source_stat: Any,
+    *,
+    delays: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0),
+) -> None:
+    for attempt in range(len(delays) + 1):
+        current_stat = dataset_file.stat()
+        if (current_stat.st_size, current_stat.st_mtime_ns) != (
+            source_stat.st_size,
+            source_stat.st_mtime_ns,
+        ):
+            raise RuntimeError("research dataset changed before atomic replacement")
+        try:
+            temp_file.replace(dataset_file)
+            return
+        except PermissionError:
+            if attempt >= len(delays):
+                raise
+            time.sleep(delays[attempt])
 
 
 def _incomplete_label_ranges(dataset_file: Path) -> dict[tuple[str, str], dict[str, int]]:

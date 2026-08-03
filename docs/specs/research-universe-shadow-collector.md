@@ -74,6 +74,12 @@ The active JSONL file must be replaced atomically after a successful label
 pass. If no label or quarantine change is needed, the original file must stay
 byte-for-byte unchanged.
 
+On Windows, a concurrent offline replay or scorecard may briefly hold a read
+handle that denies the final rename. The label pass retries only that
+`PermissionError` for a bounded 31.75 seconds. Before every retry it rechecks
+the original size and nanosecond mtime; any concurrent append aborts the
+replacement instead of risking truncation.
+
 The maintenance command
 `python backfill_research_universe_shadow_labels.py` must derive the earliest
 and latest incomplete observation for every symbol/timeframe pair, fetch that

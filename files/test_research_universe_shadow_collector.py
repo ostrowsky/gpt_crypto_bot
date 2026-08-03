@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import asyncio
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -104,6 +105,43 @@ class ResearchUniverseShadowCollectorTest(unittest.TestCase):
             self.assertEqual(result["malformed_rows_quarantined"], 0)
             self.assertEqual(dataset.read_text(encoding="utf-8"), original)
             self.assertFalse(dataset.with_name("research.jsonl.labels.tmp").exists())
+
+    def test_atomic_replace_retries_transient_windows_reader(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dataset = root / "research.jsonl"
+            temp = root / "research.jsonl.labels.tmp"
+            dataset.write_text("old\n", encoding="utf-8")
+            temp.write_text("new\n", encoding="utf-8")
+            source_stat = dataset.stat()
+            with mock.patch.object(
+                Path,
+                "replace",
+                autospec=True,
+                side_effect=[PermissionError("busy"), temp],
+            ) as replace_mock, mock.patch.object(collector.time, "sleep") as sleep_mock:
+                collector._replace_dataset_with_retry(
+                    temp,
+                    dataset,
+                    source_stat,
+                    delays=(0.1, 0.2),
+                )
+
+        self.assertEqual(replace_mock.call_count, 2)
+        sleep_mock.assert_called_once_with(0.1)
+
+    def test_atomic_replace_aborts_if_dataset_changed_during_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dataset = root / "research.jsonl"
+            temp = root / "research.jsonl.labels.tmp"
+            dataset.write_text("old\n", encoding="utf-8")
+            temp.write_text("new\n", encoding="utf-8")
+            source_stat = dataset.stat()
+            dataset.write_text("changed-size\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "changed before atomic replacement"):
+                collector._replace_dataset_with_retry(temp, dataset, source_stat, delays=())
 
     def test_incomplete_label_ranges_cover_maximum_pending_period(self) -> None:
         with tempfile.TemporaryDirectory() as td:
