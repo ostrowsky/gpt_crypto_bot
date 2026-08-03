@@ -22,6 +22,10 @@ never due again, and a restart erased the in-memory slot state.
   so operational health does not reset on restart.
 - Failures remain visible in worker status and retry on the bounded scheduler
   interval; no missing artifact is silently converted to a zero denominator.
+- Event JSONL inputs are consumed line by line. Daily critic memory must depend
+  on the selected day's events, not on the total multi-month log size; the
+  worker must not materialize complete `bot_events.jsonl` or
+  `agent_events.jsonl` files.
 
 ## Guardrails
 
@@ -32,4 +36,5 @@ entry/exit gates, positions, watchlist membership, or Telegram BUY semantics.
 
 Focused tests cover missed-final catch-up outside the nominal window, final
 precedence, independent goal scheduling, and state restoration from a restart
-snapshot.
+snapshot. A regression test also rejects whole-file event-log reads while
+preserving malformed-line and non-object filtering.

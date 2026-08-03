@@ -5,14 +5,29 @@ import tempfile
 import unittest
 from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import critic_dataset
 import top_gainer_critic
-from rl_headless_worker import _scheduled_top_gainer_slot
+from rl_headless_worker import _scheduled_top_gainer_slot, _scheduled_watchlist_goal_slot
 
 
 class TestTopGainerCritic(unittest.TestCase):
+    def test_iter_jsonl_streams_instead_of_reading_the_whole_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            event_file = Path(tmpdir) / "events.jsonl"
+            event_file.write_text(
+                '{"event":"entry","sym":"BTCUSDT"}\nnot-json\n[]\n'
+                '{"event":"exit","sym":"BTCUSDT"}\n',
+                encoding="utf-8",
+            )
+
+            with patch.object(Path, "read_text", side_effect=AssertionError("whole-file read")):
+                rows = list(top_gainer_critic._iter_jsonl(event_file))
+
+        self.assertEqual([row["event"] for row in rows], ["entry", "exit"])
+
     def test_watchlist_top_denominator_filters_exchange_top_before_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -272,13 +287,25 @@ class TestTopGainerCritic(unittest.TestCase):
 
     def test_scheduled_slots_map_to_midday_and_previous_day_final(self) -> None:
         tz = ZoneInfo("Europe/Budapest")
-        slot_goal = _scheduled_top_gainer_slot(datetime(2026, 4, 1, 22, 4, tzinfo=tz))
-        slot_midday = _scheduled_top_gainer_slot(datetime(2026, 4, 1, 12, 4, tzinfo=tz))
-        slot_final = _scheduled_top_gainer_slot(datetime(2026, 4, 1, 0, 5, tzinfo=tz))
-        slot_none = _scheduled_top_gainer_slot(datetime(2026, 4, 1, 13, 0, tzinfo=tz))
+        slot_goal = _scheduled_watchlist_goal_slot(datetime(2026, 4, 1, 22, 4, tzinfo=tz))
+        self.assertEqual(slot_goal[0].isoformat(), "2026-04-01")
 
-        self.assertEqual(slot_goal[0], "goal_cutoff")
-        self.assertEqual(slot_goal[1].isoformat(), "2026-04-01")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reports_dir = Path(tmpdir)
+            for day in range(25, 32):
+                (reports_dir / f"top_gainer_critic_2026-03-{day:02d}_final.json").write_text("{}")
+            slot_midday = _scheduled_top_gainer_slot(
+                datetime(2026, 4, 1, 12, 4, tzinfo=tz), reports_dir
+            )
+            slot_none = _scheduled_top_gainer_slot(
+                datetime(2026, 4, 1, 13, 0, tzinfo=tz), reports_dir
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            slot_final = _scheduled_top_gainer_slot(
+                datetime(2026, 4, 1, 0, 5, tzinfo=tz), Path(tmpdir)
+            )
+
         self.assertEqual(slot_midday[0], "midday")
         self.assertEqual(slot_midday[1].isoformat(), "2026-04-01")
         self.assertEqual(slot_final[0], "final")

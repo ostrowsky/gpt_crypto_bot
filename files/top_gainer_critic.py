@@ -81,20 +81,20 @@ def parse_args() -> argparse.Namespace:
 
 
 def _iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
+    """Yield JSON objects without materializing a potentially large event log."""
     if not path.exists():
-        return []
-    rows: List[Dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(rec, dict):
-            rows.append(rec)
-    return rows
+        return
+    with path.open("r", encoding="utf-8", errors="ignore") as source:
+        for line in source:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(rec, dict):
+                yield rec
 
 
 def _parse_utc_ts(raw: str | None) -> datetime | None:
