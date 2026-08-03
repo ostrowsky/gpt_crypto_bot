@@ -193,6 +193,14 @@ slippage, portfolio capacity, and the canonical watchlist-top denominator.
    outcome. Test score `32-33` first as WATCH/shadow and promote to BUY only if
    objective uplift survives all chronological windows without unacceptable
    precision or PnL loss.
+   The frozen 2026-08-03 audit is complete over all final-critic days from
+   `2026-04-01` through `2026-08-02`: `1,259` unique day/symbol candidates and
+   `1,179` mature outcomes. After excluding full-capacity and already-bought
+   cases, `196` candidates were admission-eligible. Net T+10 was negative over
+   all history (average `-0.125%`, median `-0.334%`), chronological holdout
+   (average `-0.160%`, median `-0.343%`), and recent 14-day stability (average
+   `-0.030%`, median `-0.226%`). Holdout top-mover precision was only `3.82%`.
+   Reject the `32-33` WATCH hypothesis and keep the live score floor at `34`.
 4. Reject `non_ema_mfe150` for production from its negative independent live
    labels. Search a materially different observable exit hypothesis; do not
    retune thresholds on the same failed cohort.
