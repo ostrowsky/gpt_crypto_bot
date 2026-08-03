@@ -7,9 +7,23 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ml_dataset
+from backfill_history import _load_bull_day_cache
 
 
 class TestMLDatasetAtomicRewrite(unittest.TestCase):
+    def test_recovery_event_scan_streams_utf8_and_ignores_bad_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            events = Path(td) / "bot_events.jsonl"
+            events.write_bytes(
+                b'{"event": "bull_day", "ts": "2026-08-01T00:00:00Z", "is_bull": true}\n'
+                b'\x98not-json\n'
+                b'{"event": "entry", "ts": "2026-08-02T00:00:00Z"}\n'
+            )
+            with patch.object(Path, "read_text", side_effect=AssertionError("whole-file read")):
+                cache = _load_bull_day_cache(events)
+
+        self.assertEqual(cache, {"2026-08-01": True})
+
     def test_label_rewrite_streams_and_preserves_other_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             dataset = Path(td) / "ml_dataset.jsonl"

@@ -92,6 +92,24 @@ def _read_valid_jsonl(path: Path, *, required_keys: tuple[str, ...] = ()) -> tup
     return records, skipped
 
 
+def _load_bull_day_cache(path: Path) -> Dict[str, bool]:
+    cache: Dict[str, bool] = {}
+    if not path.exists():
+        return cache
+    with path.open("r", encoding="utf-8", errors="ignore") as source:
+        for raw in source:
+            if '"event": "bull_day"' not in raw:
+                continue
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            ts = str(event.get("ts") or "")
+            if len(ts) >= 10:
+                cache[ts[:10]] = bool(event.get("is_bull", False))
+    return cache
+
+
 # ── Шаг 1: анализ пробелов ─────────────────────────────────────────────────────
 
 def find_gaps(
@@ -384,16 +402,7 @@ async def main() -> None:
     # Можно частично восстановить из bot_events.jsonl
     events_file = Path("bot_events.jsonl")
     if events_file.exists():
-        for line in events_file.read_text().splitlines():
-            if not line.strip():
-                continue
-            try:
-                e = json.loads(line)
-                if e.get("event") == "bull_day":
-                    date = e["ts"][:10]
-                    is_bull_day_cache[date] = e.get("is_bull", False)
-            except Exception:
-                pass
+        is_bull_day_cache = _load_bull_day_cache(events_file)
         log.info("Bull day кеш: %d дат из bot_events.jsonl", len(is_bull_day_cache))
 
     # Находим все символы и таймфреймы

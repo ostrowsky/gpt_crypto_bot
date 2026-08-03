@@ -23,6 +23,9 @@ only the rows it saw. On 2026-08-03 this reduced a 257.6 MB dataset to one row.
   intact.
 - Malformed rows remain observable through warning counts and are removed only
   during a successful atomic rewrite.
+- Recovery backfill scans `bot_events.jsonl` line by line as UTF-8 with invalid
+  bytes ignored; a host cp1251 default or one damaged byte cannot abort gap
+  reconstruction before writes begin.
 
 ## Guardrails
 
