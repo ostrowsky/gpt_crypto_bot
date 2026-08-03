@@ -24,10 +24,20 @@ When coverage is safe partial, the learning report should keep the caveat but sh
 - Do not change trading logic.
 - If triage is unavailable or missing symbols are active/unknown, keep conservative partial status.
 - Continue separating target metric quality from diagnostic trend-episode miss-rate.
+- Exchange status must be refreshed at least every six hours. Legacy status
+  caches without a generation timestamp are stale and cannot justify a safe
+  partial verdict.
+- Empty candle cache entries are retryable. They must never permanently suppress
+  a later fetch for a symbol that may still be active.
 
 ## Expected Behavior
 
 If latest signal quality report is partial but triage assessment is `partial_safe_inactive_symbols_only`, daily report may say the bot is developing on the target metric while preserving a warning-level coverage caveat.
+
+Coverage triage publishes both raw requested coverage and active-universe
+coverage. Missing `BREAK`, `HALT`, and `END_OF_LIFE` series are counted as
+inactive exclusions only when exchange-status provenance is fresh. Active or
+unknown misses remain metric-affecting and block a decision-grade verdict.
 
 ## Verdict Confidence Calibration
 

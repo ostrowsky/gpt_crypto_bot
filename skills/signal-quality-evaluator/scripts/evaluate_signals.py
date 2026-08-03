@@ -284,7 +284,9 @@ def _fetch_klines(symbol: str, tf: str, start_ms: int, end_ms: int, cache_dir: P
     if cache.exists():
         try:
             cached = json.loads(cache.read_text(encoding="utf-8"))
-            if isinstance(cached, list):
+            # Empty entries remain retryable: they can be caused by a transient
+            # API failure or by a later exchange-status transition.
+            if isinstance(cached, list) and cached:
                 return cached
         except Exception:
             pass

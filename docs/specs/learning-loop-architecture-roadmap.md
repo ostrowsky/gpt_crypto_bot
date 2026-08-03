@@ -132,6 +132,13 @@ P0 acceptance gate:
 - registered re-entry watches accumulate counterfactual labels even when final
   alert count remains zero.
 
+Coverage checkpoint (2026-08-03): implemented active/inactive separation,
+six-hour exchange-status freshness with provenance, conservative handling of a
+failed refresh, and retry of empty candle-cache entries. The apparent active
+TONUSDT gap was a stale local `TRADING` status; Binance reports `BREAK` and the
+series is now an explicit inactive exclusion. The seven-day operational
+acceptance window remains open.
+
 ### P1: refresh the evidence under current production policy
 
 Run every comparison on the maximum available historical period, with

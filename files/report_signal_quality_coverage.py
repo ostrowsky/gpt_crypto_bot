@@ -3,9 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,9 @@ DEFAULT_OUTPUT_JSON = REPORTS_DIR / "signal_quality_coverage_latest.json"
 DEFAULT_OUTPUT_TXT = REPORTS_DIR / "signal_quality_coverage_latest.txt"
 DEFAULT_EXCHANGE_STATUS_CACHE = ROOT / ".runtime" / "exchange_symbol_status.json"
 BINANCE_EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo"
+EXCHANGE_STATUS_CACHE_SCHEMA = 2
+EXCHANGE_STATUS_TTL_HOURS = 6.0
+INACTIVE_EXCHANGE_STATUSES = {"BREAK", "HALT", "END_OF_LIFE"}
 
 BAR_MS = {
     "1m": 60_000,
@@ -60,13 +62,18 @@ def build_report(
         status = "loaded" if _cache_has_rows(cache_path) else "missing"
         rows.append({**item, "status": status, "cache_path": str(cache_path) if cache_path else None})
     missing = [row for row in rows if row["status"] != "loaded"]
-    exchange_statuses = _exchange_statuses(
+    exchange_statuses, exchange_status_provenance = _exchange_statuses(
         sorted({row["symbol"] for row in missing}),
         exchange_status_cache,
         enabled=check_exchange_status,
     )
     for row in missing:
         row["exchange_status"] = exchange_statuses.get(row["symbol"], "unknown")
+    inactive_missing = [
+        row for row in missing
+        if str(row.get("exchange_status") or "unknown").upper() in INACTIVE_EXCHANGE_STATUSES
+    ]
+    active_missing = [row for row in missing if row not in inactive_missing]
     by_tf = {
         tf: {
             "requested": sum(1 for row in rows if row["tf"] == tf),
@@ -83,10 +90,19 @@ def build_report(
         "requested_series": len(rows),
         "loaded_series_from_cache": len(rows) - len(missing),
         "missing_series_count": len(missing),
+        "active_requested_series": len(rows) - len(inactive_missing),
+        "active_loaded_series": len(rows) - len(missing),
+        "active_missing_series_count": len(active_missing),
+        "inactive_excluded_series_count": len(inactive_missing),
         "missing_symbol_status_counts": _status_counts(missing),
+        "exchange_status_provenance": exchange_status_provenance,
         "by_timeframe": by_tf,
         "missing_series": missing,
-        "assessment": _assessment(coverage, missing),
+        "assessment": _assessment(
+            coverage,
+            missing,
+            statuses_trusted=bool(exchange_status_provenance.get("trusted")),
+        ),
     }
     text = render_text(result)
     if save:
@@ -103,7 +119,9 @@ def render_text(report: dict[str, Any]) -> str:
         f"source: {report.get('source_report')}",
         f"status: {(report.get('coverage') or {}).get('status')} — {report.get('assessment')}",
         f"series: loaded {report.get('loaded_series_from_cache')}/{report.get('requested_series')} missing {report.get('missing_series_count')}",
+        f"active series: loaded {report.get('active_loaded_series')}/{report.get('active_requested_series')} missing {report.get('active_missing_series_count')}; inactive excluded {report.get('inactive_excluded_series_count')}",
         f"missing status counts: {report.get('missing_symbol_status_counts') or {}}",
+        f"exchange status: {(report.get('exchange_status_provenance') or {}).get('freshness', 'unknown')}",
         "",
         "By timeframe:",
     ]
@@ -184,41 +202,152 @@ def _cache_has_rows(path: Path | None) -> bool:
     return isinstance(payload, list) and bool(payload)
 
 
-def _exchange_statuses(symbols: list[str], cache_path: Path, *, enabled: bool) -> dict[str, str]:
+def _exchange_statuses(
+    symbols: list[str],
+    cache_path: Path,
+    *,
+    enabled: bool,
+    now: datetime | None = None,
+    ttl_hours: float = EXCHANGE_STATUS_TTL_HOURS,
+) -> tuple[dict[str, str], dict[str, Any]]:
+    now = now or datetime.now(timezone.utc)
+    cached, generated_at = _decode_exchange_status_cache(_read_json(cache_path))
     if not symbols:
-        return {}
-    cached = _read_json(cache_path)
-    out = {sym: str(cached.get(sym) or "unknown") for sym in symbols if sym in cached}
-    missing = [sym for sym in symbols if sym not in out]
-    if not enabled or not missing:
-        return {sym: out.get(sym, "unknown") for sym in symbols}
-    changed = False
-    for sym in missing:
-        out[sym] = _fetch_exchange_status(sym)
-        changed = True
-    if changed:
-        merged = dict(cached)
-        merged.update(out)
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        except Exception:
-            pass
-    return {sym: out.get(sym, "unknown") for sym in symbols}
+        return {}, _exchange_status_provenance(
+            cache_path=cache_path,
+            generated_at=generated_at,
+            now=now,
+            ttl_hours=ttl_hours,
+            enabled=enabled,
+            refreshed=False,
+            refresh_error="",
+        )
+
+    out = {sym: str(cached.get(sym) or "unknown") for sym in symbols}
+    fresh = _cache_is_fresh(generated_at, now=now, ttl_hours=ttl_hours)
+    needs_refresh = enabled and (not fresh or any(status == "unknown" for status in out.values()))
+    refreshed = False
+    refresh_error = ""
+    if needs_refresh:
+        fetched, refresh_error = _fetch_exchange_statuses(symbols)
+        if fetched:
+            out.update(fetched)
+        if fetched and not refresh_error:
+            merged = dict(cached)
+            merged.update(fetched)
+            generated_at = now
+            refreshed = True
+            payload = {
+                "schema_version": EXCHANGE_STATUS_CACHE_SCHEMA,
+                "generated_at_utc": now.isoformat().replace("+00:00", "Z"),
+                "source": BINANCE_EXCHANGE_INFO,
+                "statuses": dict(sorted(merged.items())),
+            }
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+                tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+                tmp.replace(cache_path)
+            except Exception as exc:
+                refresh_error = f"cache_write_failed: {exc}"
+
+    provenance = _exchange_status_provenance(
+        cache_path=cache_path,
+        generated_at=generated_at,
+        now=now,
+        ttl_hours=ttl_hours,
+        enabled=enabled,
+        refreshed=refreshed,
+        refresh_error=refresh_error,
+    )
+    return {sym: out.get(sym, "unknown") for sym in symbols}, provenance
 
 
-def _fetch_exchange_status(symbol: str) -> str:
-    params = urllib.parse.urlencode({"symbol": symbol})
-    req = urllib.request.Request(f"{BINANCE_EXCHANGE_INFO}?{params}", headers={"User-Agent": "coverage-triage/1.0"})
+def _decode_exchange_status_cache(payload: dict[str, Any]) -> tuple[dict[str, str], datetime | None]:
+    statuses = payload.get("statuses") if isinstance(payload.get("statuses"), dict) else None
+    if statuses is None:
+        # Legacy caches have no generation timestamp and are always refreshed.
+        statuses = payload
+        generated_at = None
+    else:
+        generated_at = _parse_utc(payload.get("generated_at_utc"))
+    out = {
+        str(symbol).upper(): str(status)
+        for symbol, status in statuses.items()
+        if isinstance(status, str)
+    }
+    return out, generated_at
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if not value:
+        return None
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _cache_is_fresh(generated_at: datetime | None, *, now: datetime, ttl_hours: float) -> bool:
+    if generated_at is None:
+        return False
+    age_hours = (now - generated_at).total_seconds() / 3600.0
+    return 0.0 <= age_hours <= ttl_hours
+
+
+def _exchange_status_provenance(
+    *,
+    cache_path: Path,
+    generated_at: datetime | None,
+    now: datetime,
+    ttl_hours: float,
+    enabled: bool,
+    refreshed: bool,
+    refresh_error: str,
+) -> dict[str, Any]:
+    fresh = _cache_is_fresh(generated_at, now=now, ttl_hours=ttl_hours)
+    if not enabled:
+        freshness = "status_check_disabled"
+    elif fresh:
+        freshness = "fresh"
+    elif refresh_error:
+        freshness = "stale_refresh_failed"
+    else:
+        freshness = "stale"
+    return {
+        "schema_version": EXCHANGE_STATUS_CACHE_SCHEMA,
+        "source": BINANCE_EXCHANGE_INFO,
+        "cache_path": str(cache_path),
+        "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z") if generated_at else None,
+        "ttl_hours": ttl_hours,
+        "freshness": freshness,
+        "refreshed": refreshed,
+        "refresh_error": refresh_error or None,
+        "trusted": (not enabled) or fresh,
+    }
+
+
+def _fetch_exchange_statuses(symbols: list[str]) -> tuple[dict[str, str], str]:
+    req = urllib.request.Request(BINANCE_EXCHANGE_INFO, headers={"User-Agent": "coverage-triage/2.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return "unknown"
+    except Exception as exc:
+        return {}, f"exchange_info_failed: {exc}"
     rows = payload.get("symbols") if isinstance(payload, dict) else None
-    if not rows:
-        return "unknown"
-    return str((rows[0] or {}).get("status") or "unknown")
+    if not isinstance(rows, list):
+        return {}, "exchange_info_invalid_payload"
+    requested = set(symbols)
+    out = {
+        str(row.get("symbol")): str(row.get("status") or "unknown")
+        for row in rows
+        if isinstance(row, dict) and str(row.get("symbol")) in requested
+    }
+    error = "" if len(out) == len(requested) else "exchange_info_missing_requested_symbols"
+    return out, error
 
 
 def _status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -229,13 +358,18 @@ def _status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(out.items()))
 
 
-def _assessment(coverage: dict[str, Any], missing: list[dict[str, Any]]) -> str:
+def _assessment(
+    coverage: dict[str, Any],
+    missing: list[dict[str, Any]],
+    *,
+    statuses_trusted: bool = True,
+) -> str:
     if not missing and coverage.get("status") in {"ok", "complete"}:
         return "complete"
     if not missing:
         return "report_marked_partial_but_cache_complete"
     statuses = {str(row.get("exchange_status") or "unknown").upper() for row in missing}
-    if statuses and statuses <= {"BREAK", "HALT", "END_OF_LIFE"}:
+    if statuses_trusted and statuses and statuses <= INACTIVE_EXCHANGE_STATUSES:
         return "partial_safe_inactive_symbols_only"
     if coverage.get("events_loaded", 0) and coverage.get("paired_trades", 0):
         return "metric_affecting_possible: candle series missing while events/trades exist"
