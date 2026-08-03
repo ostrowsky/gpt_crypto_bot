@@ -192,3 +192,19 @@ P1 promotion gate:
 4. Resume calibrated V2 admission, portfolio EV/risk ranking, blocker harm, and
    correlation/exposure learners only after P0 is stable and their training
    labels carry current-policy provenance.
+
+## 2026-08-03 Early-Trend Discriminator Checkpoint
+
+The maximum-period research-universe replay rejected all 648 transparent
+ignition-rule combinations at the frozen train gate. A materially different
+CatBoost adjunct then passed validation and untouched holdout: holdout primary
+precision improved by `+1.50pp`, recall by `+3.74pp`, and average T+10 by
+`+0.046pp`; the strict label also improved. On 9 critic days / 26 canonical top
+movers, recall was unchanged and three captured movers were surfaced 560
+minutes earlier on average, while top-mover precision declined `0.94pp` within
+the frozen guardrail.
+
+The profile advances only to independent research-dataset shadow annotation.
+No BUY, score gate, blocker, portfolio, V2, or Telegram behavior changes. The
+next decision point is a new forward cohort with first-event symbol/day
+deduplication; do not reuse replay holdout rows as forward evidence.

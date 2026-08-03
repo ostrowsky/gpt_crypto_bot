@@ -176,6 +176,7 @@ RESEARCH_UNIVERSE_SHADOW_SCORECARD_ENABLED: bool = True
 RESEARCH_UNIVERSE_SHADOW_SCORECARD_TELEGRAM_ENABLED: bool = False
 RESEARCH_UNIVERSE_SHADOW_SCORECARD_DAYS: int = 14
 RESEARCH_UNIVERSE_SHADOW_SCORECARD_HORIZON: int = 5
+RESEARCH_EARLY_TREND_SHADOW_ENABLED: bool = True
 
 ATR_TRAIL_K: float = 2.0   # РјРЅРѕР¶РёС‚РµР»СЊ ATR РґР»СЏ С‚СЂРµР№Р»РёРЅРі-СЃС‚РѕРїР°
 MACDWARN_BARS: int = 3     # Р±Р°СЂРѕРІ РїРѕРґСЂСЏРґ MACD hist РїР°РґР°РµС‚ в†’ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рѕ СЂР°Р·РІРѕСЂРѕС‚Рµ

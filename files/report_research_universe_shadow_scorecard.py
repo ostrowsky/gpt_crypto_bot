@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 import research_universe_shadow_collector as collector
 
@@ -18,6 +19,7 @@ REPORT_DIR = WORKSPACE_ROOT / ".runtime" / "reports"
 DATASET_FILE = collector.DATASET_FILE
 DEFAULT_OUTPUT_JSON = REPORT_DIR / "research_universe_shadow_scorecard_latest.json"
 DEFAULT_OUTPUT_TXT = REPORT_DIR / "research_universe_shadow_scorecard_latest.txt"
+LOCAL_ZONE = ZoneInfo("Europe/Budapest")
 
 
 def build_scorecard(
@@ -52,6 +54,7 @@ def build_scorecard(
         min_avg_ret_pct=min_avg_ret_pct,
     )
     feature_patterns = _feature_pattern_rows(mature, label_key=label_key, high_return_threshold_pct=high_return_threshold_pct)
+    early_trend_shadow = _early_trend_shadow_cohort(rows)
     recommendation = _recommendation(total_rows=len(rows), mature_rows=len(mature), promotion_candidates=top_symbols)
     report = {
         "mode": "research_only",
@@ -81,6 +84,7 @@ def build_scorecard(
         "by_rule_signal": by_rule_signal,
         "promotion_candidates": top_symbols[:20],
         "feature_patterns": feature_patterns[:20],
+        "early_trend_shadow": early_trend_shadow,
         "recommendation": recommendation,
         "guardrails": [
             "research_only",
@@ -101,6 +105,7 @@ def render_text(report: dict[str, Any]) -> str:
     coverage = report.get("coverage") or {}
     summary = report.get("summary") or {}
     outside = report.get("outside_watchlist") or {}
+    early = report.get("early_trend_shadow") or {}
     rec = report.get("recommendation") or {}
     lines = [
         "Research Universe Shadow Scorecard",
@@ -118,6 +123,12 @@ def render_text(report: dict[str, Any]) -> str:
         f"  mature avg/median: {_fmt(summary.get('avg_ret_pct'))}% / {_fmt(summary.get('median_ret_pct'))}%",
         f"  positive rate: {_fmt(summary.get('positive_rate_pct'))}%  high-return rate: {_fmt(summary.get('high_return_rate_pct'))}%",
         f"  outside avg/positive: {_fmt(outside.get('avg_ret_pct'))}% / {_fmt(outside.get('positive_rate_pct'))}%",
+        "",
+        "Early-trend independent shadow:",
+        f"  first candidates/mature: {early.get('first_candidates', 0)}/{early.get('mature_both', 0)}",
+        f"  primary precision: {_fmt(early.get('primary_precision_pct'))}%  strict: {_fmt(early.get('strict_precision_pct'))}%",
+        f"  avg T+5/T+10: {_fmt(early.get('avg_ret_5_pct'))}% / {_fmt(early.get('avg_ret_10_pct'))}%",
+        f"  decision: {early.get('decision', 'collect_forward_labels')}",
         "",
         f"Recommendation: {rec.get('decision', 'unknown')}",
         f"Reason: {rec.get('reason', '')}",
@@ -245,6 +256,68 @@ def _feature_pattern_rows(rows: list[dict[str, Any]], *, label_key: str, high_re
     return _group_rows(rows, key_fn=_feature_pattern_key, label_key=label_key, high_return_threshold_pct=high_return_threshold_pct)
 
 
+def _early_trend_shadow_cohort(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    annotated = [
+        row
+        for row in rows
+        if bool((row.get("early_trend_shadow") or {}).get("candidate"))
+    ]
+    annotated.sort(key=lambda row: str(row.get("ts_utc") or ""))
+    first_rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in annotated:
+        symbol = str(row.get("sym") or "")
+        local_day = _local_day(row.get("ts_utc"))
+        if not symbol or not local_day:
+            continue
+        key = (symbol, local_day)
+        if key in seen:
+            continue
+        seen.add(key)
+        first_rows.append(row)
+    mature = [
+        row
+        for row in first_rows
+        if _label_value(row, "ret_5") is not None and _label_value(row, "ret_10") is not None
+    ]
+    primary = [
+        row
+        for row in mature
+        if float(_label_value(row, "ret_5") or 0.0) >= 0.5
+        and float(_label_value(row, "ret_10") or 0.0) >= 1.0
+    ]
+    strict = [
+        row
+        for row in mature
+        if float(_label_value(row, "ret_5") or 0.0) >= 1.0
+        and float(_label_value(row, "ret_10") or 0.0) >= 2.0
+    ]
+    ret_5 = [float(_label_value(row, "ret_5") or 0.0) for row in mature]
+    ret_10 = [float(_label_value(row, "ret_10") or 0.0) for row in mature]
+    if len(mature) < 30:
+        decision = "collect_forward_labels"
+    elif _pct(len(primary), len(mature)) is not None and float(_pct(len(primary), len(mature)) or 0.0) >= 10.0:
+        decision = "ready_for_frozen_forward_audit_not_production"
+    else:
+        decision = "forward_gate_failed_keep_shadow_only"
+    return {
+        "annotated_candidates": len(annotated),
+        "first_candidates": len(first_rows),
+        "mature_both": len(mature),
+        "pending": len(first_rows) - len(mature),
+        "primary_useful": len(primary),
+        "primary_precision_pct": _pct(len(primary), len(mature)),
+        "strict_useful": len(strict),
+        "strict_precision_pct": _pct(len(strict), len(mature)),
+        "avg_ret_5_pct": _avg(ret_5),
+        "median_ret_5_pct": _median(ret_5),
+        "avg_ret_10_pct": _avg(ret_10),
+        "median_ret_10_pct": _median(ret_10),
+        "decision": decision,
+        "production_eligible": False,
+    }
+
+
 def _feature_pattern_key(row: dict[str, Any]) -> str:
     f = row.get("f") or {}
     return "|".join(
@@ -315,6 +388,11 @@ def _parse_ts(value: Any) -> datetime | None:
         return dt.astimezone(timezone.utc)
     except Exception:
         return None
+
+
+def _local_day(value: Any) -> str:
+    parsed = _parse_ts(value)
+    return parsed.astimezone(LOCAL_ZONE).date().isoformat() if parsed else ""
 
 
 def _fmt_ts(value: datetime) -> str:

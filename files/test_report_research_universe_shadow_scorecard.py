@@ -69,6 +69,39 @@ class ResearchUniverseShadowScorecardTest(unittest.TestCase):
         self.assertEqual(report["recommendation"]["decision"], "insufficient_data")
         self.assertEqual(report["coverage"]["rows_in_window"], 0)
 
+    def test_early_trend_shadow_deduplicates_symbol_local_day(self) -> None:
+        rows = [
+            {
+                **_row("AAAUSDT", "2026-06-01T20:30:00Z", 0.8, inside=True, signal="none"),
+                "early_trend_shadow": {"candidate": True},
+                "labels": {"ret_5": 0.8, "ret_10": 1.5},
+            },
+            {
+                **_row("AAAUSDT", "2026-06-01T21:00:00Z", -1.0, inside=True, signal="none"),
+                "early_trend_shadow": {"candidate": True},
+                "labels": {"ret_5": -1.0, "ret_10": -2.0},
+            },
+            {
+                **_row("BBBUSDT", "2026-06-02T08:00:00Z", 1.2, inside=True, signal="none"),
+                "early_trend_shadow": {"candidate": True},
+                "labels": {"ret_5": 1.2, "ret_10": 2.5},
+            },
+            {
+                **_row("CCCUSDT", "2026-06-02T09:00:00Z", None, inside=True, signal="none"),
+                "early_trend_shadow": {"candidate": True},
+                "labels": {"ret_5": None, "ret_10": None},
+            },
+        ]
+
+        cohort = scorecard._early_trend_shadow_cohort(rows)
+
+        self.assertEqual(cohort["annotated_candidates"], 4)
+        self.assertEqual(cohort["first_candidates"], 3)
+        self.assertEqual(cohort["mature_both"], 2)
+        self.assertEqual(cohort["primary_useful"], 2)
+        self.assertEqual(cohort["strict_useful"], 1)
+        self.assertEqual(cohort["decision"], "collect_forward_labels")
+
 
 if __name__ == "__main__":
     unittest.main()

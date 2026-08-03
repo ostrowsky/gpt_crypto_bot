@@ -14,6 +14,7 @@ import numpy as np
 
 import config
 import data_collector
+import research_early_trend_shadow
 from indicators import compute_features
 from runtime_executors import run_cpu
 from strategy import fetch_klines
@@ -89,6 +90,9 @@ async def run_once(
         "rows_written": 0,
         "labels_updated": 0,
         "malformed_rows_quarantined": 0,
+        "early_trend_scored": 0,
+        "early_trend_candidates": 0,
+        "early_trend_model_error": "",
         "dataset_file": str(dataset_file),
     }
     _write_status(status_file, status)
@@ -179,6 +183,8 @@ async def collect_symbols(
 ) -> dict[str, int]:
     existing_ids = _existing_ids(dataset_file)
     rows_written = 0
+    early_trend_scored = 0
+    early_trend_candidates = 0
     market_data: dict[tuple[str, str], Any] = {}
     pairs = [(item, tf) for item in universe for tf in timeframes]
     for start in range(0, len(pairs), batch_size):
@@ -205,6 +211,8 @@ async def collect_symbols(
                 log.debug("research universe collect error: %s", result)
                 continue
             rows_written += int(result.get("rows_written", 0))
+            early_trend_scored += int(result.get("early_trend_scored", 0))
+            early_trend_candidates += int(result.get("early_trend_candidates", 0))
             key = result.get("market_data_key")
             data = result.get("market_data")
             if isinstance(key, tuple) and len(key) == 2 and data is not None:
@@ -214,6 +222,9 @@ async def collect_symbols(
                 {
                     "pairs_scanned": min(start + len(batch), len(pairs)),
                     "rows_written": rows_written,
+                    "early_trend_scored": early_trend_scored,
+                    "early_trend_candidates": early_trend_candidates,
+                    "early_trend_model_error": research_early_trend_shadow.SCORER.last_error,
                 }
             )
             _write_status(status_file, status)
@@ -226,6 +237,9 @@ async def collect_symbols(
         "rows_written": rows_written,
         "labels_updated": labels_updated,
         "malformed_rows_quarantined": malformed_rows_quarantined,
+        "early_trend_scored": early_trend_scored,
+        "early_trend_candidates": early_trend_candidates,
+        "early_trend_model_error": research_early_trend_shadow.SCORER.last_error,
     }
 
 
@@ -256,9 +270,12 @@ async def _collect_one(
     feat = await run_cpu(compute_features, data["o"], data["h"], data["l"], data["c"].astype(float), data["v"])
     rule_signal = await run_cpu(data_collector._detect_rule_signal, feat, i, data)
     record = _build_record(item, tf, bar_ts, rule_signal, feat, i, data)
+    annotation = research_early_trend_shadow.annotate_record(record)
     _append_jsonl(dataset_file, record)
     existing_ids.add(record_id)
     result["rows_written"] = 1
+    result["early_trend_scored"] = int(annotation is not None)
+    result["early_trend_candidates"] = int(bool(annotation and annotation.get("candidate")))
     return result
 
 
