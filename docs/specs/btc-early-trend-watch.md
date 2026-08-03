@@ -1,7 +1,7 @@
 # BTC Early Trend WATCH
 
-Status: shipped operator WATCH; no BUY-policy change
-Last updated: 2026-07-17
+Status: retired after failed live-forward gate; broad V2 shadow remains enabled
+Last updated: 2026-08-03
 
 ## Problem
 
@@ -61,3 +61,13 @@ fresh catch-up, persistent deduplication, and WATCH/not-BUY wording.
 
 Set `V2_BTC_TREND_WATCH_TELEGRAM_ENABLED=False` to stop these alerts without
 disabling V2 shadow collection or changing trading behavior.
+
+## Live-Forward Decision — 2026-08-03
+
+The post-deployment cohort contained 11 independent episodes after a 12-hour
+deduplication window. Six-hour return averaged `-0.1788%`, median was
+`-0.2082%`, and only `36.36%` were positive. Twelve-hour average was only
+`+0.0068%` (10 mature cases), despite a positive median, so the original replay
+edge did not survive independent forward observation. The dedicated Telegram
+WATCH is disabled by default. This retirement does not disable the broad V2
+observer and does not change BUY admission.

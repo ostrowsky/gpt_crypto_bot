@@ -39,6 +39,7 @@ class LabeledShadowReentry:
     mfe_pct: float
     bars_since_exit: int
     cooldown_bars_left: int
+    cohort: str
     label_status: str
     label_reason: str = ""
     ret_2: float | None = None
@@ -70,10 +71,16 @@ def build_scorecard(
         _label_event(row, kline_loader=kline_loader, now_utc=now_utc)
         for row in rows
     ]
+    registered_labeled = [
+        _label_registered_watch(row, kline_loader=kline_loader, now_utc=now_utc)
+        for row in watch_decisions
+        if row.get("decision") == "registered"
+    ]
     payload = _payload(
         target_day,
         timezone_name,
         labeled,
+        registered_labeled=registered_labeled,
         watch_decisions=watch_decisions,
         excluded_alerts=excluded_alerts,
         excluded_watch_decisions=excluded_watch_decisions,
@@ -117,6 +124,9 @@ def render_text(scorecard: dict[str, Any]) -> str:
         f"excluded non-watchlist telemetry={summary.get('excluded_non_watchlist_events', 0)}.",
         f"  • same-day alert/registered pressure: {_fmt_pct(summary.get('same_day_alert_per_registered_ratio'))}; "
         f"pending watch windows={summary.get('watch_pending', 0)}.",
+        f"  • registered cohort T+5: labeled={summary.get('registered_labeled_ret5', 0)}; "
+        f"avg/median={_fmt(summary.get('registered_avg_ret5'))} / {_fmt(summary.get('registered_median_ret5'))}; "
+        f"positive={_fmt_pct(summary.get('registered_ret5_positive_rate'))}.",
         f"  • ret5 avg/median: {_fmt(summary.get('avg_ret5'))} / {_fmt(summary.get('median_ret5'))}; positive={_fmt_pct(summary.get('ret5_positive_rate'))}.",
         f"  • ret10 avg/median: {_fmt(summary.get('avg_ret10'))} / {_fmt(summary.get('median_ret10'))}; downside p50={_fmt(summary.get('median_drawdown10'))}.",
         f"  • exit context: avg exit pnl={_fmt(summary.get('avg_exit_pnl_pct'))}; avg prior MFE={_fmt(summary.get('avg_mfe_pct'))}.",
@@ -142,6 +152,7 @@ def _payload(
     timezone_name: str,
     labeled: list[LabeledShadowReentry],
     *,
+    registered_labeled: list[LabeledShadowReentry],
     watch_decisions: list[dict[str, Any]],
     excluded_alerts: list[dict[str, Any]],
     excluded_watch_decisions: list[dict[str, Any]],
@@ -156,9 +167,15 @@ def _payload(
     ret10 = _vals(x.ret_10 for x in mature)
     drawdown10 = _vals(x.max_drawdown_10 for x in mature)
     runup10 = _vals(x.max_runup_10 for x in mature)
+    registered_mature = [x for x in registered_labeled if x.label_status == "labeled"]
+    registered_pending = [x for x in registered_labeled if x.label_status == "pending"]
+    registered_failed = [x for x in registered_labeled if x.label_status == "missing"]
+    registered_ret5 = _vals(x.ret_5 for x in registered_mature)
+    registered_ret10 = _vals(x.ret_10 for x in registered_mature)
+    registered_drawdown10 = _vals(x.max_drawdown_10 for x in registered_mature)
     watch_counts = Counter(str(row.get("decision") or "unknown") for row in watch_decisions)
     watch_registered = int(watch_counts.get("registered", 0))
-    watch_pending = _pending_registered_watch_count(watch_decisions, labeled, now_utc=now_utc)
+    watch_pending = len(registered_pending)
     coverage_reasons: list[str] = []
     if not events_file.exists():
         coverage_reasons.append("missing bot_events.jsonl")
@@ -166,6 +183,8 @@ def _payload(
         coverage_reasons.append(f"pending labels: {len(pending)}")
     if failed:
         coverage_reasons.append(f"missing market data: {len(failed)}")
+    if registered_failed:
+        coverage_reasons.append(f"missing registered-watch market data: {len(registered_failed)}")
     if not labeled and not watch_decisions and events_file.exists():
         coverage_reasons.append("no re-entry watch decisions or alerts for target day")
     if watch_pending:
@@ -182,6 +201,20 @@ def _payload(
         "excluded_non_watchlist_events": len(excluded_alerts) + len(excluded_watch_decisions),
         "watch_registered": watch_registered,
         "watch_pending": watch_pending,
+        "registered_labeled_ret5": len(registered_ret5),
+        "registered_pending": len(registered_pending),
+        "registered_missing": len(registered_failed),
+        "registered_avg_ret5": _avg(registered_ret5),
+        "registered_median_ret5": _median(registered_ret5),
+        "registered_avg_ret10": _avg(registered_ret10),
+        "registered_median_ret10": _median(registered_ret10),
+        "registered_ret5_positive_rate": _ratio(
+            sum(1 for value in registered_ret5 if value > 0.0), len(registered_ret5)
+        ),
+        "registered_ret5_gt_fee_rate": _ratio(
+            sum(1 for value in registered_ret5 if value > 0.15), len(registered_ret5)
+        ),
+        "registered_median_drawdown10": _median(registered_drawdown10),
         "watch_rejected_exit_score": int(watch_counts.get("rejected_exit_score", 0)),
         "watch_rejected_mfe": int(watch_counts.get("rejected_mfe", 0)),
         "watch_other": len(watch_decisions)
@@ -211,6 +244,7 @@ def _payload(
         "coverage_reasons": coverage_reasons,
         "summary": summary,
         "rows": [asdict(x) for x in labeled],
+        "registered_rows": [asdict(x) for x in registered_labeled],
         "watch_funnel": {
             "decision_counts": dict(sorted(watch_counts.items())),
             "registered_examples": [
@@ -304,37 +338,6 @@ def _filter_valid_symbols(
     return included, excluded
 
 
-def _pending_registered_watch_count(
-    watch_decisions: list[dict[str, Any]],
-    labeled: list[LabeledShadowReentry],
-    *,
-    now_utc: datetime | None,
-) -> int:
-    now = now_utc or datetime.now(timezone.utc)
-    alert_times: dict[str, list[datetime]] = {}
-    for row in labeled:
-        try:
-            alert_dt = datetime.fromisoformat(row.ts.replace("Z", "+00:00"))
-        except Exception:
-            continue
-        alert_times.setdefault(row.sym, []).append(alert_dt)
-    pending = 0
-    window_bars = int(getattr(config, "SUSPICIOUS_REENTRY_SHADOW_WINDOW_BARS", 8))
-    for row in watch_decisions:
-        if row.get("decision") != "registered":
-            continue
-        try:
-            registered_at = datetime.fromisoformat(str(row.get("ts") or "").replace("Z", "+00:00"))
-        except Exception:
-            continue
-        expires_at = registered_at + timedelta(milliseconds=window_bars * _bar_ms(str(row.get("tf") or "15m")))
-        symbol = str(row.get("sym") or "")
-        already_alerted = any(registered_at <= alert_at <= now for alert_at in alert_times.get(symbol, []))
-        if not already_alerted and now < expires_at:
-            pending += 1
-    return pending
-
-
 def _label_event(
     row: dict[str, Any], *,
     kline_loader: Callable[[str, str, int, int], list[list[Any]]] | None,
@@ -380,7 +383,80 @@ def _label_event(
     )
 
 
-def _row(row: dict[str, Any], *, label_status: str, label_reason: str = "", ret_2: float | None = None, ret_5: float | None = None, ret_10: float | None = None, max_runup_10: float | None = None, max_drawdown_10: float | None = None) -> LabeledShadowReentry:
+def _label_registered_watch(
+    row: dict[str, Any],
+    *,
+    kline_loader: Callable[[str, str, int, int], list[list[Any]]] | None,
+    now_utc: datetime | None,
+) -> LabeledShadowReentry:
+    """Label the actionable counterfactual: enter at the next candle open."""
+    sym = str(row.get("sym") or "")
+    tf = str(row.get("tf") or "15m")
+    ts = str(row.get("ts") or "")
+    event_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    event_ms = int(event_dt.timestamp() * 1000)
+    bar_ms = _bar_ms(tf)
+    max_h = max(HORIZONS)
+    now = now_utc or datetime.now(timezone.utc)
+    if int(now.timestamp() * 1000) < event_ms + max_h * bar_ms:
+        return _row(
+            row,
+            cohort="registered_watch",
+            label_status="pending",
+            label_reason="forward horizon not mature",
+        )
+    loader = kline_loader or _fetch_binance_klines
+    try:
+        candles = loader(sym, tf, event_ms, event_ms + (max_h + 2) * bar_ms)
+    except Exception as exc:
+        return _row(
+            row,
+            cohort="registered_watch",
+            label_status="missing",
+            label_reason=str(exc)[:160],
+        )
+    if not candles:
+        return _row(
+            row,
+            cohort="registered_watch",
+            label_status="missing",
+            label_reason="no candles",
+        )
+    idx = _first_candle_at_or_after(candles, event_ms)
+    if idx is None or idx + max_h - 1 >= len(candles):
+        return _row(
+            row,
+            cohort="registered_watch",
+            label_status="pending",
+            label_reason="not enough future candles",
+        )
+    entry = _float(candles[idx][1])
+    if entry <= 0:
+        return _row(
+            row,
+            cohort="registered_watch",
+            label_status="missing",
+            label_reason="invalid next-candle open",
+        )
+    closes = [_float(candle[4]) for candle in candles]
+    highs = [_float(candle[2]) for candle in candles]
+    lows = [_float(candle[3]) for candle in candles]
+    future = slice(idx, idx + max_h)
+    labeled_row = dict(row)
+    labeled_row["price"] = entry
+    return _row(
+        labeled_row,
+        cohort="registered_watch",
+        label_status="labeled",
+        ret_2=_pct_return(closes[idx + 1], entry),
+        ret_5=_pct_return(closes[idx + 4], entry),
+        ret_10=_pct_return(closes[idx + 9], entry),
+        max_runup_10=_pct_return(max(highs[future]), entry),
+        max_drawdown_10=_pct_return(min(lows[future]), entry),
+    )
+
+
+def _row(row: dict[str, Any], *, cohort: str = "alert", label_status: str, label_reason: str = "", ret_2: float | None = None, ret_5: float | None = None, ret_10: float | None = None, max_runup_10: float | None = None, max_drawdown_10: float | None = None) -> LabeledShadowReentry:
     return LabeledShadowReentry(
         sym=str(row.get("sym") or ""),
         tf=str(row.get("tf") or "15m"),
@@ -393,6 +469,7 @@ def _row(row: dict[str, Any], *, label_status: str, label_reason: str = "", ret_
         mfe_pct=_float(row.get("mfe_pct")),
         bars_since_exit=int(_float(row.get("bars_since_exit"))),
         cooldown_bars_left=int(_float(row.get("cooldown_bars_left"))),
+        cohort=cohort,
         label_status=label_status,
         label_reason=label_reason,
         ret_2=ret_2,
@@ -440,12 +517,25 @@ def _interpretation(summary: dict[str, Any]) -> str:
         registered = int(summary.get("watch_registered") or 0)
         alerts = int(summary.get("alerts_total") or 0)
         pending = int(summary.get("watch_pending") or 0)
+        registered_labeled = int(summary.get("registered_labeled_ret5") or 0)
         if watch_total == 0:
             return "нет upstream watch decisions и mature labels; coverage контура за день не доказан."
         if pending:
             return (
                 f"upstream работал, но pending registered watch windows: {pending}; "
                 "оценка final confirmation преждевременна."
+            )
+        if registered_labeled:
+            avg = summary.get("registered_avg_ret5")
+            positive = summary.get("registered_ret5_positive_rate")
+            if avg is not None and avg > 0.25 and positive is not None and positive >= 0.55:
+                return (
+                    f"final alerts отсутствуют, но counterfactual registered cohort n={registered_labeled} "
+                    "имеет положительный T+5; нужен максимальный replay final confirmation."
+                )
+            return (
+                f"counterfactual registered cohort размечен (n={registered_labeled}), но не проходит "
+                "promotion gate; пороги re-entry не расслаблять."
             )
         if registered > 0 and alerts == 0:
             return (
@@ -467,8 +557,15 @@ def _interpretation(summary: dict[str, Any]) -> str:
 
 def _recommendation(summary: dict[str, Any], status: str) -> str:
     n = int(summary.get("labeled_ret5") or 0)
-    if n < 10:
+    registered_n = int(summary.get("registered_labeled_ret5") or 0)
+    if n < 10 and registered_n < 10:
         return "продолжать shadow-only сбор; production re-entry не включать."
+    if n < 10:
+        avg = summary.get("registered_avg_ret5") or 0.0
+        pos = summary.get("registered_ret5_positive_rate") or 0.0
+        if status == "complete" and avg > 0.25 and pos >= 0.55:
+            return "проверить final confirmation на максимальном replay; production re-entry пока не включать."
+        return "registered cohort не проходит gate; production re-entry не включать и пороги не расслаблять."
     avg = summary.get("avg_ret5") or 0.0
     pos = summary.get("ret5_positive_rate") or 0.0
     if status == "complete" and avg > 0.25 and pos >= 0.55:

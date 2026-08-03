@@ -477,6 +477,62 @@ def _restore_training_state(state: "WorkerState") -> bool:
     return bool(restored or latest_restored)
 
 
+def _restore_daily_report_state(state: "WorkerState") -> bool:
+    payload = _load_status_snapshot()
+    restored = False
+    sections = (
+        (
+            "top_gainer_critic",
+            "top_gainer",
+            {
+                "runs_total": "runs_total",
+                "runs_ok": "runs_ok",
+                "runs_failed": "runs_failed",
+                "last_slot_key": "last_slot_key",
+                "last_started_at": "last_started_at",
+                "last_finished_at": "last_finished_at",
+                "last_error": "last_error",
+                "last_phase": "last_phase",
+                "last_target_day_local": "last_target_day_local",
+                "last_report_json": "last_report_json",
+                "last_report_txt": "last_report_txt",
+                "last_capture_rate_pct": "last_watchlist_top_capture_rate_pct",
+                "last_early_capture_rate_pct": "last_watchlist_top_early_capture_rate_pct",
+            },
+        ),
+        (
+            "watchlist_top_gainer_goal",
+            "watchlist_goal",
+            {
+                "runs_total": "runs_total",
+                "runs_ok": "runs_ok",
+                "runs_failed": "runs_failed",
+                "last_slot_key": "last_slot_key",
+                "last_started_at": "last_started_at",
+                "last_finished_at": "last_finished_at",
+                "last_error": "last_error",
+                "last_target_day_local": "last_target_day_local",
+                "last_report_json": "last_report_json",
+                "last_report_txt": "last_report_txt",
+                "last_recall_pct": "last_recall_at_cutoff_pct",
+                "last_median_lead_time_min": "last_median_lead_time_min",
+                "last_precision_first_10_pct": "last_precision_first_10_pct",
+                "last_positive_coverage_pct": "last_mandatory_positive_coverage_pct",
+            },
+        ),
+    )
+    for section_name, state_prefix, mapping in sections:
+        section = payload.get(section_name) or {}
+        if not isinstance(section, dict):
+            continue
+        for state_suffix, snapshot_key in mapping.items():
+            if snapshot_key not in section:
+                continue
+            setattr(state, f"{state_prefix}_{state_suffix}", section[snapshot_key])
+            restored = True
+    return restored
+
+
 def _try_acquire_train_lock(stale_after_sec: int = DEFAULT_TRAIN_LOCK_STALE_SEC) -> bool:
     TRAIN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -1242,20 +1298,38 @@ async def _status_loop(state: WorkerState) -> None:
         await asyncio.sleep(state.status_interval_sec)
 
 
-def _scheduled_top_gainer_slot(now_local: datetime) -> tuple[str, date, str] | None:
+def _scheduled_top_gainer_slot(
+    now_local: datetime,
+    reports_dir: Path = REPORT_DIR,
+) -> tuple[str, date, str] | None:
+    """Return the critic slot, including a missed-final catch-up.
+
+    Artifact existence, rather than in-memory state, makes the final due slot
+    survive process restarts. A missing recent final takes precedence over
+    today's midday report, with yesterday checked first.
+    """
+    previous_day = now_local.date() - timedelta(days=1)
+    catchup_days = max(1, int(getattr(config, "TOP_GAINER_CRITIC_CATCHUP_DAYS", 7)))
+    due_days = [previous_day] + [previous_day - timedelta(days=offset) for offset in range(1, catchup_days)]
+    for target_day in due_days:
+        final_path = reports_dir / f"top_gainer_critic_{target_day.isoformat()}_final.json"
+        if not final_path.exists():
+            slot_key = f"{target_day.isoformat()}::final"
+            return "final", target_day, slot_key
+    if now_local.hour == 12 and now_local.minute < 15:
+        target_day = now_local.date()
+        midday_path = reports_dir / f"top_gainer_critic_{target_day.isoformat()}_midday.json"
+        if not midday_path.exists():
+            slot_key = f"{target_day.isoformat()}::midday"
+            return "midday", target_day, slot_key
+    return None
+
+
+def _scheduled_watchlist_goal_slot(now_local: datetime) -> tuple[date, str] | None:
     goal_cutoff_hour = int(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_CUTOFF_HOUR_LOCAL", 22))
     if now_local.hour == goal_cutoff_hour and now_local.minute < 15:
         target_day = now_local.date()
-        slot_key = f"{target_day.isoformat()}::goal_{goal_cutoff_hour:02d}h"
-        return "goal_cutoff", target_day, slot_key
-    if now_local.hour == 0 and now_local.minute < 15:
-        target_day = now_local.date() - timedelta(days=1)
-        slot_key = f"{target_day.isoformat()}::final"
-        return "final", target_day, slot_key
-    if now_local.hour == 12 and now_local.minute < 15:
-        target_day = now_local.date()
-        slot_key = f"{target_day.isoformat()}::midday"
-        return "midday", target_day, slot_key
+        return target_day, f"{target_day.isoformat()}::goal_{goal_cutoff_hour:02d}h"
     return None
 
 
@@ -1284,9 +1358,6 @@ async def _top_gainer_critic_loop(state: WorkerState) -> None:
             top_gainer_critic.DEFAULT_MIN_QUOTE_VOLUME,
         )
     )
-    goal_cutoff_hour = int(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_CUTOFF_HOUR_LOCAL", 22))
-    goal_checkpoint_hours = tuple(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_CHECKPOINT_HOURS", (1, 4, 8, 12, 18, goal_cutoff_hour)))
-    goal_precision_top_ns = tuple(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_PRECISION_FIRST_NS", (5, 10, 20)))
     while True:
         try:
             slot = _scheduled_top_gainer_slot(datetime.now(tz))
@@ -1295,106 +1366,116 @@ async def _top_gainer_critic_loop(state: WorkerState) -> None:
                 continue
 
             phase, target_day, slot_key = slot
-            if phase == "goal_cutoff":
-                if not state.watchlist_goal_enabled:
-                    await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
-                    continue
-                if slot_key == state.watchlist_goal_last_slot_key:
-                    await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
-                    continue
-
-                state.watchlist_goal_runs_total += 1
-                state.watchlist_goal_last_started_at = _utc_now_iso()
-                state.watchlist_goal_last_error = ""
-                result = await asyncio.to_thread(
-                    watchlist_top_gainer_goal.run_goal_report,
-                    target_day=target_day,
-                    cutoff_hour=goal_cutoff_hour,
-                    timezone_name=tz_name,
-                    top_n=top_n,
-                    min_quote_volume=min_quote_volume,
-                    checkpoint_hours=goal_checkpoint_hours,
-                    precision_top_ns=goal_precision_top_ns,
-                )
-                summary = result.get("summary", {})
-                files = result.get("files", {})
-                precision = result.get("precision_first_n") or []
-                precision_first_10 = next((item.get("precision_pct") for item in precision if int(item.get("top_n", 0)) == 10), None)
-                state.watchlist_goal_runs_ok += 1
-                state.watchlist_goal_last_slot_key = slot_key
-                state.watchlist_goal_last_finished_at = _utc_now_iso()
-                state.watchlist_goal_last_target_day_local = target_day.isoformat()
-                state.watchlist_goal_last_report_json = str(files.get("json", ""))
-                state.watchlist_goal_last_report_txt = str(files.get("txt", ""))
-                state.watchlist_goal_last_recall_pct = summary.get("recall_at_cutoff_pct")
-                state.watchlist_goal_last_median_lead_time_min = summary.get("median_lead_time_min")
-                state.watchlist_goal_last_precision_first_10_pct = precision_first_10
-                state.watchlist_goal_last_positive_coverage_pct = summary.get("mandatory_positive_coverage_pct")
-                log.info(
-                    "Watchlist goal done: day=%s recall@cutoff=%s%% lead=%sm p10=%s%% coverage=%s%%",
-                    target_day.isoformat(),
-                    state.watchlist_goal_last_recall_pct,
-                    state.watchlist_goal_last_median_lead_time_min,
-                    state.watchlist_goal_last_precision_first_10_pct,
-                    state.watchlist_goal_last_positive_coverage_pct,
-                )
-                if bool(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED", True)):
-                    await _send_telegram_text(_render_watchlist_goal_telegram(result))
-                await _write_status_now(state)
-            else:
-                if not state.top_gainer_enabled:
-                    await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
-                    continue
-                if slot_key == state.top_gainer_last_slot_key:
-                    await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
-                    continue
-
-                state.top_gainer_runs_total += 1
-                state.top_gainer_last_started_at = _utc_now_iso()
-                state.top_gainer_last_error = ""
-                result = await asyncio.to_thread(
-                    top_gainer_critic.run_report,
-                    target_day=target_day,
-                    phase=phase,
-                    timezone_name=tz_name,
-                    top_n=top_n,
-                    min_quote_volume=min_quote_volume,
-                )
-                summary = result.get("summary", {})
-                files = result.get("files", {})
-                state.top_gainer_runs_ok += 1
-                state.top_gainer_last_slot_key = slot_key
-                state.top_gainer_last_finished_at = _utc_now_iso()
-                state.top_gainer_last_phase = phase
-                state.top_gainer_last_target_day_local = target_day.isoformat()
-                state.top_gainer_last_report_json = str(files.get("json", ""))
-                state.top_gainer_last_report_txt = str(files.get("txt", ""))
-                state.top_gainer_last_capture_rate_pct = summary.get("watchlist_top_capture_rate_pct")
-                state.top_gainer_last_early_capture_rate_pct = summary.get("watchlist_top_early_capture_rate_pct")
-                log.info(
-                    "Top-gainer critic done: phase=%s day=%s capture=%s%% early=%s%%",
-                    phase,
-                    target_day.isoformat(),
-                    state.top_gainer_last_capture_rate_pct,
-                    state.top_gainer_last_early_capture_rate_pct,
-                )
-                if _should_send_top_gainer_telegram(phase):
-                    await _send_telegram_text(_render_top_gainer_telegram(result))
-                await _write_status_now(state)
+            if not state.top_gainer_enabled:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            state.top_gainer_runs_total += 1
+            state.top_gainer_last_started_at = _utc_now_iso()
+            state.top_gainer_last_error = ""
+            result = await asyncio.to_thread(
+                top_gainer_critic.run_report,
+                target_day=target_day,
+                phase=phase,
+                timezone_name=tz_name,
+                top_n=top_n,
+                min_quote_volume=min_quote_volume,
+            )
+            summary = result.get("summary", {})
+            files = result.get("files", {})
+            state.top_gainer_runs_ok += 1
+            state.top_gainer_last_slot_key = slot_key
+            state.top_gainer_last_finished_at = _utc_now_iso()
+            state.top_gainer_last_phase = phase
+            state.top_gainer_last_target_day_local = target_day.isoformat()
+            state.top_gainer_last_report_json = str(files.get("json", ""))
+            state.top_gainer_last_report_txt = str(files.get("txt", ""))
+            state.top_gainer_last_capture_rate_pct = summary.get("watchlist_top_capture_rate_pct")
+            state.top_gainer_last_early_capture_rate_pct = summary.get("watchlist_top_early_capture_rate_pct")
+            log.info(
+                "Top-gainer critic done: phase=%s day=%s capture=%s%% early=%s%%",
+                phase,
+                target_day.isoformat(),
+                state.top_gainer_last_capture_rate_pct,
+                state.top_gainer_last_early_capture_rate_pct,
+            )
+            if _should_send_top_gainer_telegram(phase):
+                await _send_telegram_text(_render_top_gainer_telegram(result))
+            await _write_status_now(state)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            phase_name = phase if "phase" in locals() else ""
-            if phase_name == "goal_cutoff":
-                state.watchlist_goal_runs_failed += 1
-                state.watchlist_goal_last_finished_at = _utc_now_iso()
-                state.watchlist_goal_last_error = str(exc)
-                log.exception("Watchlist goal report failed: %s", exc)
-            else:
-                state.top_gainer_runs_failed += 1
-                state.top_gainer_last_finished_at = _utc_now_iso()
-                state.top_gainer_last_error = str(exc)
-                log.exception("Top-gainer critic failed: %s", exc)
+            state.top_gainer_runs_failed += 1
+            state.top_gainer_last_finished_at = _utc_now_iso()
+            state.top_gainer_last_error = str(exc)
+            log.exception("Top-gainer critic failed: %s", exc)
+            await _write_status_now(state)
+        await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+
+
+async def _watchlist_goal_loop(state: WorkerState) -> None:
+    log = logging.getLogger("rl_headless_worker.watchlist_goal")
+    tz_name = str(getattr(config, "TOP_GAINER_CRITIC_TIMEZONE", "Europe/Budapest"))
+    tz = ZoneInfo(tz_name)
+    top_n = int(getattr(config, "TOP_GAINER_CRITIC_TOP_N", top_gainer_critic.DEFAULT_TOP_N))
+    min_quote_volume = float(
+        getattr(config, "TOP_GAINER_CRITIC_MIN_QUOTE_VOLUME_24H", top_gainer_critic.DEFAULT_MIN_QUOTE_VOLUME)
+    )
+    goal_cutoff_hour = int(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_CUTOFF_HOUR_LOCAL", 22))
+    goal_checkpoint_hours = tuple(
+        getattr(config, "WATCHLIST_TOP_GAINER_GOAL_CHECKPOINT_HOURS", (1, 4, 8, 12, 18, goal_cutoff_hour))
+    )
+    goal_precision_top_ns = tuple(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_PRECISION_FIRST_NS", (5, 10, 20)))
+    while True:
+        try:
+            slot = _scheduled_watchlist_goal_slot(datetime.now(tz))
+            if slot is None or not state.watchlist_goal_enabled:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            target_day, slot_key = slot
+            if slot_key == state.watchlist_goal_last_slot_key:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            state.watchlist_goal_runs_total += 1
+            state.watchlist_goal_last_started_at = _utc_now_iso()
+            state.watchlist_goal_last_error = ""
+            result = await asyncio.to_thread(
+                watchlist_top_gainer_goal.run_goal_report,
+                target_day=target_day,
+                cutoff_hour=goal_cutoff_hour,
+                timezone_name=tz_name,
+                top_n=top_n,
+                min_quote_volume=min_quote_volume,
+                checkpoint_hours=goal_checkpoint_hours,
+                precision_top_ns=goal_precision_top_ns,
+            )
+            summary = result.get("summary", {})
+            files = result.get("files", {})
+            precision = result.get("precision_first_n") or []
+            precision_first_10 = next(
+                (item.get("precision_pct") for item in precision if int(item.get("top_n", 0)) == 10),
+                None,
+            )
+            state.watchlist_goal_runs_ok += 1
+            state.watchlist_goal_last_slot_key = slot_key
+            state.watchlist_goal_last_finished_at = _utc_now_iso()
+            state.watchlist_goal_last_target_day_local = target_day.isoformat()
+            state.watchlist_goal_last_report_json = str(files.get("json", ""))
+            state.watchlist_goal_last_report_txt = str(files.get("txt", ""))
+            state.watchlist_goal_last_recall_pct = summary.get("recall_at_cutoff_pct")
+            state.watchlist_goal_last_median_lead_time_min = summary.get("median_lead_time_min")
+            state.watchlist_goal_last_precision_first_10_pct = precision_first_10
+            state.watchlist_goal_last_positive_coverage_pct = summary.get("mandatory_positive_coverage_pct")
+            log.info("Watchlist goal done: day=%s recall=%s%%", target_day, state.watchlist_goal_last_recall_pct)
+            if bool(getattr(config, "WATCHLIST_TOP_GAINER_GOAL_TELEGRAM_REPORTS_ENABLED", True)):
+                await _send_telegram_text(_render_watchlist_goal_telegram(result))
+            await _write_status_now(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.watchlist_goal_runs_failed += 1
+            state.watchlist_goal_last_finished_at = _utc_now_iso()
+            state.watchlist_goal_last_error = str(exc)
+            log.exception("Watchlist goal report failed: %s", exc)
             await _write_status_now(state)
         await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
 
@@ -1631,6 +1712,7 @@ async def _amain(args: argparse.Namespace) -> int:
         collector_enabled=args.enable_collector,
     )
     _restore_training_state(state)
+    _restore_daily_report_state(state)
 
     logging.getLogger("rl_headless_worker").info(
         "Headless RL worker started: train_every=%sm min_rows=%s min_new_rows=%s collector=%s",
@@ -1644,6 +1726,7 @@ async def _amain(args: argparse.Namespace) -> int:
         asyncio.create_task(_training_loop(state), name="training"),
         asyncio.create_task(_status_loop(state), name="status"),
         asyncio.create_task(_top_gainer_critic_loop(state), name="top_gainer_critic"),
+        asyncio.create_task(_watchlist_goal_loop(state), name="watchlist_top_gainer_goal"),
         asyncio.create_task(_signal_quality_loop(state), name="signal_quality_evaluator"),
         asyncio.create_task(_learning_progress_loop(state), name="learning_progress_report"),
         asyncio.create_task(_research_universe_shadow_loop(state), name="research_universe_shadow"),

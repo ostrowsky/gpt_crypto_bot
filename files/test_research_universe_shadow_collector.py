@@ -43,6 +43,97 @@ class ResearchUniverseShadowCollectorTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["ret_5"], 20.0)
         self.assertIsNone(updated["labels"]["ret_10"])
 
+    def test_batch_labeling_quarantines_bad_row_without_blocking_valid_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "research.jsonl"
+            quarantine = Path(td) / "bad.jsonl"
+            first = {
+                "id": "AAAUSDT_15m_1000",
+                "sym": "AAAUSDT",
+                "tf": "15m",
+                "bar_ts": 1000,
+                "labels": {"ret_3": None, "ret_5": None, "ret_10": None},
+            }
+            second = {
+                "id": "BBBUSDT_15m_1000",
+                "sym": "BBBUSDT",
+                "tf": "15m",
+                "bar_ts": 1000,
+                "labels": {"ret_3": None, "ret_5": None, "ret_10": None},
+            }
+            dataset.write_text(
+                json.dumps(first) + "\n{not valid json\n" + json.dumps(second) + "\n",
+                encoding="utf-8",
+            )
+            market_data = {
+                ("AAAUSDT", "15m"): {
+                    "t": np.array([1000, 2000, 3000, 4000], dtype=np.int64),
+                    "c": np.array([10.0, 10.1, 10.2, 11.0], dtype=float),
+                },
+                ("BBBUSDT", "15m"): {
+                    "t": np.array([1000, 2000, 3000, 4000], dtype=np.int64),
+                    "c": np.array([20.0, 20.2, 20.4, 18.0], dtype=float),
+                },
+            }
+
+            result = collector._fill_mature_labels_batch(
+                dataset,
+                market_data,
+                quarantine_file=quarantine,
+            )
+            updated = [json.loads(line) for line in dataset.read_text(encoding="utf-8").splitlines()]
+            quarantined = json.loads(quarantine.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(result["labels_updated"], 2)
+        self.assertEqual(result["malformed_rows_quarantined"], 1)
+        self.assertEqual([row["id"] for row in updated], [first["id"], second["id"]])
+        self.assertEqual(updated[0]["labels"]["ret_3"], 10.0)
+        self.assertEqual(updated[1]["labels"]["ret_3"], -10.0)
+        self.assertEqual(quarantined["line_number"], 2)
+        self.assertEqual(quarantined["raw"], "{not valid json")
+
+    def test_batch_labeling_preserves_dataset_when_nothing_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "research.jsonl"
+            original = '{"id":"done","sym":"AAAUSDT","tf":"15m","bar_ts":1000,"labels":{"ret_3":1}}\n'
+            dataset.write_text(original, encoding="utf-8")
+
+            result = collector._fill_mature_labels_batch(dataset, {})
+
+            self.assertEqual(result["labels_updated"], 0)
+            self.assertEqual(result["malformed_rows_quarantined"], 0)
+            self.assertEqual(dataset.read_text(encoding="utf-8"), original)
+            self.assertFalse(dataset.with_name("research.jsonl.labels.tmp").exists())
+
+    def test_incomplete_label_ranges_cover_maximum_pending_period(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "research.jsonl"
+            rows = [
+                {"sym": "AAAUSDT", "tf": "15m", "bar_ts": 3000, "labels": {"ret_10": None}},
+                {"sym": "AAAUSDT", "tf": "15m", "bar_ts": 1000, "labels": {"ret_10": None}},
+                {
+                    "sym": "AAAUSDT",
+                    "tf": "15m",
+                    "bar_ts": 5000,
+                    "labels": {"ret_3": 1, "ret_5": 1, "ret_10": 1},
+                },
+                {"sym": "BBBUSDT", "tf": "1h", "bar_ts": 2000, "labels": {}},
+            ]
+            dataset.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\nnot-json\n",
+                encoding="utf-8",
+            )
+
+            ranges = collector._incomplete_label_ranges(dataset)
+
+        self.assertEqual(
+            ranges[("AAAUSDT", "15m")],
+            {"min_bar_ts": 1000, "max_bar_ts": 3000, "rows": 2},
+        )
+        self.assertEqual(ranges[("BBBUSDT", "1h")]["rows"], 1)
+        self.assertEqual(collector._timeframe_ms("15m"), 900_000)
+        self.assertEqual(collector._timeframe_ms("1h"), 3_600_000)
+
     def test_build_research_universe_ranks_by_quote_volume(self) -> None:
         async def fake_symbols(_session):
             return ["AAAUSDT", "BBBUSDT", "USDCUSDT", "币安人生USDT"]

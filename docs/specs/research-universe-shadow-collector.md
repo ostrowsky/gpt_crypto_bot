@@ -1,7 +1,7 @@
 # Research Universe Shadow Collector
 
 Status: research/measurement-only  
-Date: 2026-06-04
+Date: 2026-08-03
 
 ## Problem
 
@@ -44,6 +44,14 @@ Each row should include:
 - selected scalar market-structure features;
 - forward labels for T+3/T+5/T+10 when mature.
 
+Label maintenance must be incremental at the collection-cycle level: all
+symbols fetched in one cycle are applied in one streaming dataset pass, rather
+than rereading and rewriting the complete dataset once per symbol. A malformed
+JSONL row must not block later mature labels. Such rows are removed from the
+active dataset during the atomic rewrite and copied to
+`research_universe_shadow_quarantine.jsonl` with their line number and parse
+error. Runtime state and quarantine output remain uncommitted artifacts.
+
 ## Runtime Integration
 
 The collector may run from the headless worker as a separate background task.
@@ -60,7 +68,30 @@ It should report status in `rl_worker_status.json`, including:
 - labels updated;
 - in-progress cycle status while a long collector cycle has not yet returned to the worker loop;
 - batch-level progress for pairs scanned, rows written, and labels updated.
+- malformed rows quarantined during the label pass.
+
+The active JSONL file must be replaced atomically after a successful label
+pass. If no label or quarantine change is needed, the original file must stay
+byte-for-byte unchanged.
+
+The maintenance command
+`python backfill_research_universe_shadow_labels.py` must derive the earliest
+and latest incomplete observation for every symbol/timeframe pair, fetch that
+entire range plus the longest label horizon, and fill every label that has
+matured. It must never truncate a concurrent append: the atomic replacement is
+aborted if the source file size or modification time changes during the pass.
 
 ## Expected Effect
 
 The bot can learn from a broader market without expanding live trading. The first measurable target is not PnL; it is increased positive-label coverage and better early-trend pattern discovery.
+
+## Maximum-Period Backfill — 2026-08-03
+
+The repaired job covered all 328 accumulated symbol/timeframe pairs from
+2026-06-05 through 2026-08-03, fetched 811,338 candles, wrote 391,660 mature
+T+3/T+5/T+10 labels, and quarantined the single malformed row with zero failed
+pairs. Across 130,691 mature T+5 observations, average return was `-0.0346%`,
+positive rate `45.63%`; outside-watchlist average was `-0.0611%`. Existing
+`alignment` and `trend` rule names did not show enough unconditional edge to
+justify live-watchlist or BUY expansion. Candidate patterns remain replay-only
+and require chronological held-out validation.

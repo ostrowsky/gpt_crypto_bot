@@ -145,6 +145,8 @@ class SuspiciousReentryScorecardTests(unittest.TestCase):
                 output_json=Path(td) / "latest.json",
                 output_txt=Path(td) / "latest.txt",
                 save=False,
+                kline_loader=lambda *_: _candles([99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]),
+                now_utc=datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc),
             )
 
         summary = payload["summary"]
@@ -155,7 +157,32 @@ class SuspiciousReentryScorecardTests(unittest.TestCase):
         self.assertEqual(summary["watch_rejected_exit_score"], 1)
         self.assertEqual(summary["watch_rejected_mfe"], 1)
         self.assertEqual(summary["same_day_alert_per_registered_ratio"], 0.0)
-        self.assertIn("final candidate confirmation", payload["interpretation"])
+        self.assertEqual(summary["registered_labeled_ret5"], 1)
+        self.assertGreater(summary["registered_avg_ret5"], 0.0)
+        self.assertIn("counterfactual registered cohort", payload["interpretation"])
+
+    def test_registered_watch_uses_next_candle_open_for_counterfactual_label(self) -> None:
+        row = {
+            "ts": "2026-05-30T10:00:00Z",
+            "event": "suspicious_reentry_watch_decision",
+            "sym": "AAAUSDT",
+            "tf": "15m",
+            "decision": "registered",
+            "exit_score": 0.8,
+            "mfe_pct": 3.0,
+        }
+
+        labeled = scorecard._label_registered_watch(
+            row,
+            kline_loader=lambda *_: _candles([99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]),
+            now_utc=datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(labeled.cohort, "registered_watch")
+        self.assertEqual(labeled.label_status, "labeled")
+        self.assertEqual(labeled.price, 100.0)
+        self.assertEqual(labeled.ret_5, 4.0)
+        self.assertEqual(labeled.ret_10, 9.0)
 
     def test_open_registered_watch_marks_scorecard_partial(self) -> None:
         with tempfile.TemporaryDirectory() as td:

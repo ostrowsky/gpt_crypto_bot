@@ -31,6 +31,10 @@ Add replay-only variants that test causal replacement restrictions:
   and keep the event-log shadow simulation as hypothesis prioritization only.
 - Production flag must default OFF. Shadow logging may run while live behavior
   remains unchanged.
+- Candidate and control variants in a revalidation must share one frozen candle
+  cache, symbol universe, time window, feature computation, and final-top
+  denominator. Historical downloads are concurrent but simulation order stays
+  deterministic. `--compare-variant score_replace` provides this paired run.
 
 ## Promotion Gate
 
@@ -87,3 +91,28 @@ Decision:
 - keep `AGENT_REPLACEMENT_BLOCK_NON_LOSING_SHADOW = True` for post-deploy audit;
 - keep losing-position replacement behavior unchanged;
 - do not generalize this result into broader leader-delta or cluster rules.
+
+## 2026-08-03 Retention Revalidation
+
+The guard and the former `score_replace` behavior were rerun on one frozen
+candle/feature cache for each window, using the current 103-symbol watchlist,
+`15m + 1h` decisions with `4h` context, portfolio size 10, score floor 34,
+replacement delta 0, and Top-20 objective.
+
+| Window | Metric | guard | `score_replace` | Guard delta |
+|---|---:|---:|---:|---:|
+| 30d | total PnL | `-203.2424%` | `-214.0077%` | `+10.7653%` |
+| 30d | average PnL | `-0.1234%` | `-0.1299%` | `+0.0065%` |
+| 30d | Top-20 capture | `95%` | `95%` | `0.0pp` |
+| 30d | win rate | `38.7%` | `39.6%` | `-0.9pp` |
+| 14d | total PnL | `-98.3883%` | `-90.6671%` | `-7.7212%` |
+| 14d | average PnL | `-0.1242%` | `-0.1158%` | `-0.0084%` |
+| 14d | Top-20 capture | `95%` | `95%` | `0.0pp` |
+| 14d | win rate | `38.0%` | `39.2%` | `-1.2pp` |
+
+The maximum window supports the guard, while the fresh stability window
+reverses both PnL metrics. Raw same-horizon candidate/protected pairs therefore
+remain a warning, not sufficient rollback evidence. The retention gate is
+conflicted: keep the current production guard unchanged, do not broaden it,
+and require another independent stability window before either confirmation or
+rollback.

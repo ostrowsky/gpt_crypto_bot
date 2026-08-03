@@ -2,7 +2,7 @@
 
 Date: 2026-06-01
 Last revalidated: 2026-07-13
-Status: `non_ema_mfe150` shipped shadow-only; no production SELL changes
+Status: `non_ema_mfe150` retired after failed live-forward gate; no production SELL changes
 
 ## Problem
 
@@ -100,6 +100,16 @@ hypothetical 50% retained tail and collect forward labels at the configured
 horizons, but it must not delay, suppress, or resize a production SELL. Unknown
 selector names fail closed. Production adoption still requires independent live
 labels followed by a fee/slippage candle-path replay.
+
+## Live-Forward Decision (2026-08-03)
+
+Independent telemetry accumulated 147 candidates, including 100 mature T+10
+labels. Retaining the hypothetical half-position produced average incremental
+value of `-0.1239%`, median `-0.2881%`, and a `59%` worse rate before costs.
+This fails every promotion gate and reverses the replay result. The
+`non_ema_mfe150` collector is therefore disabled by default and must not be
+replaced by the previous selector without a new maximum-period, held-out
+replay. Production SELL behavior remains unchanged.
 
 ## Rollback
 

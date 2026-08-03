@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import config
 import rl_headless_worker
@@ -13,9 +15,75 @@ from rl_headless_worker import (
     _release_learning_progress_telegram_slot,
     build_status_snapshot,
     _render_top_gainer_telegram,
+    _restore_daily_report_state,
+    _scheduled_top_gainer_slot,
+    _scheduled_watchlist_goal_slot,
     _should_send_top_gainer_telegram,
     should_train,
 )
+
+
+class TestDailyCriticSchedulerRecovery(unittest.TestCase):
+    def test_missing_previous_final_is_due_after_nominal_window(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            slot = _scheduled_top_gainer_slot(
+                datetime(2026, 8, 3, 10, 30, tzinfo=ZoneInfo("Europe/Budapest")),
+                Path(td),
+            )
+
+        self.assertEqual(slot, ("final", datetime(2026, 8, 2).date(), "2026-08-02::final"))
+
+    def test_existing_final_allows_independent_midday_slot(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            reports = Path(td)
+            previous = datetime(2026, 8, 2).date()
+            for offset in range(7):
+                day = previous - timedelta(days=offset)
+                (reports / f"top_gainer_critic_{day.isoformat()}_final.json").write_text("{}", encoding="utf-8")
+            slot = _scheduled_top_gainer_slot(
+                datetime(2026, 8, 3, 12, 5, tzinfo=ZoneInfo("Europe/Budapest")),
+                reports,
+            )
+
+        self.assertEqual(slot, ("midday", datetime(2026, 8, 3).date(), "2026-08-03::midday"))
+
+    def test_goal_slot_is_scheduled_separately(self) -> None:
+        slot = _scheduled_watchlist_goal_slot(
+            datetime(2026, 8, 3, 22, 5, tzinfo=ZoneInfo("Europe/Budapest"))
+        )
+        self.assertEqual(slot, (datetime(2026, 8, 3).date(), "2026-08-03::goal_22h"))
+
+    def test_report_state_survives_restart_snapshot(self) -> None:
+        state = WorkerState(60, 60, 1, 1, False)
+        with tempfile.TemporaryDirectory() as td:
+            status_file = Path(td) / "status.json"
+            status_file.write_text(
+                json.dumps(
+                    {
+                        "top_gainer_critic": {
+                            "runs_total": 7,
+                            "runs_ok": 6,
+                            "last_slot_key": "2026-08-02::final",
+                            "last_target_day_local": "2026-08-02",
+                        },
+                        "watchlist_top_gainer_goal": {
+                            "runs_total": 4,
+                            "last_slot_key": "2026-08-02::goal_22h",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            original = rl_headless_worker.STATUS_FILE
+            try:
+                rl_headless_worker.STATUS_FILE = status_file
+                self.assertTrue(_restore_daily_report_state(state))
+            finally:
+                rl_headless_worker.STATUS_FILE = original
+
+        self.assertEqual(state.top_gainer_runs_total, 7)
+        self.assertEqual(state.top_gainer_last_slot_key, "2026-08-02::final")
+        self.assertEqual(state.watchlist_goal_last_slot_key, "2026-08-02::goal_22h")
 
 
 class TestLearningProgressTelegramSlot(unittest.TestCase):

@@ -3375,6 +3375,7 @@ async def run_replay(
     variant: str = "score_replace",
     top_gainer_score_min: float = 0.0,
     objective_top_n: int = 10,
+    compare_variant: str | None = None,
 ) -> dict:
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
@@ -3384,13 +3385,24 @@ async def run_replay(
     async with aiohttp.ClientSession() as session:
         cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]] = {}
         fetch_symbols = list(dict.fromkeys(list(symbols) + ["BTCUSDT"]))
-        for sym in fetch_symbols:
-            for tf in sorted(set(timeframes) | {"15m", "4h"}):
+        fetch_pairs = [
+            (sym, tf)
+            for sym in fetch_symbols
+            for tf in sorted(set(timeframes) | {"15m", "4h"})
+        ]
+        fetch_semaphore = asyncio.Semaphore(8)
+
+        async def fetch_one(sym: str, tf: str) -> tuple[str, str, Optional[np.ndarray]]:
+            async with fetch_semaphore:
                 data = await fetch_klines(session, sym, tf, start_ms, end_ms)
-                if data is None:
-                    continue
-                feat = compute_features(data["o"], data["h"], data["l"], data["c"].astype(float), data["v"])
-                cache[(sym, tf)] = (data, feat)
+            return sym, tf, data
+
+        fetched = await asyncio.gather(*(fetch_one(sym, tf) for sym, tf in fetch_pairs))
+        for sym, tf, data in fetched:
+            if data is None:
+                continue
+            feat = compute_features(data["o"], data["h"], data["l"], data["c"].astype(float), data["v"])
+            cache[(sym, tf)] = (data, feat)
 
     cache_15m = {sym: cache[(sym, "15m")] for sym in symbols if (sym, "15m") in cache}
     cache_4h = {sym: cache[(sym, "4h")] for sym in symbols if (sym, "4h") in cache}
@@ -3445,6 +3457,39 @@ async def run_replay(
         )
     }
 
+    if compare_variant:
+        control_enable_replacement = compare_variant in {
+            "score_replace",
+            "score_replace_cluster",
+            "score_replace_cluster_non_losing",
+            "replacement_block_non_losing",
+            "replacement_block_leader_delta_lt_10",
+            "replacement_block_non_losing_unless_delta20",
+        }
+        control_trades, control_stats = await simulate_portfolio(
+            symbols,
+            timeframes,
+            cache,
+            cache_15m,
+            cache_4h,
+            market_ctx,
+            max_open_positions=max_open_positions,
+            enable_replacement=control_enable_replacement,
+            replace_min_delta=replace_min_delta,
+            variant=compare_variant,
+            top_gainer_score_min=top_gainer_score_min,
+        )
+        reports["control"] = _make_report(
+            start=start,
+            end=end,
+            symbols=symbols,
+            timeframes=timeframes,
+            trades=control_trades,
+            run_stats=control_stats,
+            label=f"control:{compare_variant}",
+            final_top_symbols=final_top_symbols,
+        )
+
     if compare_baseline:
         baseline_trades, baseline_stats = await simulate_portfolio(
             symbols,
@@ -3471,13 +3516,16 @@ async def run_replay(
         )
 
     comparison = {}
-    if "baseline" in reports:
+    reference_name = "control" if "control" in reports else "baseline" if "baseline" in reports else ""
+    if reference_name:
         portfolio_totals = reports["portfolio"]["totals"]
-        baseline_totals = reports["baseline"]["totals"]
+        baseline_totals = reports[reference_name]["totals"]
         portfolio_stats_dict = reports["portfolio"]["run_stats"]
-        baseline_stats_dict = reports["baseline"]["run_stats"]
+        baseline_stats_dict = reports[reference_name]["run_stats"]
         comparison = {
-            "trades_delta": reports["portfolio"]["trades_total"] - reports["baseline"]["trades_total"],
+            "reference": reference_name,
+            "reference_variant": compare_variant if reference_name == "control" else "baseline",
+            "trades_delta": reports["portfolio"]["trades_total"] - reports[reference_name]["trades_total"],
             "pnl_total_delta": round(portfolio_totals["pnl_total"] - baseline_totals["pnl_total"], 4),
             "pnl_avg_delta": round(portfolio_totals["pnl_avg"] - baseline_totals["pnl_avg"], 4),
             "win_rate_delta": round(portfolio_totals["win_rate"] - baseline_totals["win_rate"], 4),
@@ -3489,7 +3537,7 @@ async def run_replay(
             "replacements_improved": portfolio_stats_dict["replacements_improved"],
             "replacements_worsened": portfolio_stats_dict["replacements_worsened"],
             "modes_only_in_portfolio": sorted(
-                set(reports["portfolio"]["summary"]) - set(reports["baseline"]["summary"])
+                set(reports["portfolio"]["summary"]) - set(reports[reference_name]["summary"])
             ),
         }
 
@@ -3503,6 +3551,7 @@ async def run_replay(
         "variant": variant,
         "top_gainer_score_min": top_gainer_score_min,
         "objective_top_n": objective_top_n,
+        "compare_variant": compare_variant,
         "reports": reports,
         "comparison": comparison,
     }
@@ -3560,6 +3609,7 @@ def render_text(report: dict) -> str:
             [
                 "",
                 "Comparison:",
+                f"  reference={report['comparison'].get('reference_variant', report['comparison'].get('reference', 'baseline'))}",
                 f"  trades_delta={report['comparison'].get('trades_delta', 0):+d}",
                 f"  pnl_total_delta={report['comparison'].get('pnl_total_delta', 0.0):+.4f}%",
                 f"  pnl_avg_delta={report['comparison'].get('pnl_avg_delta', 0.0):+.4f}%",
@@ -3617,6 +3667,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--top-gainer-score-min", type=float, default=18.0)
     parser.add_argument("--objective-top-n", type=int, default=15)
+    parser.add_argument(
+        "--compare-variant",
+        choices=[
+            "score_replace",
+            "score_replace_cluster",
+            "score_replace_cluster_non_losing",
+            "replacement_block_non_losing",
+            "replacement_block_leader_delta_lt_10",
+            "replacement_block_non_losing_unless_delta20",
+        ],
+        default=None,
+        help="run a frozen-cache control variant in the same process",
+    )
     parser.add_argument("--no-baseline", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json")
     return parser.parse_args()
@@ -3640,6 +3703,7 @@ def main() -> None:
             variant=args.variant,
             top_gainer_score_min=args.top_gainer_score_min,
             objective_top_n=args.objective_top_n,
+            compare_variant=args.compare_variant,
         )
     )
     if args.as_json:

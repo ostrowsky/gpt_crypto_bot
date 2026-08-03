@@ -145,6 +145,10 @@ slippage, portfolio capacity, and the canonical watchlist-top denominator.
    the former replacement behavior after replay caching is fixed. Until both
    maximum-period and fresh stability windows finish, treat the live cohort as
    a warning and keep the current guard unchanged.
+   The paired 2026-08-03 rerun is now complete: 30d favors the guard by
+   `+10.7653pp` total PnL, while 14d reverses by `-7.7212pp`; Top-20 capture is
+   `95%` in both variants/windows. Evidence is conflicted, so keep the current
+   guard unchanged and require another stability window before rollback.
 3. Audit the score-34 near-miss band with a frozen control: attribute candidates
    to detection, score admission, other blockers, portfolio capacity, and later
    outcome. Test score `32-33` first as WATCH/shadow and promote to BUY only if

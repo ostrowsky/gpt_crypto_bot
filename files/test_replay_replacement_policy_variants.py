@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from replay_backtest import _replacement_policy_block_reason
+from replay_backtest import _replacement_policy_block_reason, parse_args
 
 
 class ReplacementPolicyVariantTest(unittest.TestCase):
@@ -55,6 +56,22 @@ class ReplacementPolicyVariantTest(unittest.TestCase):
             ),
             "",
         )
+
+    def test_cli_accepts_frozen_control_variant(self) -> None:
+        with patch(
+            "sys.argv",
+            [
+                "replay_backtest.py",
+                "--variant",
+                "replacement_block_non_losing",
+                "--compare-variant",
+                "score_replace",
+                "--no-baseline",
+            ],
+        ):
+            args = parse_args()
+        self.assertEqual(args.compare_variant, "score_replace")
+        self.assertTrue(args.no_baseline)
 
 
 if __name__ == "__main__":

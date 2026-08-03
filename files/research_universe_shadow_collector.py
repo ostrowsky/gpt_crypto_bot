@@ -39,9 +39,14 @@ STABLE_OR_NON_TARGET = {
 LEVERAGED_TOKENS = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
 DEFAULT_FETCH_LIMIT = 120
 DEFAULT_HORIZONS = (3, 5, 10)
+TIMEFRAME_UNITS_MS = {
+    "m": 60_000,
+    "h": 60 * 60_000,
+    "d": 24 * 60 * 60_000,
+    "w": 7 * 24 * 60 * 60_000,
+}
 
 log = logging.getLogger("research_universe_shadow_collector")
-_LABEL_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,7 @@ async def run_once(
         "pairs_scanned": 0,
         "rows_written": 0,
         "labels_updated": 0,
+        "malformed_rows_quarantined": 0,
         "dataset_file": str(dataset_file),
     }
     _write_status(status_file, status)
@@ -173,7 +179,7 @@ async def collect_symbols(
 ) -> dict[str, int]:
     existing_ids = _existing_ids(dataset_file)
     rows_written = 0
-    labels_updated = 0
+    market_data: dict[tuple[str, str], Any] = {}
     pairs = [(item, tf) for item in universe for tf in timeframes]
     for start in range(0, len(pairs), batch_size):
         batch = pairs[start : start + batch_size]
@@ -199,21 +205,27 @@ async def collect_symbols(
                 log.debug("research universe collect error: %s", result)
                 continue
             rows_written += int(result.get("rows_written", 0))
-            labels_updated += int(result.get("labels_updated", 0))
+            key = result.get("market_data_key")
+            data = result.get("market_data")
+            if isinstance(key, tuple) and len(key) == 2 and data is not None:
+                market_data[(str(key[0]), str(key[1]))] = data
         if status_file is not None and status is not None:
             status.update(
                 {
                     "pairs_scanned": min(start + len(batch), len(pairs)),
                     "rows_written": rows_written,
-                    "labels_updated": labels_updated,
                 }
             )
             _write_status(status_file, status)
+    label_result = await run_cpu(_fill_mature_labels_batch, dataset_file, market_data)
+    labels_updated = int(label_result["labels_updated"])
+    malformed_rows_quarantined = int(label_result["malformed_rows_quarantined"])
     return {
         "symbols_scanned": len(universe),
         "pairs_scanned": len(pairs),
         "rows_written": rows_written,
         "labels_updated": labels_updated,
+        "malformed_rows_quarantined": malformed_rows_quarantined,
     }
 
 
@@ -225,25 +237,29 @@ async def _collect_one(
     dataset_file: Path,
     existing_ids: set[str],
     fetch_limit: int,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     data = await fetch_klines(session, item.symbol, tf, limit=fetch_limit)
     if data is None or len(data) < 30:
-        return {"rows_written": 0, "labels_updated": 0}
-    async with _LABEL_LOCK:
-        labels_updated = await run_cpu(_fill_mature_labels_for_symbol, dataset_file, item.symbol, tf, data)
+        return {"rows_written": 0}
+    result: dict[str, Any] = {
+        "rows_written": 0,
+        "market_data_key": (item.symbol, tf),
+        "market_data": data,
+    }
     i = len(data["c"]) - 2
     if i < 20:
-        return {"rows_written": 0, "labels_updated": labels_updated}
+        return result
     bar_ts = int(data["t"][i])
     record_id = _record_id(item.symbol, tf, bar_ts)
     if record_id in existing_ids:
-        return {"rows_written": 0, "labels_updated": labels_updated}
+        return result
     feat = await run_cpu(compute_features, data["o"], data["h"], data["l"], data["c"].astype(float), data["v"])
     rule_signal = await run_cpu(data_collector._detect_rule_signal, feat, i, data)
     record = _build_record(item, tf, bar_ts, rule_signal, feat, i, data)
     _append_jsonl(dataset_file, record)
     existing_ids.add(record_id)
-    return {"rows_written": 1, "labels_updated": labels_updated}
+    result["rows_written"] = 1
+    return result
 
 
 def _build_record(
@@ -291,41 +307,261 @@ def _build_record(
 
 
 def _fill_mature_labels_for_symbol(dataset_file: Path, symbol: str, tf: str, data: Any) -> int:
+    result = _fill_mature_labels_batch(dataset_file, {(symbol, tf): data})
+    return int(result["labels_updated"])
+
+
+def _fill_mature_labels_batch(
+    dataset_file: Path,
+    market_data: dict[tuple[str, str], Any],
+    *,
+    quarantine_file: Path | None = None,
+) -> dict[str, int]:
+    """Fill all labels in one streaming, atomic dataset pass.
+
+    Malformed JSONL rows are removed from the active dataset and copied to a
+    quarantine file. One bad observation therefore cannot stop future labels.
+    """
     if not dataset_file.exists():
-        return 0
+        return {
+            "labels_updated": 0,
+            "malformed_rows_quarantined": 0,
+            "rows_scanned": 0,
+        }
+
+    indexed_data: dict[tuple[str, str], tuple[dict[int, int], np.ndarray]] = {}
+    for key, data in market_data.items():
+        try:
+            indexed_data[(str(key[0]), str(key[1]))] = (
+                {int(ts): idx for idx, ts in enumerate(data["t"])},
+                data["c"].astype(float),
+            )
+        except Exception:
+            log.debug("invalid market data for research label key=%s", key, exc_info=True)
+
+    quarantine_file = quarantine_file or dataset_file.with_name(f"{dataset_file.stem}_quarantine.jsonl")
+    temp_file = dataset_file.with_name(f"{dataset_file.name}.labels.tmp")
+    labels_updated = 0
+    malformed: list[dict[str, Any]] = []
+    rows_scanned = 0
+    source_stat = dataset_file.stat()
     try:
-        rows = [json.loads(line) for line in dataset_file.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+        with dataset_file.open("r", encoding="utf-8", errors="replace") as source, temp_file.open(
+            "w", encoding="utf-8"
+        ) as target:
+            for line_number, raw_line in enumerate(source, start=1):
+                if not raw_line.strip():
+                    continue
+                try:
+                    row = json.loads(raw_line)
+                    if not isinstance(row, dict):
+                        raise ValueError("JSONL observation is not an object")
+                except Exception as exc:
+                    malformed.append(
+                        {
+                            "quarantined_at": _utc_now_iso(),
+                            "line_number": line_number,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "raw": raw_line.rstrip("\r\n"),
+                        }
+                    )
+                    continue
+
+                rows_scanned += 1
+                series = indexed_data.get((str(row.get("sym") or ""), str(row.get("tf") or "")))
+                if series is not None:
+                    ts_to_idx, closes = series
+                    labels = row.setdefault("labels", {})
+                    idx = ts_to_idx.get(int(row.get("bar_ts") or -1))
+                    entry = _safe(closes[idx]) if idx is not None else 0.0
+                    if idx is not None and entry > 0:
+                        for horizon in DEFAULT_HORIZONS:
+                            key = f"ret_{horizon}"
+                            if labels.get(key) is not None or idx + horizon >= len(closes):
+                                continue
+                            labels[key] = round((_safe(closes[idx + horizon]) / entry - 1.0) * 100.0, 6)
+                            labels[f"label_{horizon}"] = labels[key] > 0
+                            labels_updated += 1
+                target.write(json.dumps(row, ensure_ascii=False, cls=_JsonEncoder) + "\n")
+
+        if labels_updated or malformed:
+            current_stat = dataset_file.stat()
+            if (current_stat.st_size, current_stat.st_mtime_ns) != (
+                source_stat.st_size,
+                source_stat.st_mtime_ns,
+            ):
+                raise RuntimeError("research dataset changed during label pass")
+            temp_file.replace(dataset_file)
+            if malformed:
+                quarantine_file.parent.mkdir(parents=True, exist_ok=True)
+                with quarantine_file.open("a", encoding="utf-8") as target:
+                    for row in malformed:
+                        target.write(json.dumps(row, ensure_ascii=False) + "\n")
+        else:
+            temp_file.unlink(missing_ok=True)
     except Exception:
-        return 0
-    ts_to_idx = {int(ts): idx for idx, ts in enumerate(data["t"])}
-    closes = data["c"].astype(float)
-    changed = 0
-    for row in rows:
-        if row.get("sym") != symbol or row.get("tf") != tf:
-            continue
-        labels = row.setdefault("labels", {})
-        if all(labels.get(f"ret_{h}") is not None for h in DEFAULT_HORIZONS):
-            continue
-        idx = ts_to_idx.get(int(row.get("bar_ts") or -1))
-        if idx is None:
-            continue
-        entry = _safe(closes[idx])
-        if entry <= 0:
-            continue
-        for horizon in DEFAULT_HORIZONS:
-            key = f"ret_{horizon}"
-            if labels.get(key) is not None:
+        temp_file.unlink(missing_ok=True)
+        raise
+
+    return {
+        "labels_updated": labels_updated,
+        "malformed_rows_quarantined": len(malformed),
+        "rows_scanned": rows_scanned,
+    }
+
+
+def _incomplete_label_ranges(dataset_file: Path) -> dict[tuple[str, str], dict[str, int]]:
+    ranges: dict[tuple[str, str], dict[str, int]] = {}
+    if not dataset_file.exists():
+        return ranges
+    with dataset_file.open("r", encoding="utf-8", errors="replace") as source:
+        for raw_line in source:
+            try:
+                row = json.loads(raw_line)
+            except Exception:
                 continue
-            if idx + horizon < len(closes):
-                labels[key] = round((_safe(closes[idx + horizon]) / entry - 1.0) * 100.0, 6)
-                labels[f"label_{horizon}"] = labels[key] > 0
-                changed += 1
-    if changed:
-        dataset_file.write_text(
-            "\n".join(json.dumps(row, ensure_ascii=False, cls=_JsonEncoder) for row in rows) + "\n",
-            encoding="utf-8",
+            if not isinstance(row, dict):
+                continue
+            labels = row.get("labels") or {}
+            if all(labels.get(f"ret_{horizon}") is not None for horizon in DEFAULT_HORIZONS):
+                continue
+            symbol = str(row.get("sym") or "")
+            tf = str(row.get("tf") or "")
+            bar_ts = int(row.get("bar_ts") or 0)
+            if not symbol or not tf or bar_ts <= 0:
+                continue
+            current = ranges.setdefault(
+                (symbol, tf),
+                {"min_bar_ts": bar_ts, "max_bar_ts": bar_ts, "rows": 0},
+            )
+            current["min_bar_ts"] = min(current["min_bar_ts"], bar_ts)
+            current["max_bar_ts"] = max(current["max_bar_ts"], bar_ts)
+            current["rows"] += 1
+    return ranges
+
+
+def _timeframe_ms(tf: str) -> int:
+    value = str(tf or "").strip().lower()
+    if len(value) < 2 or value[-1] not in TIMEFRAME_UNITS_MS:
+        raise ValueError(f"unsupported timeframe: {tf}")
+    amount = int(value[:-1])
+    if amount <= 0:
+        raise ValueError(f"unsupported timeframe: {tf}")
+    return amount * TIMEFRAME_UNITS_MS[value[-1]]
+
+
+async def backfill_mature_labels(
+    *,
+    dataset_file: Path = DATASET_FILE,
+    concurrency: int = 4,
+) -> dict[str, Any]:
+    """Fetch the maximum required Binance history and label every mature row."""
+    ranges = await run_cpu(_incomplete_label_ranges, dataset_file)
+    result: dict[str, Any] = {
+        "started_at": _utc_now_iso(),
+        "finished_at": None,
+        "pairs_requested": len(ranges),
+        "pairs_fetched": 0,
+        "pairs_failed": 0,
+        "bars_fetched": 0,
+        "labels_updated": 0,
+        "malformed_rows_quarantined": 0,
+        "rows_scanned": 0,
+    }
+    if not ranges:
+        result["finished_at"] = _utc_now_iso()
+        return result
+
+    semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+    market_data: dict[tuple[str, str], Any] = {}
+
+    async def fetch_pair(
+        session: aiohttp.ClientSession,
+        key: tuple[str, str],
+        span: dict[str, int],
+    ) -> tuple[tuple[str, str], Any | None]:
+        symbol, tf = key
+        bar_ms = _timeframe_ms(tf)
+        start_ms = int(span["min_bar_ts"])
+        end_ms = int(span["max_bar_ts"]) + (max(DEFAULT_HORIZONS) + 2) * bar_ms
+        async with semaphore:
+            data = await _fetch_range_klines(session, symbol, tf, start_ms, end_ms)
+        return key, data
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    connector = aiohttp.TCPConnector(limit=max(4, int(concurrency) * 2))
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(headers=headers, connector=connector, timeout=timeout) as session:
+        fetched = await asyncio.gather(
+            *[fetch_pair(session, key, span) for key, span in ranges.items()]
         )
-    return changed
+    for key, data in fetched:
+        if data is None or len(data) == 0:
+            result["pairs_failed"] += 1
+            continue
+        market_data[key] = data
+        result["pairs_fetched"] += 1
+        result["bars_fetched"] += len(data)
+
+    label_result = await run_cpu(_fill_mature_labels_batch, dataset_file, market_data)
+    result.update(label_result)
+    result["finished_at"] = _utc_now_iso()
+    return result
+
+
+async def _fetch_range_klines(
+    session: aiohttp.ClientSession,
+    symbol: str,
+    tf: str,
+    start_ms: int,
+    end_ms: int,
+) -> np.ndarray | None:
+    rows: list[list[Any]] = []
+    cursor = int(start_ms)
+    bar_ms = _timeframe_ms(tf)
+    while cursor <= end_ms:
+        batch: Any = None
+        for attempt in range(3):
+            try:
+                batch = await _fetch_json(
+                    session,
+                    f"{BINANCE_API}/api/v3/klines",
+                    {
+                        "symbol": symbol,
+                        "interval": tf,
+                        "startTime": cursor,
+                        "endTime": int(end_ms),
+                        "limit": 1000,
+                    },
+                )
+                break
+            except Exception:
+                if attempt == 2:
+                    log.warning("research label backfill fetch failed for %s %s", symbol, tf)
+                    return None
+                await asyncio.sleep(0.5 * (attempt + 1))
+        if not isinstance(batch, list) or not batch:
+            break
+        rows.extend(batch)
+        next_cursor = int(batch[-1][0]) + bar_ms
+        if next_cursor <= cursor:
+            break
+        cursor = next_cursor
+        if len(batch) < 1000:
+            break
+    if not rows:
+        return None
+    data = np.zeros(
+        len(rows),
+        dtype=[("t", "i8"), ("o", "f8"), ("h", "f8"), ("l", "f8"), ("c", "f8"), ("v", "f8")],
+    )
+    data["t"] = [int(row[0]) for row in rows]
+    data["o"] = [float(row[1]) for row in rows]
+    data["h"] = [float(row[2]) for row in rows]
+    data["l"] = [float(row[3]) for row in rows]
+    data["c"] = [float(row[4]) for row in rows]
+    data["v"] = [float(row[5]) for row in rows]
+    return data
 
 
 async def _fetch_json(session: aiohttp.ClientSession, url: str, params: dict[str, Any] | None = None) -> Any:
@@ -370,13 +606,14 @@ def _existing_ids(path: Path) -> set[str]:
     if not path.exists():
         return set()
     out: set[str] = set()
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(rec, dict) and rec.get("id"):
-            out.add(str(rec["id"]))
+    with path.open("r", encoding="utf-8", errors="replace") as source:
+        for line in source:
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(rec, dict) and rec.get("id"):
+                out.add(str(rec["id"]))
     return out
 
 
