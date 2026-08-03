@@ -1936,6 +1936,7 @@ async def _maybe_send_top_gainer_watch_alert(
     min_score = _top_gainer_score_gate_min_for_mode(mode)
     if score >= min_score or score < float(getattr(config, "TOP_GAINER_WATCH_ALERT_MIN_SCORE", 30.0)):
         return
+    day_key = _local_day_key(bar_ts)
     key = f"top_gainer_score|{sym}|{tf}|{mode}"
     logged = getattr(state, "watch_alert_logged", None)
     if logged is None:

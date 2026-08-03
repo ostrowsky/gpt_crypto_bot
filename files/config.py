@@ -500,7 +500,9 @@ TOP_GAINER_SCORE_GATE_MODE_MIN_SCORE: dict[str, float] = {"impulse": 30.0}
 
 # Watch-only alerts for strong candidates blocked by quality gates. These do not
 # open positions; they explain "why no signal" without weakening production BUYs.
-TOP_GAINER_WATCH_ALERTS_ENABLED: bool = True
+# Broad score-band WATCH failed the 2026-08-03 max-period/holdout/recent gate.
+# Keep the stricter candidate-score + near-floor alert below as the operator path.
+TOP_GAINER_WATCH_ALERTS_ENABLED: bool = False
 TOP_GAINER_WATCH_ALERT_MODES: tuple[str, ...] = ("impulse_speed",)
 TOP_GAINER_WATCH_ALERT_MIN_SCORE: float = 30.0
 TOP_GAINER_SCORE_GATE_STRONG_ALERTS_ENABLED: bool = True

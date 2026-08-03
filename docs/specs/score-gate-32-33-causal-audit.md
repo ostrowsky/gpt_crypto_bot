@@ -40,3 +40,11 @@ WATCH/shadow requires all-period, holdout, and recent windows to each have:
 BUY is always false at this stage. Any later BUY proposal requires independent
 forward WATCH evidence and the normal early-capture, precision, PnL, drawdown,
 turnover, and capacity guardrails.
+
+## Production reconciliation
+
+The failed gate disables the broad `TOP_GAINER_WATCH_ALERTS` score-band
+notification. It does not change the BUY floor (`34`) and does not disable the
+separate strict alert that also requires a high candidate score and bounded
+distance to the floor. The broad alert helper still has deterministic local-day
+deduplication and remains covered for safe future research re-enablement.
