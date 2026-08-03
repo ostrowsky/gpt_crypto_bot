@@ -282,3 +282,27 @@ The profile advances only to independent research-dataset shadow annotation.
 No BUY, score gate, blocker, portfolio, V2, or Telegram behavior changes. The
 next decision point is a new forward cohort with first-event symbol/day
 deduplication; do not reuse replay holdout rows as forward evidence.
+
+## 2026-08-03 Prioritized Hypothesis Backtest Checkpoint
+
+Three next-step hypotheses were evaluated causally before any production
+implementation:
+
+1. The current CatBoost EV/opportunity ranker failed its chronological
+   capacity-ranking pre-gate. On test top-1/top-3/top-5 competitions it reduced
+   teacher top-gainer rate by `2.59-5.11pp` and capture by `0.87-1.70pp`;
+   top-3/top-5 also reduced forward return. Do not run the full ten-slot replay
+   or enable this frozen model for portfolio allocation.
+2. The action-level exit model was corrected to include causal trade-path
+   context and use train/validation/untouched-holdout day splits with purges.
+   The validation-selected model captured only `62.322330` advantage on
+   holdout versus `21,869.736704` for always-sell. Reject it before full
+   environment replay; production SELL remains unchanged.
+3. Losing-incumbent replacement with a train-selected leader-delta threshold
+   passed the recent 14-day slice but failed train median/positive-rate and
+   holdout blocked-regret gates. Keep the current guard and require a new
+   independent stability window before testing a regime-conditional profile.
+
+The next active evidence gates are therefore forward, not threshold retuning:
+the frozen early-trend discriminator cohort, the observable tail-selector
+cohort, the seven-day measurement acceptance window, and replacement stability.

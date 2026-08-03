@@ -102,3 +102,51 @@ Next research direction:
 
 Rationale: current features describe market/symbol structure, but the exit action
 also depends on where the current trade is in its own lifecycle.
+
+## Context-Aware Revalidation Protocol — 2026-08-03
+
+The first model-family audit had two limitations that make its result
+diagnostic rather than a valid promotion gate:
+
+1. `bars_held`, unrealized PnL, MFE, giveback, and candidate action were present
+   at the top level of every action row, but the audit read only the nested
+   structural feature map;
+2. the best prediction threshold was selected on the same holdout used for the
+   final decision.
+
+The revalidation must therefore:
+
+- add the causal position-path fields and a `candidate_action_sell` indicator;
+- split complete local days into train, validation, and untouched holdout;
+- purge complete days around both split boundaries;
+- fit quantile edges and bin means on train only;
+- select both model family and threshold on validation only;
+- read the holdout once and require captured advantage to beat both never-sell
+  and always-sell without degenerating into a near-always-sell policy.
+
+Passing still authorizes only a full offline environment replay. Production
+SELL behavior remains unchanged.
+
+## Context-Aware Revalidation Result — 2026-08-03
+
+The corrected maximum-history dataset contained `99,935` action frames across
+18 local days. Complete-day splitting with one-day purges produced `53,565`
+train, `10,531` validation, and `14,209` untouched holdout rows; four boundary
+days were excluded.
+
+Validation selected a pair-bin model using `price_vs_ema20_pct` and
+`belief_open_mass` at threshold `0.0`. Position-path features were available to
+every candidate model but were not selected as the best validation family.
+
+On untouched holdout:
+
+- sell rate: `1.6891%`;
+- captured advantage: `62.322330`;
+- strong precision: `50.0%`;
+- bad sells: `62`;
+- always-sell captured advantage: `21,869.736704`;
+- never-sell captured advantage: `0`.
+
+Decision: `research_only_rejected_underperforms_always_sell_proxy`. Adding the
+available causal trade-path context does not solve action-level exit selection.
+Do not run the full environment replay and do not change production SELL.
