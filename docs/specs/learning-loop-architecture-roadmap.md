@@ -306,3 +306,25 @@ implementation:
 The next active evidence gates are therefore forward, not threshold retuning:
 the frozen early-trend discriminator cohort, the observable tail-selector
 cohort, the seven-day measurement acceptance window, and replacement stability.
+
+## 2026-08-04 Forward-Gate Checkpoint
+
+The next two replay-approved profiles are now evaluated by one provenance-safe
+forward report. It excludes every research row at or before the frozen model's
+creation time, deduplicates early-trend candidates to the first symbol/local-day
+event, matches observable-tail labels to their causal candidate, and joins
+canonical top movers only from final critics.
+
+Current independent evidence is not yet large enough for promotion. The early-
+trend cohort has 9 mature first candidates over 2 local days versus a minimum
+of 30 over 5 days. Primary precision is `11.11%`, but average and median T+5
+are `-0.7864%` and `-0.5587%`; its one available final-critic day adds no new
+or earlier canonical top mover. The new observable-tail profile has 11
+candidates and 6 mature T+10 labels versus a minimum of 30 over 5 days. Its
+average T+10 partial delta is currently `-0.0013%` and median is `+0.0552%`.
+Both remain shadow-only.
+
+The replacement stability audit was also refreshed over 510 closed cases. Its
+recent slice remains favorable, but train still fails median, positive-rate,
+and regret gates, while holdout blocked-positive regret is `53.85%`. Keep the
+non-losing incumbent guard and reject the targeted relaxation.
