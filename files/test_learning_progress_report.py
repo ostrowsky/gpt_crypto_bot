@@ -127,6 +127,43 @@ class LearningProgressReportTest(unittest.TestCase):
             self.assertEqual(report["learning_components"]["ranker_training"]["status"], "stale")
             self.assertEqual(report["focus_symbols"][0]["symbol"], "ARUSDT")
 
+    def test_unchanged_ranker_dataset_waits_for_labels_without_false_stale_alert(self) -> None:
+        latest = lpr.DayMetrics(day="2026-08-04", watchlist_top_count=1, early_pct=100.0, coverage_status="complete")
+        previous = [
+            lpr.DayMetrics(day=f"2026-08-0{day}", watchlist_top_count=4, early_pct=50.0, coverage_status="complete")
+            for day in range(1, 4)
+        ]
+        older = [
+            lpr.DayMetrics(day=f"2026-07-{day:02d}", watchlist_top_count=4, early_pct=75.0, coverage_status="complete")
+            for day in range(25, 32)
+        ]
+        status = {
+            "training": {
+                "last_finished_at": "2026-08-03T22:35:22Z",
+                "last_rows_total": 22163,
+                "last_dataset_mtime": 123.0,
+                "min_new_rows": 50,
+                "last_error": "",
+            },
+            "datasets": {"critic_dataset": {"last_write_time": 123.0}},
+        }
+
+        state = lpr._ranker_training_state(status, latest.day)
+        components = lpr._learning_components(status, {}, latest.day)
+        alerts = lpr._alerts(latest, status, {}, [], {})
+        actions = lpr._next_actions(latest, status, {}, [], {})
+        verdict = lpr._verdict(latest, previous, older, status)
+        decisions = lpr._previous_decisions({"apply_cooldown_relaxation": True}, status, latest.day)
+
+        self.assertEqual(state["status"], "waiting_for_new_labels")
+        self.assertEqual(components["ranker_training"]["status"], "waiting_for_new_labels")
+        self.assertFalse(any("ML ranker training stale" in item["text"] for item in alerts))
+        self.assertFalse(any("Починить ML/ranker" in item for item in actions))
+        self.assertTrue(any("ждать новых ranker-eligible labels" in item for item in actions))
+        self.assertEqual(verdict["label"], "УХУДШИЛСЯ ПО EARLY-CAPTURE")
+        self.assertTrue(any(item["status"] == "ожидает новые labels" for item in decisions))
+        self.assertIn("аудит score 32–33 завершён", decisions[1]["impact"])
+
     def test_shadow_reentry_summary_is_rendered_and_actionable(self) -> None:
         scorecard = {
             "status": "complete",

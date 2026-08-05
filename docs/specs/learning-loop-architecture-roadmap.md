@@ -328,3 +328,87 @@ The replacement stability audit was also refreshed over 510 closed cases. Its
 recent slice remains favorable, but train still fails median, positive-rate,
 and regret gates, while holdout blocked-positive regret is `53.85%`. Keep the
 non-losing incumbent guard and reject the targeted relaxation.
+
+## 2026-08-05 Daily Report and Deferred-Evidence Audit
+
+The 2026-08-04 daily report has a valid final critic and safe partial candle
+coverage: all 22 missing series are fresh-status `BREAK` exclusions. Its one
+watchlist top mover was bought and early-captured, so the daily 100% figures are
+correct but weak evidence. Rolling early capture remains above the 25% target
+at `56.2%`, while declining from `71.4%`; with medium confidence the correct
+verdict is `УХУДШИЛСЯ ПО EARLY-CAPTURE`, not a flat verdict caused by alleged
+training failure. Broad trend miss-rate `70.18%` uses a different denominator
+and is not the complement of watchlist-top capture.
+
+The ML freshness alarm was false. The last successful run consumed 22,163
+ranker-eligible rows, the current eligible count and dataset watermark are
+unchanged, and the worker has no error. Training is correctly waiting for new
+labels under its data-driven trigger; daily retraining is not required. The
+current model nevertheless remains rejected for portfolio allocation because
+its untouched test reduced teacher top-gainer rate and capture.
+
+Current-policy refreshes preserve the previous policy decisions:
+
+- entry admission: 91 critic days / 1,842,138 blocked events, best net reward
+  `-18%`; reject BUY expansion;
+- blocker reward: 21,801 cases, no blocker passed the harm gate; keep blockers;
+- portfolio replacement: 510 closed cases, average delta `+0.0462%`, median
+  `-0.137%`, positive `44.31%`; causal filters retain `34.89-40.33%` regret and
+  are not promotable;
+- suspicious re-entry: five registered-watch labels, average T+5 `+1.66%` but
+  only `40%` positive and zero final confirmations; continue measurement only.
+
+The tail-selector maximum-period run timed out after five minutes and the
+14-day run after three minutes. Neither produced evidence. Incremental
+tail-label caching is therefore the next executable P0 engineering item before
+another replay. Independent forward evidence is already unfavorable but below
+the frozen decision support: observable tail has 13/30 mature T+10 cases,
+average/median partial delta `-0.2747%/-0.2096%`, worse rate `53.85%`; early
+trend has 15/30 mature cases over 3/5 days, primary precision `6.67%`, average
+T+5 `-0.5904%`, and no new or earlier canonical top mover across two critic
+days. Keep both profiles shadow-only until their frozen minimum support is met.
+
+P0 operational acceptance is now 2/7 consecutive post-fix target days with a
+final critic before the 09:00 report. No production BUY, SELL, blocker,
+portfolio, cooldown, or Telegram trade behavior changes follow from this audit.
+
+### Prioritized validation queue after the 2026-08-05 audit
+
+1. **Incremental tail-label cache (P0 engineering).** Cache candle-derived exit
+   labels by immutable trade/horizon identity and make maximum-period plus
+   recent-window replay incremental. Acceptance: the same replay result as the
+   uncached implementation on a frozen fixture, a warm run under 60 seconds,
+   and no live SELL change.
+2. **Frozen observable-tail forward decision.** Do not retune
+   `exclude_ema_and_false_cleanup` on its first 13 cases. At 30 mature T+10
+   cases over five days, apply the already frozen average, median, and worse-
+   rate gate. If it fails, retire the profile. Only then may a materially
+   different exit-reason x market-regime selector be trained on maximum history
+   and checked on a new untouched holdout.
+3. **Frozen early-trend forward decision.** Continue to 30 mature first
+   symbol/day candidates, five local days, five critic days, and five canonical
+   top movers. Require proxy returns plus at least one new or earlier canonical
+   capture. Failure retires this discriminator; no threshold tuning on its
+   forward cohort.
+4. **Re-entry confirmation-funnel replay.** Continue registered-watch labels to
+   at least 30 mature cases. Then compare the current zero-conversion final
+   confirmation with a frozen registered-watch policy using T+5/T+10 return,
+   positive rate, drawdown, false-entry penalty, fees, and ten-slot opportunity
+   cost. No confirmation relaxation from the current five labels.
+5. **Objective-aligned ranker v2.** Retraining freshness is not the problem.
+   After new labels arrive, test a materially different model whose primary
+   loss directly includes canonical top-mover/capture targets rather than
+   promoting the current EV proxy. Require chronological validation, untouched
+   test improvement in top-1/top-3/top-5 teacher metrics, and full ten-slot
+   portfolio replay before any allocation use.
+6. **Conditional replacement only after a valid causal ranker.** The favorable
+   losing-incumbent and hindsight incoming-top segments are hypothesis
+   generators, not a production rule. Revisit replacement only when a causal
+   decision-time incoming-quality estimate passes its own independent gate;
+   require blocked-positive regret at most 25% in train, holdout, and recent
+   windows.
+
+Entry-admission rescue, blocker relaxation, score 32-33, delayed +120m entry,
+agent wake-up rescue, and the current EV/action-exit models remain closed after
+failed maximum-period or untouched-holdout gates. They are not active retuning
+tasks.

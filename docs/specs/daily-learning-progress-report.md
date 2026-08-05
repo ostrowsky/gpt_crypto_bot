@@ -1,7 +1,7 @@
 ﻿# Daily Learning Progress Report
 
 Status: shipped reporting/observability  
-Last updated: 2026-05-20
+Last updated: 2026-08-05
 
 ## Purpose
 
@@ -51,6 +51,16 @@ from final reports.
   because final alert confirmation produced zero alerts. When registered-watch
   counterfactual T+5 labels exist, the report must show that upstream cohort,
   keep it distinct from final alerts, and keep production re-entry disabled.
+- Ranker freshness is driven by labeled dataset provenance, not the calendar.
+  An older successful training run is `waiting_for_new_labels`, not `stale`,
+  when the current critic-dataset watermark equals the watermark consumed by
+  that run and the worker has no training error. Only a newer unconsumed
+  dataset watermark, a failed run, or a never-trained model is actionable
+  training staleness.
+- Previous-decision text must reflect completed evidence. It must not keep
+  requesting the score-32/33 blocked-winner audit after that replay rejected
+  the band, or describe cooldown `2` as entirely unevaluated after its first
+  forward window.
 
 ## Required Output
 

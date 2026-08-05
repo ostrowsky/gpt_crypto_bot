@@ -326,13 +326,50 @@ def _top_rate(days: Iterable[DayMetrics], rate_field: str) -> float | None:
     return round(weighted / denominator, 2)
 
 
+def _ranker_training_state(status: dict[str, Any], latest_day: str) -> dict[str, Any]:
+    training = status.get("training") or {}
+    dataset = (status.get("datasets") or {}).get("critic_dataset") or {}
+    last_finished = str(training.get("last_finished_at") or "")
+    last_error = str(training.get("last_error") or "")
+    trained_mtime = _maybe_float(training.get("last_dataset_mtime"))
+    current_mtime = _maybe_float(dataset.get("last_write_time"))
+    min_new_rows = int(training.get("min_new_rows") or 0)
+    if last_error:
+        state = "error"
+        reason = f"last_error={last_error}"
+    elif not last_finished:
+        state = "stale"
+        reason = "training has never finished"
+    elif last_finished[:10] >= latest_day:
+        state = "fresh"
+        reason = "trained for the latest report day"
+    elif (
+        trained_mtime is not None
+        and current_mtime is not None
+        and current_mtime <= trained_mtime + 1e-6
+    ):
+        state = "waiting_for_new_labels"
+        reason = "ranker-eligible dataset watermark is unchanged"
+    else:
+        state = "stale"
+        reason = "dataset advanced after the last completed training"
+    return {
+        "status": state,
+        "reason": reason,
+        "last_finished_at": last_finished,
+        "last_rows_total": training.get("last_rows_total"),
+        "min_new_rows": min_new_rows,
+        "trained_dataset_mtime": trained_mtime,
+        "current_dataset_mtime": current_mtime,
+    }
+
+
 def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics], status: dict[str, Any]) -> dict[str, str]:
     recent_top_days = _days_with_top_denominator([*previous[-7:], latest])
     older_top_days = _days_with_top_denominator(older)
     early_recent = _top_rate(recent_top_days, "early_pct")
     early_old = _top_rate(older_top_days, "early_pct")
-    training = (((status.get("training") or {}).get("last_finished_at")) or "")
-    stale_training = bool(training and training[:10] < latest.day)
+    stale_training = _ranker_training_state(status, latest.day)["status"] in {"stale", "error"}
     confidence, confidence_reason = _verdict_confidence(latest, previous, older)
     extra = {"confidence": confidence, "confidence_reason": confidence_reason}
     if not latest.critic_present:
@@ -390,7 +427,8 @@ def _learning_components(
     critic = status.get("top_gainer_critic") or {}
     sq = status.get("signal_quality_evaluator") or {}
     fb_policy = feedback.get("policy") or feedback
-    last_train = str(training.get("last_finished_at") or "")
+    ranker_state = _ranker_training_state(status, latest_day)
+    last_train = str(ranker_state.get("last_finished_at") or "")
     critic_day = str(critic.get("last_target_day_local") or "")
     sq_day = str(sq.get("last_target_day_local") or "")
     if reports_dir is not None:
@@ -413,8 +451,11 @@ def _learning_components(
         },
         "ranker_training": {
             "label": "ML ranker training",
-            "status": "stale" if last_train[:10] < latest_day else "fresh",
-            "detail": f"last_finished={last_train or 'never'}, rows={training.get('last_rows_total')}",
+            "status": str(ranker_state.get("status") or "stale"),
+            "detail": (
+                f"last_finished={last_train or 'never'}, rows={training.get('last_rows_total')}; "
+                f"{ranker_state.get('reason')}"
+            ),
         },
     }
 
@@ -422,12 +463,18 @@ def _learning_components(
 def _previous_decisions(feedback: dict[str, Any], status: dict[str, Any], latest_day: str) -> list[dict[str, str]]:
     out = []
     if (feedback.get("policy") or feedback).get("apply_cooldown_relaxation"):
-        out.append({"name": "cooldown relaxation", "status": "применено", "impact": "рано судить; нужно сравнить cooldown_harm и false positives"})
-    out.append({"name": "top-gainer score gate 34", "status": "оставлен", "impact": "защищает precision, но блокирует часть winners; нужен blocked-winner audit"})
+        out.append({"name": "cooldown relaxation", "status": "оставлено cooldown=2", "impact": "первое forward-окно поддерживает решение; дальше не расслаблять без causal rollback warning"})
+    out.append({"name": "top-gainer score gate 34", "status": "оставлен", "impact": "аудит score 32–33 завершён: доходность отрицательная, BUY/WATCH не расширять"})
     out.append({"name": "delayed +120m confirmation", "status": "отклонено", "impact": "правильно: top15 предсказывает, но вход после +120m убыточен"})
-    training = (status.get("training") or {})
-    if str(training.get("last_finished_at") or "")[:10] < latest_day:
+    ranker_state = _ranker_training_state(status, latest_day)
+    if ranker_state["status"] in {"stale", "error"}:
         out.append({"name": "ML ranker retraining", "status": "не обновляется", "impact": "это не self-improvement; нужен repair"})
+    elif ranker_state["status"] == "waiting_for_new_labels":
+        out.append({
+            "name": "ML ranker retraining",
+            "status": "ожидает новые labels",
+            "impact": "dataset watermark не изменился; retraining trigger не достигнут, текущий ranker не прошёл portfolio gate",
+        })
     return out
 
 
@@ -521,9 +568,12 @@ def _alerts(
         out.append({"severity": "serious", "text": f"trend miss-rate {latest.miss_rate * 100:.1f}%"})
     if latest.blocked_winner_count >= 5:
         out.append({"severity": "warn", "text": f"blocked winners={latest.blocked_winner_count}: {', '.join(latest.blocked_symbols[:6])}"})
-    training = status.get("training") or {}
-    if str(training.get("last_finished_at") or "")[:10] < latest.day:
-        out.append({"severity": "serious", "text": f"ML ranker training stale: last {training.get('last_finished_at')}"})
+    ranker_state = _ranker_training_state(status, latest.day)
+    if ranker_state["status"] in {"stale", "error"}:
+        out.append({
+            "severity": "serious",
+            "text": f"ML ranker training {ranker_state['status']}: {ranker_state['reason']}",
+        })
     blocked_focus = [x["symbol"] for x in focus_findings if x.get("status") in {"blocked_rule", "missed", "not_bought"}]
     if blocked_focus:
         out.append({"severity": "warn", "text": "focus top movers blocked/missed: " + ", ".join(blocked_focus[:8])})
@@ -558,11 +608,16 @@ def _next_actions(
     portfolio_replacement: dict[str, Any] | None = None,
 ) -> list[str]:
     actions = []
-    training = status.get("training") or {}
+    ranker_state = _ranker_training_state(status, latest.day)
     if not latest.critic_present:
         actions.append("▶️ Починить/перезапустить final top-gainer critic: без него watchlist_top=0 недостоверен.")
-    if str(training.get("last_finished_at") or "")[:10] < latest.day:
-        actions.append("▶️ Починить ML/ranker retraining freshness: сейчас модель не доказывает ежедневное обучение.")
+    if ranker_state["status"] in {"stale", "error"}:
+        actions.append("▶️ Проверить ML/ranker worker: dataset продвинулся после последнего обучения либо training завершился ошибкой.")
+    elif ranker_state["status"] == "waiting_for_new_labels":
+        actions.append(
+            "⏳ ML ranker: ждать новых ranker-eligible labels; текущую модель не продвигать, "
+            "она не прошла portfolio allocation gate."
+        )
     if latest.blocked_winner_count:
         actions.append("▶️ Запустить blocked-winner audit по top_gainer_score_gate / agent_mode_disabled / cooldown, без production relax.")
     if latest.median_exit_efficiency is not None and latest.median_exit_efficiency < 0:
