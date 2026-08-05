@@ -103,6 +103,7 @@ new BUY mode -> more replay tuning
 | Temporal exit robustness | complete: local 3x3 grid is positive in `9/9` cells; center `+122.90`, worst `+91.86` |
 | Temporal exit window stability | complete: wins `3/4` windows, aggregate `+152.49`, but latest window loses `-100.29` |
 | Temporal exit failure-slice audit | complete: latest losing window is noise-dominant / weak-structure, with lower RSI, lower range, below-EMA mean |
+| Early RSI-WEAK causal replay | complete/rejected: 831 exits, all static hold/grace/confirmation/15m+1h veto and partial-tail profiles failed validation+holdout gate |
 | Market-environment taxonomy | defined: policy-oriented hidden states, not simple bullish/bearish labels |
 | Market-environment separability | complete first pass: policy-favorable vs unfavorable days are separable enough for a classifier baseline, with small-sample caution |
 | Market-environment switched policy | complete first pass: oracle switch strongly wins, first causal prefix classifier loses to both fixed policies |
