@@ -1,6 +1,6 @@
 # Hypothesis Queue
 
-Last updated: 2026-08-05 20:25 Europe/Budapest
+Last updated: 2026-08-07 Europe/Budapest
 
 ## Purpose
 
@@ -55,6 +55,7 @@ production relaxations:
 | 15m causal structure veto | holdout median negative; `77%+` harmed at `k=1.4` | rejected |
 | last-closed 1h confirmation | positive mean, negative median, `56-61%` harmed | mixed/rejected for production |
 | static 25%/50% protected tail | downside compressed, but median negative and `61%` harmed | mixed/rejected for production |
+| expansion-score protected tail | `301/314` labeled; primary avg `-0.0829pp`, median `-0.1772pp`, `82%` harmed; all eight profiles failed | rejected |
 
 Next allowed exit hypothesis: a causal discriminator trained on universal
 post-exit labels for **all** WEAK exits, including low-MFE exits currently

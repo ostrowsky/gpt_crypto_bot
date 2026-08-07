@@ -1,6 +1,6 @@
 # Belief-State V2 Roadmap
 
-Last updated: 2026-05-19
+Last updated: 2026-08-07
 
 ## North Star
 
@@ -104,6 +104,8 @@ new BUY mode -> more replay tuning
 | Temporal exit window stability | complete: wins `3/4` windows, aggregate `+152.49`, but latest window loses `-100.29` |
 | Temporal exit failure-slice audit | complete: latest losing window is noise-dominant / weak-structure, with lower RSI, lower range, below-EMA mean |
 | Early RSI-WEAK causal replay | complete/rejected: 831 exits, all static hold/grace/confirmation/15m+1h veto and partial-tail profiles failed validation+holdout gate |
+| Impulse-expansion protected tail | complete/rejected: 301/314 exits labeled; eight ADX/DM/ER/Donchian/CMF/EMA/MACD profiles failed, primary avg `-0.0829pp`, median `-0.1772pp`, `82%` harmed |
+| Universal WEAK exit discriminator | next priority: learn post-exit advantage from all WEAK exits plus trade-path context; chronological validation before any portfolio replay |
 | Market-environment taxonomy | defined: policy-oriented hidden states, not simple bullish/bearish labels |
 | Market-environment separability | complete first pass: policy-favorable vs unfavorable days are separable enough for a classifier baseline, with small-sample caution |
 | Market-environment switched policy | complete first pass: oracle switch strongly wins, first causal prefix classifier loses to both fixed policies |
@@ -126,6 +128,27 @@ new BUY mode -> more replay tuning
 | Post-block delayed confirmation replay | complete/rejected: high top15 precision but no post-entry edge; selected mean `240m` return `-0.879%` vs baseline `-0.362%` |
 
 ## Latest Backtest-Gated Findings
+
+### Impulse-expansion protected tail
+
+The C98USDT failure case motivated a narrower experiment than broad WEAK
+suppression. The replay combined ADX level/change, directional movement,
+Kaufman efficiency ratio, Donchian position, Chaikin Money Flow, EMA
+slope/acceleration/alignment/distance, and normalized MACD into a causal
+expansion score. Eight protected-tail profiles were frozen before results.
+
+The maximum locally labelable replay reconstructed `301/314` exits from
+`2026-05-03` through `2026-08-06`. The primary `25%` tail retained a median
+`94.335%` of baseline profit, but still produced average net delta `-0.0829pp`,
+median `-0.1772pp`, and an `82.0%` worse-rate. Validation was negative and the
+small positive holdout mean was carried by a minority of continuation cases;
+holdout median remained `-0.0823pp` with `64.71%` harmed.
+
+Decision: reject all eight static expansion-tail profiles and keep production
+SELL unchanged. The next exit priority is the previously queued universal WEAK
+post-exit discriminator with explicit trade-lifecycle features. It must use a
+chronological train/validation/holdout protocol and advance only after both
+event-level and full portfolio gates.
 
 ### Exhaustion-aware exit hypotheses
 
