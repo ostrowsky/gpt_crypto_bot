@@ -554,7 +554,9 @@ REGIME_START_1D_RSI_MIN: float = 35.0
 REGIME_START_1D_RSI_MAX: float = 65.0
 REGIME_START_1D_PRICE_EDGE_MIN_PCT: float = -3.0
 REGIME_START_1D_RETURN_3D_MAX_PCT: float = 12.0
-DISCOVERY_SCAN_SEC: int = 300
+# A newly closed 15m/1h signal must enter monitoring on the next normal poll;
+# the discovery layer applies the same closed-bar entry gates as the main path.
+DISCOVERY_SCAN_SEC: int = 60
 DISCOVERY_ENTRY_GRACE_BARS: int = 2
 DISCOVERY_ENTRY_MAX_SLIPPAGE_PCT: float = 0.45
 WAKEUP_SCOUT_ENABLED: bool = True

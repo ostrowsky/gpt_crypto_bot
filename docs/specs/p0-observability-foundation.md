@@ -1,6 +1,6 @@
 # P0 Observability Foundation
 
-Last updated: 2026-05-16
+Last updated: 2026-08-12
 
 ## Problem
 
@@ -24,7 +24,8 @@ It is intentionally **measurement-first** and must not change BUY / SELL behavio
 Implement now:
 
 1. structured blocked logging fields for bot and market-agent blocked events;
-2. a read-only why-no-signal trace report over critic candidate history;
+2. a read-only why-no-signal trace report over critic candidate history and
+   the canonical runtime blocked-event journal;
 3. evaluator coverage diagnostics that explain empty or weakly-covered windows;
 4. a canonical metrics map document for operator / roadmap decisions.
 5. daily critic summaries that surface the dominant blocker and the latest
@@ -48,7 +49,9 @@ Explicitly out of scope:
 ## Acceptance Criteria
 
 - blocked events contain normalized `reason_code`, `gate`, and richer optional context;
-- why-no-signal report can summarize blocker chains for a requested symbol/window;
+- why-no-signal report can summarize blocker chains for a requested
+  symbol/window even when critic persistence is missing, while repeated polls
+  of the same closed bar are shown as one decision with a repeat count;
 - evaluator output includes a machine-readable `coverage` section and human-readable explanation when the window is empty or incomplete;
 - canonical metrics map exists under `docs/specs/`;
 - daily critic output contains concise why-no-signal summaries for missed winners;
@@ -58,7 +61,8 @@ Explicitly out of scope:
 
 - richer logging slightly increases event size;
 - some legacy blocked events will not have the new fields;
-- why-no-signal quality depends on existing critic-candidate coverage;
+- legacy diagnostics that consult only the critic dataset can miss real runtime
+  blocks; the runtime journal is therefore an explicit fallback source;
 - canonical metrics reduce ambiguity but may expose conflicts that require later roadmap decisions.
 
 ## Verification Gate
@@ -80,6 +84,10 @@ Shipped first additive slice:
 
 - structured blocked events now emit normalized `reason_code` and `gate`;
 - `files/why_no_signal_report.py` provides a read-only blocker-chain report;
+- the report streams and normalizes both `critic_dataset.jsonl` and
+  `bot_events.jsonl`, scans append-only journals backwards only through the
+  requested time window, exposes raw versus unique counts, and records
+  provenance;
 - evaluator output now includes additive `coverage` diagnostics;
 - canonical metrics map added in `docs/specs/metrics-canonical.md`.
 

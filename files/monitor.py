@@ -4720,12 +4720,16 @@ async def _discover_new_hot_coins(
         if existing is not None:
             idx, current = existing
             if _coin_report_priority(report) <= _coin_report_priority(current):
-                return
+                # One unchanged hot symbol must not abort routing of the other
+                # discovery candidates produced by the same market scan.
+                continue
             state.hot_coins[idx] = report
             discovery_action = "upgrade"
         else:
             if report.symbol in state.positions:
-                return
+                # Likewise, an already-open symbol is local to that candidate;
+                # later candidates may still need to enter monitoring.
+                continue
             state.hot_coins.append(report)
         state.recent_discoveries[report.symbol] = {
             "tf": report.tf,
@@ -7390,12 +7394,22 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
                     discovery_busy = state.discovery_task is not None and not state.discovery_task.done()
                     if not discovery_busy and now_ms >= state.last_discovery_ts + discovery_ms:
                         async def _run_discovery() -> None:
+                            started = asyncio.get_running_loop().time()
+                            added = 0
                             try:
                                 added = await _discover_new_hot_coins(session, state, send)
                                 if added:
                                     log.info("discovery scan added %d coin(s)", added)
                             except Exception as exc:
                                 log.warning("discovery scan failed: %s", exc)
+                            finally:
+                                elapsed = asyncio.get_running_loop().time() - started
+                                log.info(
+                                    "discovery scan complete: duration=%.2fs added=%d hot=%d",
+                                    elapsed,
+                                    added,
+                                    len(state.hot_coins),
+                                )
                         state.last_discovery_ts = now_ms
                         state.discovery_task = asyncio.create_task(_run_discovery())
 

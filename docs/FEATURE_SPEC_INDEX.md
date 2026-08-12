@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-08-03 11:06 Europe/Budapest
+Last updated: 2026-08-12 Europe/Budapest
 
 ## Objective
 
@@ -112,8 +112,10 @@ earlier capture of same-day watchlist top movers with a single unified
 | Unified portfolio replacement | planned | `SCOUT_OPTIMIZATION_SPEC.md` | opportunity cost, replacement uplift, capture under `10/10` | replay grid required |
 | GitHub-inspired portfolio controls | research-only replay harness | `docs/specs/github-inspired-portfolio-controls.md` | `pnl_total`, `trade_precision`, `capture_rate`, `exit_efficiency`, `giveback_pct` | 30d regime split before any live adoption |
 | BTC benchmark admission | research-only complete; not promoted | `docs/specs/btc-benchmark-admission-replay.md` | net PnL, BTC PnL, bypass admissions, holdout stability | collect four more frozen-profile rotation cases; no live change |
-| Why-no-signal traces | shipped first read-only version | `docs/specs/p0-observability-foundation.md` | blocker chain per missed top mover | connect to daily reports |
-| P0 observability foundation | shipped first additive slice | `docs/specs/p0-observability-foundation.md` | `blocked_reason_harm`, evaluator coverage | expand blocker context fields |
+| Closed-bar discovery routing | shipped correctness repair | `docs/specs/closed-bar-discovery-cadence.md` | closed-bar routing delay, candidate suppression | monitor live discovery duration and post-close latency |
+| High-volume breakout score rescue | maximum-period replay rejected; production unchanged | `docs/specs/closed-bar-discovery-cadence.md` | top precision, T+10 net return, positive rate | retire profile; keep score floor 34 |
+| Why-no-signal traces | shipped runtime-journal fallback | `docs/specs/p0-observability-foundation.md` | blocker chain per missed top mover, raw/unique counts | connect normalized trace to daily reports |
+| P0 observability foundation | shipped runtime-source repair | `docs/specs/p0-observability-foundation.md` | `blocked_reason_harm`, evaluator coverage | monitor critic/runtime source divergence |
 | Canonical metrics map | shipped | `docs/specs/metrics-canonical.md` | objective decision consistency | use in roadmap reviews |
 | Failure casebook | diagnostic-only complete | `docs/specs/failure-casebook.md` | ranked real failure cases, opportunity cost, replayable hypotheses | replay early-block-to-entry rescue first |
 | Trend lifecycle attribution | measurement-only; latest day complete, historical detail partial | `docs/specs/trend-lifecycle-attribution.md` | causal missed stage, remaining opportunity, metric-family separation | use bounded nightly casebook; backfill old capped detail before aggregate claims |
