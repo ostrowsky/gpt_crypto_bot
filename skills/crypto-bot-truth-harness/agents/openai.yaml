@@ -1,0 +1,4 @@
+interface:
+  display_name: "Crypto Bot Truth Harness"
+  short_description: "Audit trading metrics and change evidence"
+  default_prompt: "Audit this bot or staged change against the Truth Harness before accepting claims or shipping behavior."

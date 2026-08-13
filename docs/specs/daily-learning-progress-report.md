@@ -61,6 +61,22 @@ from final reports.
   requesting the score-32/33 blocked-winner audit after that replay rejected
   the band, or describe cooldown `2` as entirely unevaluated after its first
   forward window.
+- A progress verdict is a comparison, not an absolute-threshold shortcut.
+  `watchlist_top_bought_rate >= 50%` and goal recall `>= 50%` cannot by
+  themselves produce `improving`.
+- Capture aggregates use only days with a final critic and a goal denominator.
+  Exit/false-positive guardrails use only complete signal-quality days. Partial
+  quality coverage does not erase a valid capture denominator, but it blocks an
+  `improving` verdict because the downside guardrails are unknown.
+- Every rate exposes numerator and denominator. An absent/zero denominator is
+  `null`/`unknown`, never a synthetic `0%`.
+- Compare equal-length chronological windows. Require at least three complete
+  days per window and at least ten current-window watchlist-top observations;
+  otherwise the verdict is `inconclusive`.
+- `improving` requires a material early-capture gain without material
+  deterioration in capture recall, false-positive rate, or exit efficiency.
+  ML/teacher metrics remain diagnostic-only and cannot override realized
+  objective metrics.
 
 ## Required Output
 

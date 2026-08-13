@@ -84,7 +84,14 @@ from build_info import build_badge as _runtime_build_badge
 
 import config
 import botlog
-from monitor import MonitorState, monitoring_loop, load_positions, save_positions
+from monitor import (
+    MonitorState,
+    _build_full_watchlist_reports,
+    _build_shortlist_reports,
+    load_positions,
+    monitoring_loop,
+    save_positions,
+)
 from menu_text import is_hide_menu_text, is_open_menu_text
 from strategy import market_scan, check_entry_conditions, check_setup_conditions, analyze_coin, fetch_klines, get_entry_mode
 from telegram_delivery_audit import classify_message
@@ -841,22 +848,26 @@ def _make_broadcast_send(app: "Application"):
 def _update_hot_coins(state, in_play, skipped) -> None:
     """
     Обновляет state.hot_coins:
-    - confirmed монеты (in_play) — мониторятся всегда
-    - НЕ-confirmed монеты с signal_now=True — мониторятся с пометкой риска
+    - в full-watchlist режиме сохраняет весь целевой watchlist;
+    - иначе confirmed монеты (in_play) мониторятся всегда;
+    - НЕ-confirmed монеты с signal_now=True мониторятся с пометкой риска.
     
     Это главный фикс: раньше монеты типа TRXUSDT (signal_now=True, confirmed=False)
     полностью игнорировались мониторингом. Теперь они включаются.
     """
-    # Confirmed всегда в списке
-    hot = list(in_play)
-    
-    # Добавляем не-confirmed с активным сигналом прямо сейчас
-    already = {r.symbol for r in hot}
-    for r in skipped:
-        if r.signal_now and r.symbol not in already:
-            hot.append(r)
-    
-    state.hot_coins = hot
+    if bool(getattr(config, "MONITOR_FULL_WATCHLIST", False)):
+        default_tf = str((getattr(config, "TIMEFRAMES", None) or ["15m"])[0])
+        state.hot_coins = _build_full_watchlist_reports(
+            config.load_watchlist(),
+            list(in_play),
+            list(skipped),
+            list(state.hot_coins),
+            default_tf=default_tf,
+        )
+        _ensure_positions_monitored(state)
+        return
+
+    state.hot_coins = _build_shortlist_reports(list(in_play), list(skipped))
 
 
 def _main_menu_text() -> str:
@@ -1602,13 +1613,17 @@ async def _auto_reanalyze(app: Application) -> None:
                 state.task = None
                 state.running = False
 
-            if in_play and (not state.running or _task_dead):
+            full_watchlist_active = bool(
+                getattr(config, "MONITOR_FULL_WATCHLIST", False)
+                and state.hot_coins
+            )
+            if (in_play or full_watchlist_active or state.positions) and (not state.running or _task_dead):
                 state.running = True
                 state.task = asyncio.create_task(
                     monitoring_loop(state, _make_broadcast_send(app))
                 )
                 mon_note = f"\n▶️ *Мониторинг запущен автоматически*"
-            elif not in_play and state.running and not state.positions:
+            elif not in_play and state.running and not state.positions and not full_watchlist_active:
                 # Нет подтверждённых монет и нет открытых позиций — останавливаем
                 state.running = False
                 if state.task:

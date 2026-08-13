@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+PY="$ROOT/pyembed/python.exe"
+if [ -x "$PY" ]; then
+  exec "$PY" "$ROOT/files/truth_harness.py" change --staged
+fi
+exec python "$ROOT/files/truth_harness.py" change --staged

@@ -4022,10 +4022,100 @@ class MonitorState:
     discovery_task: Optional[asyncio.Task] = None
     wakeup_task: Optional[asyncio.Task] = None
     regime_start_task: Optional[asyncio.Task] = None
+    poll_cursor: int = 0
 
 
 def _tf_bar_ms(tf: str) -> int:
     return 15 * 60 * 1000 if tf == "15m" else 60 * 60 * 1000
+
+
+def _select_poll_coins(
+    coins: List[CoinReport],
+    position_symbols: set[str],
+    cap: int,
+    cursor: int,
+) -> tuple[List[CoinReport], int]:
+    """Select one bounded, starvation-free poll slice.
+
+    Open positions are included on every cycle. Remaining capacity rotates
+    through the non-position population in stable list order.
+    """
+    unique: List[CoinReport] = []
+    seen: set[str] = set()
+    for report in coins:
+        if report.symbol in seen:
+            continue
+        seen.add(report.symbol)
+        unique.append(report)
+
+    if cap <= 0 or len(unique) <= cap:
+        return unique, cursor
+
+    held = [report for report in unique if report.symbol in position_symbols]
+    rest = [report for report in unique if report.symbol not in position_symbols]
+    budget = max(0, cap - len(held))
+    if not rest or budget <= 0:
+        # Safety takes precedence over the request budget: if restored live
+        # positions exceed the configured cap, poll every position and no
+        # non-position symbol this cycle.
+        return held, cursor % max(1, len(rest))
+
+    budget = min(budget, len(rest))
+    start = cursor % len(rest)
+    selected = rest[start:start + budget]
+    if len(selected) < budget:
+        selected += rest[:budget - len(selected)]
+    return held + selected, (start + budget) % len(rest)
+
+
+def _build_full_watchlist_reports(
+    watchlist: List[str],
+    in_play: List[CoinReport],
+    skipped: List[CoinReport],
+    existing: List[CoinReport],
+    default_tf: str = "15m",
+) -> List[CoinReport]:
+    """Build one stable report per watchlist symbol without losing scan state."""
+    scanned: Dict[str, CoinReport] = {}
+    for report in [*in_play, *skipped]:
+        scanned.setdefault(report.symbol, report)
+    previous = {report.symbol: report for report in existing}
+    reports: List[CoinReport] = []
+    seen: set[str] = set()
+    for raw_symbol in watchlist:
+        symbol = str(raw_symbol or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        report = scanned.get(symbol) or previous.get(symbol)
+        if report is None:
+            report = CoinReport(
+                symbol=symbol,
+                tf=default_tf,
+                today_signals=0,
+                today_accuracy={},
+                today_confirmed=False,
+                best_horizon=0,
+                best_accuracy=0.0,
+                in_play=False,
+                note="full-watchlist monitoring; awaiting analysis",
+            )
+        reports.append(report)
+    return reports
+
+
+def _build_shortlist_reports(
+    in_play: List[CoinReport],
+    skipped: List[CoinReport],
+) -> List[CoinReport]:
+    """Legacy rollback policy: confirmed reports plus active skipped signals."""
+    reports = list(in_play)
+    seen = {report.symbol for report in reports}
+    for report in skipped:
+        if report.signal_now and report.symbol not in seen:
+            reports.append(report)
+            seen.add(report.symbol)
+    return reports
 
 
 def _normalize_forward_horizons(values) -> tuple[int, ...]:
@@ -7376,9 +7466,15 @@ async def monitoring_loop(state: MonitorState, send: SendFn) -> None:
                     except Exception as exc:
                         log.warning("portfolio trim notification failed: %s", exc)
 
+                poll_coins, state.poll_cursor = _select_poll_coins(
+                    list(state.hot_coins),
+                    set(state.positions),
+                    int(getattr(config, "MAX_POLL_PER_CYCLE", 0) or 0),
+                    state.poll_cursor,
+                )
                 tasks = [
                     _poll_coin(session, r, state, send)
-                    for r in state.hot_coins
+                    for r in poll_coins
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 errors = [exc for exc in results if isinstance(exc, Exception)]

@@ -130,6 +130,13 @@ POLL_SEC      = 60
 HISTORY_LIMIT = 300
 LIVE_LIMIT    = 100
 
+# Observe the complete objective population instead of shrinking the main
+# monitor back to today's already-confirmed shortlist after each reanalysis.
+# The monitor rotates a bounded slice; open positions are always polled.
+# Rollback: set MONITOR_FULL_WATCHLIST=False.
+MONITOR_FULL_WATCHLIST: bool = True
+MAX_POLL_PER_CYCLE: int = 45
+
 # в”Ђв”Ђ РќРѕРІС‹Рµ С„РёР»СЊС‚СЂС‹ РІС…РѕРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # РњР°РєСЃ. СЂРѕСЃС‚ РѕС‚ РјРёРЅРёРјСѓРјР° РїРѕСЃР»РµРґРЅРёС… 96 Р±Р°СЂРѕРІ (24С‡ РЅР° 15m)
 # Р•СЃР»Рё РјРѕРЅРµС‚Р° СѓР¶Рµ РІС‹СЂРѕСЃР»Р° Р±РѕР»СЊС€Рµ вЂ” С‚СЂРµРЅРґ СѓСЃС‚Р°Р», РІС…РѕРґ Р·Р°РїСЂРµС‰С‘РЅ

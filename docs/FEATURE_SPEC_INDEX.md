@@ -13,6 +13,8 @@ earlier capture of same-day watchlist top movers with a single unified
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
 | Spec-first workflow | shipped | `docs/specs/spec-first-workflow.md` | regression safety, reproducibility | use for every non-trivial change |
+| Truth Harness | shipped enforcement; compliance may fail closed | `docs/specs/truth-harness.md` | evidence provenance, denominator integrity, MD/config parity | run `full` before analysis and `change --staged` before handoff |
+| Full watchlist rotating monitor | shipped under guarded forward canary | `docs/specs/full-watchlist-rotating-monitor.md` | objective-population coverage, sweep latency, early capture | review seven complete forward days before claiming recall uplift |
 | Scout objective and metric contract | shipped | `SCOUT_OPTIMIZATION_SPEC.md` | `watchlist_top_bought`, `early_captures`, `false_positive_buys` | keep current |
 | Signal-quality evaluator | shipped | `skills/signal-quality-evaluator/SKILL.md` | `miss_rate`, `capture_ratio_at_entry`, `exit_efficiency`, `giveback_pct` | feed hypothesis queue |
 | Exit-quality auditor | shipped measurement-only | `docs/specs/exit-quality-auditor.md` | `exit_efficiency`, `giveback_pct`, `top_mover_exit_failure_count`, `negative_after_mfe_count` | choose SELL hypotheses for replay; no live SELL change |

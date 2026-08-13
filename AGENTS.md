@@ -19,3 +19,17 @@ trained model artifacts unless the user explicitly requests those artifacts.
 Trading-policy hypotheses must be validated on the maximum available historical
 period before production behavior is relaxed. Always propose and perform that
 validation when evaluating a new hypothesis.
+
+## Mandatory Truth Harness
+
+For audits and for every change to trading behavior, gates, models, metrics,
+reports, or the learning loop:
+
+1. Use `skills/crypto-bot-truth-harness/SKILL.md` at the start of the task.
+2. Run `pyembed\python.exe files\truth_harness.py full` before relying on
+   current metrics. A failing full profile must be reported as `FAIL` or
+   `UNKNOWN`; it must not be reworded into a pass.
+3. Apply TH-01 through TH-12 from `docs/specs/truth-harness.md` during design
+   and review.
+4. Before commit, stage only intended files and run
+   `pyembed\python.exe files\truth_harness.py change --staged`.
