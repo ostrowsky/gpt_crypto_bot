@@ -328,13 +328,23 @@ def _top_rate(days: Iterable[DayMetrics], rate_field: str) -> float | None:
 
 def _ranker_training_state(status: dict[str, Any], latest_day: str) -> dict[str, Any]:
     training = status.get("training") or {}
+    provenance = training.get("provenance") or {}
     dataset = (status.get("datasets") or {}).get("critic_dataset") or {}
     last_finished = str(training.get("last_finished_at") or "")
     last_error = str(training.get("last_error") or "")
     trained_mtime = _maybe_float(training.get("last_dataset_mtime"))
     current_mtime = _maybe_float(dataset.get("last_write_time"))
     min_new_rows = int(training.get("min_new_rows") or 0)
-    if last_error:
+    verified_rows = int(provenance.get("verified_rows") or 0)
+    labeled_rows = int(provenance.get("labeled_rows") or 0)
+    required_rows = int(training.get("min_rows") or 0)
+    if provenance and verified_rows < required_rows:
+        state = "accumulating_verified_cohort"
+        reason = (
+            f"provenance-verified rows={verified_rows}/{required_rows}; "
+            f"legacy/unknown={int(provenance.get('legacy_unknown_rows') or 0)} of labeled={labeled_rows}"
+        )
+    elif last_error:
         state = "error"
         reason = f"last_error={last_error}"
     elif not last_finished:
@@ -361,6 +371,9 @@ def _ranker_training_state(status: dict[str, Any], latest_day: str) -> dict[str,
         "min_new_rows": min_new_rows,
         "trained_dataset_mtime": trained_mtime,
         "current_dataset_mtime": current_mtime,
+        "verified_rows": verified_rows,
+        "labeled_rows": labeled_rows,
+        "legacy_unknown_rows": int(provenance.get("legacy_unknown_rows") or 0),
     }
 
 
@@ -475,6 +488,15 @@ def _previous_decisions(feedback: dict[str, Any], status: dict[str, Any], latest
             "status": "ожидает новые labels",
             "impact": "dataset watermark не изменился; retraining trigger не достигнут, текущий ranker не прошёл portfolio gate",
         })
+    elif ranker_state["status"] == "accumulating_verified_cohort":
+        out.append({
+            "name": "ML ranker retraining",
+            "status": "копит доказательную когорту",
+            "impact": (
+                f"verified={ranker_state['verified_rows']}; legacy/unknown="
+                f"{ranker_state['legacy_unknown_rows']} не допускаются к обучению"
+            ),
+        })
     return out
 
 
@@ -574,6 +596,11 @@ def _alerts(
             "severity": "serious",
             "text": f"ML ranker training {ranker_state['status']}: {ranker_state['reason']}",
         })
+    elif ranker_state["status"] == "accumulating_verified_cohort":
+        out.append({
+            "severity": "warn",
+            "text": f"ML ranker evidence is not decision-grade yet: {ranker_state['reason']}",
+        })
     blocked_focus = [x["symbol"] for x in focus_findings if x.get("status") in {"blocked_rule", "missed", "not_bought"}]
     if blocked_focus:
         out.append({"severity": "warn", "text": "focus top movers blocked/missed: " + ", ".join(blocked_focus[:8])})
@@ -617,6 +644,11 @@ def _next_actions(
         actions.append(
             "⏳ ML ranker: ждать новых ranker-eligible labels; текущую модель не продвигать, "
             "она не прошла portfolio allocation gate."
+        )
+    elif ranker_state["status"] == "accumulating_verified_cohort":
+        actions.append(
+            "⏳ ML ranker: накапливать provenance-verified cohort; legacy/unknown строки "
+            "не обучать и текущую модель не продвигать."
         )
     if latest.blocked_winner_count:
         actions.append("▶️ Запустить blocked-winner audit по top_gainer_score_gate / agent_mode_disabled / cooldown, без production relax.")

@@ -95,6 +95,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
+import policy_provenance
 
 try:
     import msvcrt
@@ -444,6 +445,11 @@ def _write_candidate(
         "f":           scalar_f,
         "seq":         seq,
         "seq_feature_names": SEQ_FEATURE_NAMES,
+        "provenance": policy_provenance.build_observation_provenance(
+            bar_ts=bar_ts,
+            tf=tf,
+            source="data_collector",
+        ),
         "labels": {
             "ret_3":       None,
             "ret_5":       None,
@@ -498,14 +504,28 @@ def fill_pending_from_data(
                 key_label = f"label_{h}"
                 if lab.get(key_ret) is not None:
                     continue  # уже заполнено
-                future_ts  = rec_bar_ts + h * bar_ms
-                fut_idx    = np.where(t_arr >= future_ts)[0]
-                if len(fut_idx) == 0:
+                target_idx = policy_provenance.closed_target_index(
+                    t_arr,
+                    bar_ts=int(rec_bar_ts),
+                    bar_ms=bar_ms,
+                    horizon=h,
+                )
+                if target_idx is None:
                     continue  # данных ещё нет
-                future_close = float(c_arr[fut_idx[0]])
+                future_close = float(c_arr[target_idx])
                 ret_pct = (future_close / entry_close - 1) * 100
                 rec["labels"][key_ret]   = round(ret_pct, 4)
                 rec["labels"][key_label] = ret_pct > 0
+                policy_provenance.attach_label_provenance(
+                    rec,
+                    label_keys=(key_ret, key_label),
+                    label_time=policy_provenance.forward_label_time(
+                        bar_ts=int(rec_bar_ts),
+                        tf=str(rec.get("tf") or tf),
+                        horizon=h,
+                    ),
+                    source="collector_forward_label",
+                )
                 changed = True
             return changed
 
@@ -560,6 +580,11 @@ def fill_labels(
                 }
                 changed = any(labels.get(key) != value for key, value in values.items())
                 labels.update(values)
+                policy_provenance.attach_label_provenance(
+                    rec,
+                    label_keys=values,
+                    source="main_monitor_trade_exit",
+                )
                 return changed
             return False
 
@@ -573,7 +598,14 @@ def fill_labels(
         _pylog.warning("fill_labels error: %s", e)
 
 
-def fill_learning_labels(record_id: str, labels: Dict[str, Any]) -> None:
+def fill_learning_labels(
+    record_id: str,
+    labels: Dict[str, Any],
+    *,
+    label_definition: str | Dict[str, str] | None = None,
+    label_time: datetime | None = None,
+    source: str = "learning_labeler",
+) -> None:
     if not record_id or not labels or not ML_FILE.exists():
         return
     try:
@@ -585,6 +617,14 @@ def fill_learning_labels(record_id: str, labels: Dict[str, Any]) -> None:
                     if rec["labels"].get(key) != value:
                         rec["labels"][key] = value
                         changed = True
+                if policy_provenance.attach_label_provenance(
+                    rec,
+                    label_keys=labels,
+                    definition=label_definition,
+                    label_time=label_time,
+                    source=source,
+                ):
+                    changed = True
                 return changed
             return False
 
@@ -618,6 +658,20 @@ def fill_forward_label(
                 values = {key_ret: round(ret_pct, 4), key_label: ret_pct > 0}
                 changed = any(labels.get(key) != value for key, value in values.items())
                 labels.update(values)
+                try:
+                    label_time = policy_provenance.forward_label_time(
+                        bar_ts=int(rec.get("bar_ts") or 0),
+                        tf=str(rec.get("tf") or ""),
+                        horizon=horizon,
+                    )
+                except (TypeError, ValueError):
+                    label_time = None
+                policy_provenance.attach_label_provenance(
+                    rec,
+                    label_keys=values,
+                    label_time=label_time,
+                    source="main_monitor_forward_label",
+                )
                 return changed
             return False
 

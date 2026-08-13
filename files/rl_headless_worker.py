@@ -149,6 +149,11 @@ def _count_ranker_rows(path: Path) -> int:
             labels = rec.get("labels") or {}
             if labels.get("ret_5") is None:
                 continue
+            if (
+                bool(getattr(config, "POLICY_PROVENANCE_REQUIRED_FOR_RANKER", True))
+                and not ml_candidate_ranker.training_row_provenance_valid(rec)
+            ):
+                continue
             rows += 1
     return rows
 
@@ -190,6 +195,7 @@ def build_status_snapshot(
     *,
     critic_report: Dict[str, Any],
     ml_rows_total: int,
+    ranker_provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     research_shadow_file_status = _load_json_file(research_universe_shadow_collector.STATUS_FILE)
     research_shadow_section = {
@@ -258,6 +264,7 @@ def build_status_snapshot(
             "model_file": str(MODEL_FILE),
             "report_file": str(TRAIN_REPORT_FILE),
             "shadow_file": str(SHADOW_REPORT_FILE),
+            "provenance": ranker_provenance or {},
         },
         "datasets": {
             "ml_dataset_rows": ml_rows_total,
@@ -703,6 +710,8 @@ def _train_ranker_once(min_rows: int) -> Dict[str, Any]:
         "top1_delta": top1_delta,
         "train_report": report_without_payload,
         "shadow_report": shadow_report,
+        "evaluation_provenance": report_without_payload.get("evaluation_provenance", {}),
+        "data_provenance": report_without_payload.get("data_provenance", {}),
     }
 
 
@@ -722,6 +731,8 @@ def _build_train_session_report(
         "top1_delta": result.get("top1_delta"),
         "critic_rows_total": critic_rows_total,
         "ml_rows_total": ml_rows_total,
+        "evaluation_provenance": result.get("evaluation_provenance", {}),
+        "data_provenance": result.get("data_provenance", {}),
         "collector_last_cycle_stats": state.collector_last_cycle_stats,
         "top_gainer_critic": {
             "last_phase": state.top_gainer_last_phase,
@@ -1754,10 +1765,15 @@ async def _write_status_now(state: WorkerState) -> None:
         _restore_training_state(state)
         critic_report = await asyncio.to_thread(report_critic_dataset.build_report)
         ml_rows_total = await asyncio.to_thread(_count_jsonl_rows, ml_dataset.ML_FILE)
+        ranker_provenance = await asyncio.to_thread(
+            ml_candidate_ranker.training_provenance_coverage,
+            critic_dataset.CRITIC_FILE,
+        )
         snapshot = build_status_snapshot(
             state,
             critic_report=critic_report,
             ml_rows_total=ml_rows_total,
+            ranker_provenance=ranker_provenance,
         )
         await asyncio.to_thread(_write_status, snapshot)
         log.info(

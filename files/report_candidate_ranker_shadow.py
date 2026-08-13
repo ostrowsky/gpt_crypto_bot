@@ -118,7 +118,14 @@ def build_shadow_report(
     top_ns: Sequence[int] = (1, 3, 5),
     min_ts: datetime | None = None,
 ) -> Dict[str, Any]:
-    rows = ml_candidate_ranker.load_training_rows(dataset_path, min_ts=min_ts)
+    # Historical rows remain useful for diagnostics, but their missing causal
+    # provenance prevents training/promotion. Keep that distinction explicit.
+    rows = ml_candidate_ranker.load_training_rows(
+        dataset_path,
+        min_ts=min_ts,
+        require_provenance=False,
+    )
+    provenance = ml_candidate_ranker.training_provenance_coverage(dataset_path, min_ts=min_ts)
     payload = _load_payload(model_src)
     action_counts = Counter(str(r.get("decision", {}).get("action", "")) for r in rows)
     signal_counts = Counter(str(r.get("signal_type", "")) for r in rows)
@@ -236,6 +243,9 @@ def build_shadow_report(
         warnings.append("Many rows still lack realized trade_exit_pnl; target quality depends mostly on ret_5.")
 
     return {
+        "evidence_status": "diagnostic_only",
+        "runtime_eligible": False,
+        "data_provenance": provenance,
         "dataset_file": str(dataset_path),
         "model_name": payload.get("model_name", ""),
         "rows_total": len(rows),
@@ -256,7 +266,12 @@ def build_shadow_report(
 def render_text(report: Dict[str, Any]) -> str:
     lines = [
         "Candidate Ranker Shadow Report",
+        f"Evidence: {report.get('evidence_status', 'unknown')} (runtime_eligible={report.get('runtime_eligible', False)})",
         f"Rows: {report['rows_total']}",
+        (
+            f"Provenance: verified={int((report.get('data_provenance') or {}).get('verified_rows') or 0)} "
+            f"legacy/unknown={int((report.get('data_provenance') or {}).get('legacy_unknown_rows') or 0)}"
+        ),
         f"Grouped competitions: {report['grouped_bar_competitions']}",
     ]
     if report.get("warnings"):

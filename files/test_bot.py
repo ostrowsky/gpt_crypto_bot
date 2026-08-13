@@ -7908,7 +7908,7 @@ class TestRLHeadlessWorkerPreparation(unittest.TestCase):
         self.assertEqual(snap["datasets"]["ml_dataset_rows"], 26890)
         self.assertEqual(snap["datasets"]["critic_dataset"]["rows_total"], 1539)
 
-    def test_T260_count_ranker_rows_uses_only_rows_with_ret5(self):
+    def test_T260_count_ranker_rows_uses_only_rows_with_ret5_and_verified_provenance(self):
         import rl_headless_worker
 
         with tempfile.TemporaryDirectory() as td:
@@ -7936,7 +7936,14 @@ class TestRLHeadlessWorkerPreparation(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.assertEqual(rl_headless_worker._count_ranker_rows(path), 2)
+            self.assertEqual(rl_headless_worker._count_ranker_rows(path), 0)
+            with patch.object(
+                rl_headless_worker.config,
+                "POLICY_PROVENANCE_REQUIRED_FOR_RANKER",
+                False,
+                create=True,
+            ):
+                self.assertEqual(rl_headless_worker._count_ranker_rows(path), 2)
 
     def test_T261_restore_training_state_from_status_recovers_prior_progress(self):
         import rl_headless_worker

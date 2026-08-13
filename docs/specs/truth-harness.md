@@ -58,6 +58,9 @@ harness failure makes the audited conclusion `UNKNOWN`.
 
 ## Current known gap policy
 
-The absence of canonical portfolio alpha, immutable historical universe
-snapshots, or complete model timing provenance must remain visible as a harness
-finding. Shipping the harness does not imply that those gaps have been fixed.
+The absence of canonical portfolio alpha or immutable historical universe
+snapshots must remain visible as a harness finding. New ranker observations
+now enforce policy/label timing provenance and purged chronological splits, but
+the current historical cohort remains `legacy_unknown`; model provenance stays
+a failure until enough verified rows mature and a fresh report is produced.
+Shipping enforcement does not turn legacy evidence into proof.

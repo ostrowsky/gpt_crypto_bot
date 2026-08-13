@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -55,6 +56,32 @@ class TruthHarnessTest(unittest.TestCase):
         self.assertTrue(truth_harness._is_runtime("files/positions.json"))
         self.assertTrue(truth_harness._is_runtime("files/ml_candidate_ranker_report.json"))
         self.assertFalse(truth_harness._is_runtime("files/monitor.py"))
+
+    def test_model_provenance_rejects_overlap_and_empty_verified_cohort(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / ".runtime" / "reports"
+            reports.mkdir(parents=True)
+            (reports / "rl_train_latest.json").write_text(
+                json.dumps({
+                    "evaluation_provenance": {
+                        "feature_time": "closed bars",
+                        "label_time": "future bars",
+                        "label_definition": {"ret_5": "T+5"},
+                        "evaluation_scope": "out_of_sample_time_holdout",
+                        "cross_split_group_overlap_count": 1,
+                        "cross_split_group_overlap_examples": ["2026-08-13T10:00:00Z"],
+                        "data_provenance": {"verified_rows": 0},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            audit = truth_harness.Audit("full")
+            truth_harness.audit_model_provenance(audit, root)
+
+        messages = [finding.message for finding in audit.findings]
+        self.assertIn("Chronological holdout shares decision groups across splits", messages)
+        self.assertIn("Model evidence contains no provenance-verified rows", messages)
 
 
 if __name__ == "__main__":

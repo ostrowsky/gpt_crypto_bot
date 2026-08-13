@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - non-Windows fallback
     msvcrt = None
 
 from ml_signal_model import build_runtime_record
+import policy_provenance
 
 
 ROOT = Path(__file__).resolve().parent
@@ -307,6 +308,7 @@ def _update_existing_candidate(
     continuation_profile: bool,
     signal_flags: Optional[Dict[str, bool]],
     near_miss: bool,
+    decision_provenance: Dict[str, Any],
 ) -> bool:
     changed = False
 
@@ -338,6 +340,7 @@ def _update_existing_candidate(
             "near_miss": bool(near_miss),
             "signal_flags": signal_flags or {},
         }
+        policy_provenance.update_decision_provenance(rec, decision_provenance)
         rec.setdefault("labels", {})
         if action == "take":
             rec["labels"]["trade_taken"] = True
@@ -379,6 +382,12 @@ def log_candidate(
     market_vol_24h: float = 0.0,
 ) -> str:
     record_id = _candidate_id(sym, tf, bar_ts)
+    source = "data_collector" if stage == "collector" else "main_monitor"
+    decision_provenance = policy_provenance.build_observation_provenance(
+        bar_ts=bar_ts,
+        tf=tf,
+        source=source,
+    )
     if _is_logged(record_id):
         _update_existing_candidate(
             record_id=record_id,
@@ -398,6 +407,7 @@ def log_candidate(
             continuation_profile=continuation_profile,
             signal_flags=signal_flags,
             near_miss=near_miss,
+            decision_provenance=decision_provenance,
         )
         return record_id
 
@@ -419,6 +429,8 @@ def log_candidate(
     rec["ts_signal"] = datetime.fromtimestamp(bar_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rec["bar_ts"] = bar_ts
     rec["seq_feature_names"] = SEQ_FEATURE_NAMES
+    rec["provenance"] = dict(decision_provenance)
+    rec["decision_provenance"] = dict(decision_provenance)
     rec["decision"] = {
         "action": action,
         "reason_code": reason_code,
@@ -500,12 +512,24 @@ def fill_trade_outcome(record_id: str, exit_pnl: float, exit_reason: str, bars_h
         rec["labels"]["trade_exit_pnl"] = new_exit_pnl
         rec["labels"]["trade_exit_reason"] = new_exit_reason
         rec["labels"]["trade_bars_held"] = new_bars_held
+        policy_provenance.attach_label_provenance(
+            rec,
+            label_keys=("trade_exit_pnl", "trade_exit_reason", "trade_bars_held"),
+            source="main_monitor_trade_exit",
+        )
         return True
 
     _rewrite_records(_mutate)
 
 
-def fill_learning_labels(record_id: str, labels: Dict[str, Any]) -> None:
+def fill_learning_labels(
+    record_id: str,
+    labels: Dict[str, Any],
+    *,
+    label_definition: str | Dict[str, str] | None = None,
+    label_time: Optional[datetime] = None,
+    source: str = "learning_labeler",
+) -> None:
     if not record_id or not labels or not CRITIC_FILE.exists():
         return
 
@@ -518,6 +542,14 @@ def fill_learning_labels(record_id: str, labels: Dict[str, Any]) -> None:
             if rec["labels"].get(key) != value:
                 rec["labels"][key] = value
                 changed = True
+        if policy_provenance.attach_label_provenance(
+            rec,
+            label_keys=labels,
+            definition=label_definition,
+            label_time=label_time,
+            source=source,
+        ):
+            changed = True
         return changed
 
     _rewrite_records(_mutate)
@@ -539,6 +571,20 @@ def fill_forward_label(record_id: str, horizon: int, ret_pct: float) -> None:
             return False
         rec["labels"][key_ret] = new_ret
         rec["labels"][key_label] = new_label
+        try:
+            label_time = policy_provenance.forward_label_time(
+                bar_ts=int(rec.get("bar_ts") or 0),
+                tf=str(rec.get("tf") or ""),
+                horizon=horizon,
+            )
+        except (TypeError, ValueError):
+            label_time = None
+        policy_provenance.attach_label_provenance(
+            rec,
+            label_keys=(key_ret, key_label),
+            label_time=label_time,
+            source="main_monitor_forward_label",
+        )
         return True
 
     _rewrite_records(_mutate)
@@ -565,14 +611,28 @@ def fill_pending_from_data(sym: str, tf: str, t_arr: Any, c_arr: Any, bar_ms: in
             key_label = f"label_{h}"
             if lab.get(key_ret) is not None:
                 continue
-            future_ts = rec_bar_ts + h * bar_ms
-            fut_idx = np.where(t_arr >= future_ts)[0]
-            if len(fut_idx) == 0:
+            target_idx = policy_provenance.closed_target_index(
+                t_arr,
+                bar_ts=int(rec_bar_ts),
+                bar_ms=bar_ms,
+                horizon=h,
+            )
+            if target_idx is None:
                 continue
-            future_close = float(c_arr[fut_idx[0]])
+            future_close = float(c_arr[target_idx])
             ret_pct = (future_close / entry_close - 1) * 100
             rec["labels"][key_ret] = round(ret_pct, 4)
             rec["labels"][key_label] = ret_pct > 0
+            policy_provenance.attach_label_provenance(
+                rec,
+                label_keys=(key_ret, key_label),
+                label_time=policy_provenance.forward_label_time(
+                    bar_ts=int(rec_bar_ts),
+                    tf=str(rec.get("tf") or tf),
+                    horizon=h,
+                ),
+                source="collector_forward_label",
+            )
             changed = True
         return changed
 
@@ -707,6 +767,7 @@ def annotate_top_gainer_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
     }
     tagged_symbols = set(exchange_map) | set(watchlist_map) | false_positive_symbols
     rows_scanned = 0
+    label_time = datetime.now(timezone.utc)
 
     def _annotate(rec: Dict[str, Any], *, count_scan: bool) -> bool:
         nonlocal rows_scanned
@@ -730,10 +791,22 @@ def annotate_top_gainer_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
             false_positive_buy=sym in false_positive_symbols,
         )
         teacher = rec.setdefault("teacher", {})
-        if teacher.get(phase) == phase_payload:
-            return False
-        teacher[phase] = phase_payload
-        return True
+        changed = False
+        if teacher.get(phase) != phase_payload:
+            teacher[phase] = phase_payload
+            changed = True
+        if policy_provenance.attach_label_provenance(
+            rec,
+            label_keys=(f"teacher.{phase}",),
+            definition=(
+                f"immutable {phase} top-gainer critic membership and capture outcome "
+                f"for local day {target_day_text}"
+            ),
+            label_time=label_time,
+            source=f"top_gainer_critic_{phase}",
+        ):
+            changed = True
+        return changed
 
     def _mutate_preview(rec: Dict[str, Any]) -> bool:
         nonlocal rows_scanned

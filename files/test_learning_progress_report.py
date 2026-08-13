@@ -164,6 +164,34 @@ class LearningProgressReportTest(unittest.TestCase):
         self.assertTrue(any(item["status"] == "ожидает новые labels" for item in decisions))
         self.assertIn("аудит score 32–33 завершён", decisions[1]["impact"])
 
+    def test_ranker_reports_verified_cohort_accumulation_instead_of_false_stale(self) -> None:
+        latest = lpr.DayMetrics(day="2026-08-13", watchlist_top_count=1, early_pct=20.0, coverage_status="complete")
+        status = {
+            "training": {
+                "last_finished_at": "2026-08-03T22:35:22Z",
+                "last_rows_total": 22163,
+                "last_dataset_mtime": 123.0,
+                "min_rows": 500,
+                "provenance": {
+                    "labeled_rows": 22163,
+                    "verified_rows": 12,
+                    "legacy_unknown_rows": 22151,
+                },
+            },
+            "datasets": {"critic_dataset": {"last_write_time": 456.0}},
+        }
+
+        state = lpr._ranker_training_state(status, latest.day)
+        actions = lpr._next_actions(latest, status, {}, [], {})
+        decisions = lpr._previous_decisions({}, status, latest.day)
+        alerts = lpr._alerts(latest, status, {}, [], {})
+
+        self.assertEqual(state["status"], "accumulating_verified_cohort")
+        self.assertFalse(any("Проверить ML/ranker worker" in item for item in actions))
+        self.assertTrue(any("provenance-verified cohort" in item for item in actions))
+        self.assertTrue(any(item["status"] == "копит доказательную когорту" for item in decisions))
+        self.assertTrue(any("not decision-grade" in item["text"] for item in alerts))
+
     def test_shadow_reentry_summary_is_rendered_and_actionable(self) -> None:
         scorecard = {
             "status": "complete",

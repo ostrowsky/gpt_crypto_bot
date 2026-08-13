@@ -408,6 +408,23 @@ portfolio, cooldown, or Telegram trade behavior changes follow from this audit.
    require blocked-positive regret at most 25% in train, holdout, and recent
    windows.
 
+## 2026-08-13 Truthful Provenance Checkpoint
+
+The next P0/P2 prerequisite is implemented: new ML and critic observations now
+carry an immutable policy epoch and causal feature cutoff, while every new
+forward/outcome/teacher label carries its definition and availability time.
+Candidate-ranker training is fail-closed to provenance-verified rows by
+default, split boundaries preserve complete decision-time groups, and runtime
+loading rejects model payloads without decision-grade evaluation provenance.
+
+Legacy rows are deliberately `legacy_unknown`; they are not relabeled as the
+current policy. Therefore model retraining may wait for a new mature cohort and
+old ranker scores remain diagnostic rather than proof of self-improvement. The
+next roadmap item remains the canonical unified ten-slot portfolio-alpha
+evaluator after fees/slippage and against a named benchmark. Only after that
+evaluator and a sufficient verified cohort exist should objective-aligned
+ranker v2 be reconsidered.
+
 Entry-admission rescue, blocker relaxation, score 32-33, delayed +120m entry,
 agent wake-up rescue, and the current EV/action-exit models remain closed after
 failed maximum-period or untouched-holdout gates. They are not active retuning

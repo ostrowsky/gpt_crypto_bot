@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+import policy_provenance
 
 try:
     from catboost import CatBoostClassifier, CatBoostRanker, CatBoostRegressor, Pool
@@ -385,13 +386,22 @@ def predict_final_score_from_candidate_payload(payload: dict, rec: dict) -> floa
     return float(predict_components_from_candidate_payload(payload, rec)["final_score"])
 
 
-def load_training_rows(path: Path, min_ts: Optional[datetime] = None) -> List[dict]:
+def load_training_rows(
+    path: Path,
+    min_ts: Optional[datetime] = None,
+    *,
+    require_provenance: Optional[bool] = None,
+) -> List[dict]:
+    if require_provenance is None:
+        require_provenance = policy_provenance.provenance_required()
     rows: List[dict] = []
     for rec in _iter_jsonl(path):
         if str(rec.get("signal_type", "none")) == "none":
             continue
         labels = rec.get("labels") or {}
         if labels.get("ret_5") is None:
+            continue
+        if require_provenance and not training_row_provenance_valid(rec):
             continue
         ts = _parse_ts(rec["ts_signal"])
         if min_ts and ts < min_ts:
@@ -400,6 +410,72 @@ def load_training_rows(path: Path, min_ts: Optional[datetime] = None) -> List[di
         rows.append(rec)
     rows.sort(key=lambda r: r["_dt"])
     return rows
+
+
+def _target_label_keys(rec: dict) -> List[str]:
+    labels = rec.get("labels") or {}
+    keys = [key for key in ("ret_3", "ret_5", "ret_10", "trade_exit_pnl") if labels.get(key) is not None]
+    teacher = _teacher_payload(rec)
+    if teacher:
+        phase = str(teacher.get("phase") or "").strip()
+        if phase:
+            keys.append(f"teacher.{phase}")
+    return keys
+
+
+def training_row_provenance_valid(rec: dict) -> bool:
+    if not policy_provenance.observation_provenance_valid(rec):
+        return False
+    feature_time = policy_provenance.parse_utc((rec.get("provenance") or {}).get("feature_time"))
+    if feature_time is None:
+        return False
+    for key in _target_label_keys(rec):
+        if not policy_provenance.label_provenance_valid(rec, key):
+            return False
+        label_time = policy_provenance.parse_utc(((rec.get("label_provenance") or {}).get(key) or {}).get("label_time"))
+        if label_time is None or label_time <= feature_time:
+            return False
+    return True
+
+
+def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) -> dict:
+    labeled_rows = 0
+    verified_rows = 0
+    legacy_unknown_rows = 0
+    epoch_counts: Dict[str, int] = defaultdict(int)
+    first_feature_time: Optional[str] = None
+    last_feature_time: Optional[str] = None
+    for rec in _iter_jsonl(path):
+        if str(rec.get("signal_type", "none")) == "none":
+            continue
+        labels = rec.get("labels") or {}
+        if labels.get("ret_5") is None:
+            continue
+        try:
+            ts = _parse_ts(rec["ts_signal"])
+        except Exception:
+            continue
+        if min_ts and ts < min_ts:
+            continue
+        labeled_rows += 1
+        if training_row_provenance_valid(rec):
+            verified_rows += 1
+            epoch = str((rec.get("decision_provenance") or {}).get("policy_epoch") or "unknown")
+            epoch_counts[epoch] += 1
+            feature_time = str((rec.get("provenance") or {}).get("feature_time") or "")
+            if feature_time:
+                first_feature_time = feature_time if first_feature_time is None else min(first_feature_time, feature_time)
+                last_feature_time = feature_time if last_feature_time is None else max(last_feature_time, feature_time)
+        else:
+            legacy_unknown_rows += 1
+    return {
+        "labeled_rows": labeled_rows,
+        "verified_rows": verified_rows,
+        "legacy_unknown_rows": legacy_unknown_rows,
+        "verified_rate_pct": round(verified_rows / labeled_rows * 100.0, 4) if labeled_rows else None,
+        "policy_epoch_counts": dict(sorted(epoch_counts.items())),
+        "feature_time_range": {"first": first_feature_time, "last": last_feature_time},
+    }
 
 
 def _target_return(rec: dict) -> float:
@@ -514,41 +590,87 @@ def build_dataset(
             tg[idx] = _target_teacher_top_gainer(rec)
             cap[idx] = _target_teacher_capture_ratio(rec)
 
-    n = len(rows)
-    train_end = max(1, int(n * 0.7))
-    val_end = max(train_end + 1, int(n * 0.85))
-    val_end = min(val_end, n - 1) if n > 2 else n
+    train_idx, val_idx, test_idx = _chronological_purged_indices(rows)
 
     return DatasetBundle(
         feature_names=feature_names,
-        X_train=X[:train_end],
-        y_train=y[:train_end],
-        r_train=r[:train_end],
-        er_train=er[:train_end],
-        dd_train=dd[:train_end],
-        tg_train=tg[:train_end],
-        cap_train=cap[:train_end],
-        tmask_train=tmask[:train_end],
-        X_val=X[train_end:val_end],
-        y_val=y[train_end:val_end],
-        r_val=r[train_end:val_end],
-        er_val=er[train_end:val_end],
-        dd_val=dd[train_end:val_end],
-        tg_val=tg[train_end:val_end],
-        cap_val=cap[train_end:val_end],
-        tmask_val=tmask[train_end:val_end],
-        X_test=X[val_end:],
-        y_test=y[val_end:],
-        r_test=r[val_end:],
-        er_test=er[val_end:],
-        dd_test=dd[val_end:],
-        tg_test=tg[val_end:],
-        cap_test=cap[val_end:],
-        tmask_test=tmask[val_end:],
-        meta_train=rows[:train_end],
-        meta_val=rows[train_end:val_end],
-        meta_test=rows[val_end:],
+        X_train=X[train_idx],
+        y_train=y[train_idx],
+        r_train=r[train_idx],
+        er_train=er[train_idx],
+        dd_train=dd[train_idx],
+        tg_train=tg[train_idx],
+        cap_train=cap[train_idx],
+        tmask_train=tmask[train_idx],
+        X_val=X[val_idx],
+        y_val=y[val_idx],
+        r_val=r[val_idx],
+        er_val=er[val_idx],
+        dd_val=dd[val_idx],
+        tg_val=tg[val_idx],
+        cap_val=cap[val_idx],
+        tmask_val=tmask[val_idx],
+        X_test=X[test_idx],
+        y_test=y[test_idx],
+        r_test=r[test_idx],
+        er_test=er[test_idx],
+        dd_test=dd[test_idx],
+        tg_test=tg[test_idx],
+        cap_test=cap[test_idx],
+        tmask_test=tmask[test_idx],
+        meta_train=[rows[idx] for idx in train_idx],
+        meta_val=[rows[idx] for idx in val_idx],
+        meta_test=[rows[idx] for idx in test_idx],
     )
+
+
+def _chronological_group_boundaries(rows: Sequence[dict]) -> tuple[int, int]:
+    if len(rows) < 3:
+        return max(1, len(rows) - 2), max(2, len(rows) - 1)
+    group_starts = [0]
+    for idx in range(1, len(rows)):
+        if _decision_group_key(rows[idx]) != _decision_group_key(rows[idx - 1]):
+            group_starts.append(idx)
+    group_starts.append(len(rows))
+    groups = len(group_starts) - 1
+    if groups < 3:
+        raise RuntimeError("Need at least 3 chronological decision groups for train/validation/test")
+
+    train_group_end = min(groups - 2, max(1, int(groups * 0.70)))
+    val_group_end = min(groups - 1, max(train_group_end + 1, int(groups * 0.85)))
+    return group_starts[train_group_end], group_starts[val_group_end]
+
+
+def _row_feature_time(rec: dict) -> datetime:
+    value = policy_provenance.parse_utc((rec.get("provenance") or {}).get("feature_time"))
+    if value is None:
+        raise RuntimeError("Verified row is missing feature_time")
+    return value
+
+
+def _row_max_label_time(rec: dict) -> datetime:
+    values = [
+        policy_provenance.parse_utc(((rec.get("label_provenance") or {}).get(key) or {}).get("label_time"))
+        for key in _target_label_keys(rec)
+    ]
+    present = [value for value in values if value is not None]
+    if not present:
+        raise RuntimeError("Verified row is missing target label_time")
+    return max(present)
+
+
+def _chronological_purged_indices(rows: Sequence[dict]) -> tuple[List[int], List[int], List[int]]:
+    train_end, val_end = _chronological_group_boundaries(rows)
+    validation_start = min(_row_feature_time(rec) for rec in rows[train_end:val_end])
+    test_start = min(_row_feature_time(rec) for rec in rows[val_end:])
+    train_idx = [idx for idx in range(train_end) if _row_max_label_time(rows[idx]) < validation_start]
+    val_idx = [idx for idx in range(train_end, val_end) if _row_max_label_time(rows[idx]) < test_start]
+    test_idx = list(range(val_end, len(rows)))
+    if not train_idx or not val_idx or not test_idx:
+        raise RuntimeError(
+            "Purged chronological split has an empty partition; accumulate more provenance-verified decision groups"
+        )
+    return train_idx, val_idx, test_idx
 
 
 class RidgeRegressor:
@@ -1010,6 +1132,7 @@ def train_and_evaluate(
     if require_catboost and not CATBOOST_AVAILABLE:
         detail = CATBOOST_IMPORT_ERROR or "unknown import error"
         raise RuntimeError(f"CatBoost is required for candidate ranker training but unavailable: {detail}")
+    provenance_coverage = training_provenance_coverage(dataset_path, min_ts=min_ts)
     rows = load_training_rows(dataset_path, min_ts=min_ts)
     if len(rows) < min_rows:
         raise RuntimeError("Not enough labeled candidate rows for ranker training")
@@ -1143,8 +1266,12 @@ def train_and_evaluate(
         "ranker": {"avg_target_return": 0.0, "avg_ret5": 0.0, "avg_ev": 0.0, "win_rate": 0.0},
         "delta": {"avg_target_return": 0.0, "avg_ret5": 0.0, "avg_ev": 0.0, "win_rate": 0.0},
     }
+    evaluation_provenance = _evaluation_provenance(bundle, provenance_coverage)
     model_payload = {
-        "payload_version": 3,
+        "payload_version": 4,
+        "runtime_eligible": True,
+        "evidence_status": "decision_grade_temporal_holdout",
+        "evaluation_provenance": evaluation_provenance,
         "model_name": best_name,
         "available_model_families": {
             "logistic": not require_catboost,
@@ -1220,9 +1347,82 @@ def train_and_evaluate(
             "train_top_gainer_rate": round(float(np.mean(bundle.tg_train[bundle.tmask_train > 0.5])) if np.any(bundle.tmask_train > 0.5) else 0.0, 4),
             "train_capture_ratio": round(float(np.mean(bundle.cap_train[bundle.tmask_train > 0.5])) if np.any(bundle.tmask_train > 0.5) else 0.0, 4),
         },
+        "data_provenance": provenance_coverage,
+        "evaluation_provenance": evaluation_provenance,
         "top_feature_importance": importances,
         "suggestions": suggestions,
         "model_payload": model_payload,
+    }
+
+
+def _split_scope(rows: Sequence[dict]) -> dict[str, Any]:
+    if not rows:
+        return {"rows": 0, "groups": 0, "first_feature_time": None, "last_feature_time": None, "first_label_time": None, "last_label_time": None, "policy_epoch_counts": {}}
+    feature_times: List[str] = []
+    label_times: List[str] = []
+    epoch_counts: Dict[str, int] = defaultdict(int)
+    for rec in rows:
+        provenance = rec.get("provenance") or {}
+        decision = rec.get("decision_provenance") or {}
+        feature_time = str(provenance.get("feature_time") or "")
+        if feature_time:
+            feature_times.append(feature_time)
+        epoch_counts[str(decision.get("policy_epoch") or "unknown")] += 1
+        for key in _target_label_keys(rec):
+            label_time = str(((rec.get("label_provenance") or {}).get(key) or {}).get("label_time") or "")
+            if label_time:
+                label_times.append(label_time)
+    return {
+        "rows": len(rows),
+        "groups": len({_decision_group_key(rec) for rec in rows}),
+        "first_feature_time": min(feature_times) if feature_times else None,
+        "last_feature_time": max(feature_times) if feature_times else None,
+        "first_label_time": min(label_times) if label_times else None,
+        "last_label_time": max(label_times) if label_times else None,
+        "policy_epoch_counts": dict(sorted(epoch_counts.items())),
+    }
+
+
+def _evaluation_provenance(bundle: DatasetBundle, coverage: dict) -> dict[str, Any]:
+    split_rows = {
+        "train": bundle.meta_train,
+        "validation": bundle.meta_val,
+        "test": bundle.meta_test,
+    }
+    group_sets = {
+        name: {_decision_group_key(rec) for rec in rows}
+        for name, rows in split_rows.items()
+    }
+    overlap = sorted(
+        (group_sets["train"] & group_sets["validation"])
+        | (group_sets["train"] & group_sets["test"])
+        | (group_sets["validation"] & group_sets["test"])
+    )
+    feature_names = set(bundle.feature_names)
+    forbidden = sorted(name for name in feature_names if name.startswith("ret_") or name.startswith("label_") or "teacher" in name or "exit_pnl" in name)
+    return {
+        "schema_version": 1,
+        "feature_time": "closed decision-bar cutoff recorded per row before every target label",
+        "label_time": "per-target availability and recording time; all targets strictly after feature_time",
+        "label_definition": {
+            "quality": "EV(ret_3, ret_5, ret_10, optional realized exit) > positive_ret_threshold",
+            "return": "weighted forward/realized percent return defined by target_label_contract",
+            "drawdown_proxy": "max(0, -minimum available forward/realized return)",
+            "teacher_top_gainer": "immutable final/midday watchlist-top critic membership",
+            "teacher_capture": "critic capture_ratio clipped to [0, 1.5]",
+        },
+        "target_label_contract": dict(policy_provenance.TARGET_LABEL_DEFINITIONS),
+        "features_directly_encoding_label": forbidden,
+        "evaluation_scope": "out_of_sample_time_holdout",
+        "split_method": "purged chronological complete decision-bar groups: 70% train, 15% validation, 15% untouched test",
+        "split_scopes": {name: _split_scope(rows) for name, rows in split_rows.items()},
+        "cross_split_group_overlap_count": len(overlap),
+        "cross_split_group_overlap_examples": overlap[:10],
+        "data_provenance": coverage,
+        "limitations": [
+            "model scores are proxy evidence, not portfolio alpha",
+            "promotion still requires maximum-period causal replay and unified after-cost portfolio evaluation",
+        ],
     }
 
 

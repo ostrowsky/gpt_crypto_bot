@@ -174,6 +174,13 @@ def _load_ranker_payload() -> Optional[dict]:
         return _RANKER_MODEL_CACHE
     try:
         payload = json.loads(_RANKER_MODEL_FILE.read_text(encoding="utf-8"))
+        if (
+            isinstance(payload, dict)
+            and bool(getattr(config, "POLICY_PROVENANCE_REQUIRED_FOR_RANKER", True))
+            and not bool(payload.get("runtime_eligible"))
+        ):
+            log.warning("Candidate ranker ignored: payload lacks decision-grade provenance")
+            payload = {}
         _RANKER_MODEL_CACHE = payload if isinstance(payload, dict) else {}
     except Exception:
         _RANKER_MODEL_CACHE = {}

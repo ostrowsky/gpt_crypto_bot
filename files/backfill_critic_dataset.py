@@ -57,6 +57,15 @@ def _to_critic_row(rec: Dict[str, Any]) -> Dict[str, Any]:
         "f": rec.get("f", {}),
         "seq": rec.get("seq", []),
         "seq_feature_names": rec.get("seq_feature_names", []),
+        "provenance": rec.get("provenance") or {
+            "status": "legacy_unknown",
+            "reason": "source row predates immutable policy provenance",
+        },
+        "decision_provenance": {
+            "status": "legacy_unknown",
+            "reason": "bootstrap decision was reconstructed after the fact",
+        },
+        "label_provenance": rec.get("label_provenance", {}),
         "decision": {
             "action": "shadow",
             "reason_code": "bootstrap_ml_dataset_signal",

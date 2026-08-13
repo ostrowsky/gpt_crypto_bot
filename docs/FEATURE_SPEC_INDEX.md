@@ -14,6 +14,7 @@ earlier capture of same-day watchlist top movers with a single unified
 |---|---|---|---|---|
 | Spec-first workflow | shipped | `docs/specs/spec-first-workflow.md` | regression safety, reproducibility | use for every non-trivial change |
 | Truth Harness | shipped enforcement; compliance may fail closed | `docs/specs/truth-harness.md` | evidence provenance, denominator integrity, MD/config parity | run `full` before analysis and `change --staged` before handoff |
+| Immutable policy epoch and label provenance | shipped measurement safety | `docs/specs/policy-epoch-label-provenance.md` | verified-row coverage, epoch separation, temporal holdout integrity | accumulate provenance-verified labels before ranker retraining/promotion |
 | Full watchlist rotating monitor | shipped under guarded forward canary | `docs/specs/full-watchlist-rotating-monitor.md` | objective-population coverage, sweep latency, early capture | review seven complete forward days before claiming recall uplift |
 | Scout objective and metric contract | shipped | `SCOUT_OPTIMIZATION_SPEC.md` | `watchlist_top_bought`, `early_captures`, `false_positive_buys` | keep current |
 | Signal-quality evaluator | shipped | `skills/signal-quality-evaluator/SKILL.md` | `miss_rate`, `capture_ratio_at_entry`, `exit_efficiency`, `giveback_pct` | feed hypothesis queue |

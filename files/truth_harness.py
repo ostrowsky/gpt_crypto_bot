@@ -228,6 +228,11 @@ def audit_model_provenance(audit: Audit, root: Path = ROOT) -> None:
         audit.add("TH03_MODEL_PROVENANCE", "TH-03/TH-04", "error", "Model achievement evidence lacks timing/holdout provenance", f"missing={missing}", "Keep model metrics diagnostic-only until training artifacts record immutable timing and chronological holdout scope.")
     elif provenance.get("evaluation_scope") != "out_of_sample_time_holdout":
         audit.add("TH04_MODEL_HOLDOUT", "TH-04", "error", "Model evaluation is not a chronological out-of-sample holdout", str(provenance.get("evaluation_scope")))
+    if int(provenance.get("cross_split_group_overlap_count") or 0) != 0:
+        audit.add("TH04_MODEL_HOLDOUT", "TH-04", "error", "Chronological holdout shares decision groups across splits", json.dumps(provenance.get("cross_split_group_overlap_examples") or []))
+    data_provenance = provenance.get("data_provenance") or latest.get("data_provenance") or {}
+    if int(data_provenance.get("verified_rows") or 0) <= 0:
+        audit.add("TH03_MODEL_PROVENANCE", "TH-03", "error", "Model evidence contains no provenance-verified rows", json.dumps(data_provenance, ensure_ascii=False))
 
 
 def audit_portfolio_alpha(audit: Audit, root: Path = ROOT) -> None:
