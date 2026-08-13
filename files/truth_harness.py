@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -238,14 +239,71 @@ def audit_model_provenance(audit: Audit, root: Path = ROOT) -> None:
 def audit_portfolio_alpha(audit: Audit, root: Path = ROOT) -> None:
     audit.checked("TH11_PORTFOLIO_ALPHA")
     candidates = sorted((root / ".runtime" / "reports").glob("*portfolio*alpha*.json"))
-    valid = False
-    for path in candidates[-5:]:
-        payload = _load(path)
-        if payload.get("net_alpha_after_costs") is not None and payload.get("benchmark"):
-            valid = True
-            break
-    if not valid:
+    if not candidates:
         audit.add("TH11_PORTFOLIO_ALPHA", "TH-11", "error", "Canonical unified portfolio alpha after costs is absent", "Per-trade/per-mode PnL cannot prove portfolio profitability.")
+        return
+    # Fail closed on the newest claim. Falling back to an older valid artifact
+    # would hide a broken or incomplete current evaluator run.
+    path = max(candidates, key=lambda item: item.stat().st_mtime_ns)
+    payload = _load(path)
+    contract = payload.get("portfolio_contract") if isinstance(payload.get("portfolio_contract"), dict) else {}
+    costs = payload.get("cost_contract") if isinstance(payload.get("cost_contract"), dict) else {}
+    portfolio = payload.get("portfolio") if isinstance(payload.get("portfolio"), dict) else {}
+    benchmark = payload.get("benchmark") if isinstance(payload.get("benchmark"), dict) else {}
+    provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
+    window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
+    missing: list[str] = []
+    if payload.get("metric_contract") != "canonical_unified_ten_slot_alpha_v1":
+        missing.append("metric_contract")
+    if not payload.get("decision_grade") or payload.get("evidence_grade") != "decision_grade":
+        missing.append("decision_grade")
+    if int(contract.get("capacity") or 0) != 10 or int(contract.get("same_symbol_concurrency") or 0) != 1:
+        missing.append("ten_slot_symbol_deduplicated_contract")
+    if float(costs.get("fee_bps_per_side") or 0.0) <= 0 or float(costs.get("slippage_bps_per_side") or 0.0) <= 0:
+        missing.append("positive_fee_and_slippage")
+    if benchmark.get("name") != "BTCUSDT_buy_and_hold_same_closed_bar_window" or benchmark.get("status") != "complete":
+        missing.append("named_complete_benchmark")
+    if payload.get("net_alpha_after_costs") is None or portfolio.get("net_return_after_costs_pct") is None or benchmark.get("net_return_after_costs_pct") is None:
+        missing.append("net_returns_and_alpha")
+    else:
+        recomputed = float(portfolio["net_return_after_costs_pct"]) - float(benchmark["net_return_after_costs_pct"])
+        if abs(recomputed - float(payload["net_alpha_after_costs"])) > 1e-5:
+            missing.append("alpha_arithmetic_consistency")
+    if int(window.get("requested_days") or 0) < int(window.get("established_max_replay_days") or 30):
+        missing.append("maximum_period")
+    if float(window.get("period_coverage") or 0.0) < 0.95 or float(coverage.get("valuation_coverage") or 0.0) < 1.0:
+        missing.append("coverage")
+    if coverage.get("contract_violations"):
+        missing.append("contract_violations")
+    try:
+        sys.path.insert(0, str(root / "files"))
+        from policy_provenance import current_policy_manifest
+
+        current_epoch = current_policy_manifest().get("policy_epoch")
+    except Exception:
+        current_epoch = None
+    if not provenance.get("policy_epoch") or not provenance.get("policy_hash") or not provenance.get("universe_hash"):
+        missing.append("provenance")
+    elif current_epoch and provenance.get("policy_epoch") != current_epoch:
+        missing.append("current_policy_epoch")
+    source_hashes = provenance.get("source_hashes") if isinstance(provenance.get("source_hashes"), dict) else {}
+    for source_name in ("portfolio_alpha.py", "replay_backtest.py"):
+        source_path = root / "files" / source_name
+        current_hash = hashlib.sha256(source_path.read_bytes()).hexdigest() if source_path.exists() else None
+        if not current_hash or source_hashes.get(source_name) != current_hash:
+            missing.append(f"current_source_hash:{source_name}")
+    if not provenance.get("trade_stream_hash") or not provenance.get("price_stream_hash"):
+        missing.append("input_stream_hashes")
+    if missing:
+        audit.add(
+            "TH11_PORTFOLIO_ALPHA",
+            "TH-11",
+            "error",
+            "Canonical unified portfolio alpha artifact is not decision-grade",
+            f"path={path.name}; missing_or_invalid={missing}",
+            "Run the complete 30d ten-slot replay with positive fees/slippage and the current policy epoch.",
+        )
 
 
 def audit_change(audit: Audit, root: Path = ROOT, staged: bool = True) -> None:

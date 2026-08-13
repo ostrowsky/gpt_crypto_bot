@@ -429,3 +429,26 @@ Entry-admission rescue, blocker relaxation, score 32-33, delayed +120m entry,
 agent wake-up rescue, and the current EV/action-exit models remain closed after
 failed maximum-period or untouched-holdout gates. They are not active retuning
 tasks.
+
+## 2026-08-13 Canonical Portfolio-Alpha Checkpoint
+
+The P0 measurement contract is implemented in
+`docs/specs/canonical-portfolio-alpha.md`. Replay profitability is now evaluated
+as one symbol-deduplicated ten-slot cash account after fees and slippage against
+the named `BTCUSDT` buy-and-hold benchmark. The legacy arithmetic `pnl_total`
+remains diagnostic-only and cannot satisfy Truth Harness TH-11.
+
+This checkpoint changes no live entry, exit, replacement, or sizing rule. The
+next priority remains collecting a sufficient provenance-verified cohort for an
+objective-aligned ranker v2. Frozen exit-tail, early-trend, re-entry, and
+replacement hypotheses retain their existing forward-label gates; they are not
+unblocked by portfolio measurement alone.
+
+The completed 30d/103-symbol run reports `-49.98%` net portfolio return versus
+`-2.49%` for BTC and therefore `-47.49pp` net alpha after costs, with about `50.00%`
+maximum drawdown. TH-11 now passes, but the result rejects any claim that the
+current profile is profitable. Before ranker v2 can affect allocation, the next
+P0 analysis is a frozen-cache paired canonical-alpha attribution of turnover and
+the already frozen production alternatives. It must identify an improvement
+without relaxing entry/exit gates; otherwise the current policy remains
+unchanged while the verified label cohort accumulates.

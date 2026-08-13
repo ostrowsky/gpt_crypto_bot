@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ import numpy as np
 
 import config
 from indicators import compute_features
+from portfolio_alpha import closed_price_series, evaluate_portfolio_alpha
 from monitor import (
     _candidate_signal_flags,
     _entry_signal_score,
@@ -2736,6 +2738,7 @@ def summarize_totals(trades: List[ReplayTrade]) -> dict:
     return {
         "closed_trades": len(trades),
         "pnl_total": round(sum(pnl_values), 4),
+        "pnl_total_contract": "non_capital_weighted_diagnostic_sum_not_portfolio_return",
         "pnl_avg": round(mean(pnl_values), 4) if pnl_values else 0.0,
         "win_rate": round(sum(1 for v in pnl_values if v > 0) / len(pnl_values), 4) if pnl_values else 0.0,
         "ret_3": _stats([t.ret_3 for t in trades if t.ret_3 is not None]),
@@ -3376,6 +3379,9 @@ async def run_replay(
     top_gainer_score_min: float = 0.0,
     objective_top_n: int = 10,
     compare_variant: str | None = None,
+    portfolio_initial_capital: float = 10_000.0,
+    portfolio_fee_bps: float | None = None,
+    portfolio_slippage_bps: float = 5.0,
 ) -> dict:
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
@@ -3457,6 +3463,51 @@ async def run_replay(
         )
     }
 
+    benchmark_data = cache.get(("BTCUSDT", "15m"), (None, None))[0]
+    benchmark_series = closed_price_series(
+        benchmark_data,
+        bar_ms=BAR_MS["15m"],
+        start_ms=start_ms,
+        end_ms=end_ms,
+    )
+    price_series_by_symbol = {
+        sym: closed_price_series(
+            data,
+            bar_ms=BAR_MS["15m"],
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        for (sym, tf), (data, _) in cache.items()
+        if tf == "15m"
+    }
+    effective_fee_bps = (
+            float(getattr(config, "PAPER_FEE_BPS", 7.5))
+            if portfolio_fee_bps is None
+            else float(portfolio_fee_bps)
+    )
+
+    def build_portfolio_alpha(rows: List[ReplayTrade], row_variant: str) -> dict:
+        return evaluate_portfolio_alpha(
+            rows,
+            price_series_by_symbol=price_series_by_symbol,
+            benchmark_series=benchmark_series,
+            window_start_ms=start_ms,
+            window_end_ms=end_ms,
+            requested_days=days,
+            universe=symbols,
+            variant=row_variant,
+            capacity=max_open_positions,
+            initial_capital=portfolio_initial_capital,
+            fee_bps=effective_fee_bps,
+            slippage_bps=portfolio_slippage_bps,
+            source_hashes={
+                Path(__file__).name: hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            },
+        )
+
+    portfolio_alpha = build_portfolio_alpha(portfolio_trades, variant)
+    reports["portfolio"]["portfolio_alpha"] = portfolio_alpha
+
     if compare_variant:
         control_enable_replacement = compare_variant in {
             "score_replace",
@@ -3489,6 +3540,10 @@ async def run_replay(
             label=f"control:{compare_variant}",
             final_top_symbols=final_top_symbols,
         )
+        reports["control"]["portfolio_alpha"] = build_portfolio_alpha(
+            control_trades,
+            compare_variant,
+        )
 
     if compare_baseline:
         baseline_trades, baseline_stats = await simulate_portfolio(
@@ -3514,6 +3569,10 @@ async def run_replay(
             label="baseline",
             final_top_symbols=final_top_symbols,
         )
+        reports["baseline"]["portfolio_alpha"] = build_portfolio_alpha(
+            baseline_trades,
+            "baseline",
+        )
 
     comparison = {}
     reference_name = "control" if "control" in reports else "baseline" if "baseline" in reports else ""
@@ -3522,11 +3581,25 @@ async def run_replay(
         baseline_totals = reports[reference_name]["totals"]
         portfolio_stats_dict = reports["portfolio"]["run_stats"]
         baseline_stats_dict = reports[reference_name]["run_stats"]
+        portfolio_capital = reports["portfolio"]["portfolio_alpha"]["portfolio"]
+        reference_capital = reports[reference_name]["portfolio_alpha"]["portfolio"]
         comparison = {
             "reference": reference_name,
             "reference_variant": compare_variant if reference_name == "control" else "baseline",
             "trades_delta": reports["portfolio"]["trades_total"] - reports[reference_name]["trades_total"],
             "pnl_total_delta": round(portfolio_totals["pnl_total"] - baseline_totals["pnl_total"], 4),
+            "pnl_total_delta_contract": "non_capital_weighted_diagnostic_sum_not_portfolio_alpha",
+            "portfolio_net_return_after_costs_delta": round(
+                float(portfolio_capital["net_return_after_costs_pct"])
+                - float(reference_capital["net_return_after_costs_pct"]),
+                6,
+            ),
+            "net_alpha_after_costs_delta": round(
+                float(reports["portfolio"]["portfolio_alpha"]["net_alpha_after_costs"])
+                - float(reports[reference_name]["portfolio_alpha"]["net_alpha_after_costs"]),
+                6,
+            ),
+            "canonical_profitability_contract": "capital_weighted_ten_slot_after_costs_same_btc_benchmark",
             "pnl_avg_delta": round(portfolio_totals["pnl_avg"] - baseline_totals["pnl_avg"], 4),
             "win_rate_delta": round(portfolio_totals["win_rate"] - baseline_totals["win_rate"], 4),
             "ret_3_avg_delta": round(((portfolio_totals["ret_3"] or {}).get("avg", 0.0)) - ((baseline_totals["ret_3"] or {}).get("avg", 0.0)), 4),
@@ -3554,6 +3627,8 @@ async def run_replay(
         "compare_variant": compare_variant,
         "reports": reports,
         "comparison": comparison,
+        "portfolio_alpha": portfolio_alpha,
+        "profitability_contract": "portfolio_alpha is canonical; totals.pnl_total is diagnostic-only",
     }
 
 
@@ -3573,7 +3648,7 @@ def render_text(report: dict) -> str:
                 "",
                 f"{name.title()}:",
                 f"  Trades: {sub['trades_total']}",
-                f"  Totals: pnl_total={totals['pnl_total']:+.4f}% pnl_avg={totals['pnl_avg']:+.4f}% win_rate={totals['win_rate']:.1%}",
+                f"  Diagnostic trade sum: pnl_total={totals['pnl_total']:+.4f}% pnl_avg={totals['pnl_avg']:+.4f}% win_rate={totals['win_rate']:.1%}",
                 f"  Flow: candidates={run_stats['candidates_total']} skipped_full={run_stats['skipped_portfolio_full']} replacements={run_stats['replacements_total']}",
                 f"  Objective: symbol_precision={sub['objective']['symbol_precision']:.1%} trade_precision={sub['objective']['trade_precision']:.1%} recall={sub['objective']['capture_rate']:.1%} captured={len(sub['objective']['captured_top_symbols'])}/{sub['objective']['final_top_n']}",
                 f"  Score/cluster skips: score={run_stats.get('skipped_top_gainer_score', 0)} cluster={run_stats.get('skipped_cluster_cap', 0)}",
@@ -3581,6 +3656,17 @@ def render_text(report: dict) -> str:
                 "  By mode:",
             ]
         )
+        alpha = sub.get("portfolio_alpha")
+        if alpha:
+            portfolio = alpha.get("portfolio") or {}
+            benchmark = alpha.get("benchmark") or {}
+            lines.append(
+                "  Canonical alpha: "
+                f"portfolio={portfolio.get('net_return_after_costs_pct', 0.0):+.4f}% "
+                f"benchmark={benchmark.get('net_return_after_costs_pct', 0.0):+.4f}% "
+                f"alpha={alpha.get('net_alpha_after_costs', 0.0):+.4f}% "
+                f"grade={alpha.get('evidence_grade', 'diagnostic')}"
+            )
         for key in ("ret_3", "ret_5", "ret_10"):
             val = totals.get(key)
             if val:
@@ -3682,6 +3768,10 @@ def parse_args() -> argparse.Namespace:
         help="run a frozen-cache control variant in the same process",
     )
     parser.add_argument("--no-baseline", action="store_true")
+    parser.add_argument("--portfolio-alpha-output", type=Path, default=None)
+    parser.add_argument("--portfolio-initial-capital", type=float, default=10_000.0)
+    parser.add_argument("--portfolio-fee-bps", type=float, default=None)
+    parser.add_argument("--portfolio-slippage-bps", type=float, default=5.0)
     parser.add_argument("--json", action="store_true", dest="as_json")
     return parser.parse_args()
 
@@ -3705,8 +3795,20 @@ def main() -> None:
             top_gainer_score_min=args.top_gainer_score_min,
             objective_top_n=args.objective_top_n,
             compare_variant=args.compare_variant,
+            portfolio_initial_capital=args.portfolio_initial_capital,
+            portfolio_fee_bps=args.portfolio_fee_bps,
+            portfolio_slippage_bps=args.portfolio_slippage_bps,
         )
     )
+    if args.portfolio_alpha_output is not None:
+        output = Path(args.portfolio_alpha_output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        tmp = output.with_suffix(output.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(report["portfolio_alpha"], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp.replace(output)
     if args.as_json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

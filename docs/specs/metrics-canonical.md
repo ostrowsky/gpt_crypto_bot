@@ -15,6 +15,7 @@ between incompatible success definitions.
 | Are cooldowns harming continuing trends? | `cooldown_harm` | post-exit run-up | Do not relax cooldowns without evidence. |
 | Is WATCH useful without becoming noise? | `WATCH precision` | alerts/day, WATCH recall | WATCH quality must not be mixed with BUY precision. |
 | Is the portfolio using scarce slots well? | `replacement_uplift` | `blocked_winners` under `10/10`, concentration measures | Requires replay before live changes. |
+| Does trading beat the alternative use of capital? | `net_alpha_after_costs` | net portfolio return, named benchmark return, fees, slippage, drawdown | Must use the canonical unified ten-slot capital curve. Sum of per-trade percentages is not portfolio return. |
 | Is the evaluator trustworthy today? | `coverage.status` | event-file presence, trades paired, candle coverage | A zero report is not automatically informative. |
 
 ## Decision Rules
@@ -25,4 +26,3 @@ between incompatible success definitions.
    - BUY affects capital and PnL;
    - WATCH affects operator noise;
    - diagnostics affect learning quality.
-
