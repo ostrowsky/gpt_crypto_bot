@@ -1,7 +1,7 @@
 ﻿# Learning Loop Architecture Roadmap
 
 Date: 2026-08-14
-Status: active; control-plane implementation reordered for a walking skeleton
+Status: active; evidence throughput governs control-plane implementation
 
 ## Principle
 
@@ -11,23 +11,32 @@ Every major target metric should have three layers:
 2. shadow learner: model/policy recommendation without trading side effects;
 3. replay/promotion gate: production adoption only after robust evidence.
 
-## 2026-08-14 Control-Plane Implementation Order
+The program objective is not the number of agents, hypotheses, or promotions.
+It is the number of decision-grade terminal results produced per unit of
+calendar time, compute, and operator attention without weakening provenance,
+power, or guardrails.
+
+## 2026-08-14 Evidence-Throughput Implementation Order
 
 The control-plane design is not permission to build another large research
 framework before completing an experiment. Its implementation order is:
 
-1. **Walking skeleton first:** one seeded non-trading hypothesis, one existing
-   validator, independent result verification, and one append-only terminal
-   attempt. LLM/RAG/promotion and broad registries remain stubs.
-2. **Then measurement foundations:** canonical labels, power report, scoped
-   remediation queue, metric/capability bindings, and migration of existing
-   negative/inconclusive research.
-3. **Then liveness:** restart-safe states, leases, timeouts, retries, and
-   dead-letter handling reuse the skeleton rather than creating a parallel path.
-4. **Then propose-only LLM:** only after frozen-world evaluation shows value over
-   the deterministic priority baseline.
-5. **Then one real experiment and alert shadow:** no BUY/SELL or portfolio
-   autonomy is introduced by the control plane.
+1. **Walking skeleton first:** the dedicated
+   `FixtureDeltaValidatorAdapter` validates at most 64 immutable fixture rows,
+   independent verification reads the frozen raw fixture, and one append-only
+   attempt closes in under ten seconds. It does not import the monolithic market
+   replay or any production policy.
+2. **Measure and expand evidence capacity:** canonical labels, power/throughput
+   report, logging repair, dependence-aware pooling, continuous outcomes,
+   metric/capability bindings, and migration of negative/inconclusive research.
+3. **Prove the durable deterministic loop:** leases, retries and recovery reuse
+   the skeleton, then one real manually/deterministically selected hypothesis
+   must reach a terminal result within 30 days.
+4. **Evaluate whether an LLM is necessary:** frozen-world evaluation compares it
+   with the deterministic baseline after LLM cost, latency, and operator time.
+   Human comparison is optional when a complete timestamped baseline exists.
+5. **Only then allow one agent-selected experiment and alert shadow:** no
+   BUY/SELL or portfolio autonomy is introduced by the control plane.
 
 There is one accountable owner (`repository maintainer`) and one triage queue.
 Subsystem names categorize work but do not pretend five staffed teams exist.
@@ -43,11 +52,22 @@ rather than repeatedly generating underpowered hypotheses.
 
 Planning assumptions are one evidence pack per week, at most one new primary
 historical validation per week, and normally 2–4 weeks for a forward hypothesis
-version to mature. Capacity is capped initially at 12 decision-grade forward
-versions per year. Multi-agent research is unscheduled at this throughput.
+version to mature. Twelve decision-grade forward versions per year is a ceiling,
+not a delivery target. The quarterly roadmap is therefore governed by
+power-feasible share, terminal results, time-to-terminal, cost per terminal
+result, label/logging loss, and evidence reuse. Multi-agent research is outside
+the roadmap at this throughput.
+
+Four consecutive infeasible/underpowered primary prechecks, or a
+power-feasible share below 25% across the trailing eight, enters
+`EVIDENCE_CAPACITY_RECOVERY` and pauses LLM-selected admissions. Failure to
+finish the first real durable-loop hypothesis within 30 days enters
+`LOOP_RECOVERY`, freezes agent/promotion expansion, and returns work to the
+last proven vertical slice.
+
 Every cycle has a versioned compute/token/operator-time envelope; optional LLM
 drafts and diagnostic slices are cut before provenance, the primary validator,
-result verification, or mandatory guardrails.
+raw-snapshot result verification, or mandatory guardrails.
 
 ## 2026-08-03 Evidence Checkpoint
 

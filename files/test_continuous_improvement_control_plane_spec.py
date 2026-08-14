@@ -21,9 +21,13 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
 
     def test_walking_skeleton_precedes_measurement_platform(self) -> None:
         skeleton = self.spec.index("### Phase -1: walking skeleton")
-        phase_zero = self.spec.index("### Phase 0: power and canonical labels")
+        phase_zero = self.spec.index("### Phase 0: evidence capacity")
         self.assertLess(skeleton, phase_zero)
-        self.assertIn("walking skeleton before Phase 0", self.index)
+        self.assertIn("FixtureDeltaValidatorAdapter", self.spec)
+        self.assertIn("files/improvement_fixture_validator.py", self.spec)
+        self.assertIn("control_plane_smoke_fixture.json", self.spec)
+        self.assertIn("under ten seconds", self.spec)
+        self.assertIn("FixtureDeltaValidatorAdapter", self.index)
         self.assertIn("Walking skeleton first", self.roadmap)
 
     def test_result_is_verified_before_governor(self) -> None:
@@ -31,6 +35,12 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn('VERIFY --> GOVERNOR["Deterministic Decision Policy"]', self.spec)
         self.assertNotIn("RESULT --> GOVERNOR", self.spec)
         self.assertIn("INVALID_RESULT", self.spec)
+        self.assertIn("orchestrator-frozen immutable raw", self.spec)
+        self.assertIn("registered candidate policy", self.spec)
+        self.assertIn("decision trace is comparison evidence", self.spec)
+        self.assertIn(
+            "must not import the validator's aggregation implementation", self.spec
+        )
 
     def test_single_owner_and_honest_debt_contract(self) -> None:
         self.assertIn("All rows have the same accountable owner", self.spec)
@@ -44,8 +54,9 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("CycleBudget", self.spec)
         self.assertIn("BUDGET_EXHAUSTED", self.spec)
         self.assertIn("### 16.4 Program cadence and capacity", self.spec)
-        self.assertIn("expected 2–4 weeks", self.spec)
-        self.assertIn("12 decision-grade forward hypothesis versions", self.spec)
+        self.assertIn("at most 12 decision-grade forward hypothesis versions", self.spec)
+        self.assertIn("scarce ceiling, not a delivery target", self.spec)
+        self.assertIn("cost per terminal", self.roadmap)
 
     def test_policy_epoch_has_semantic_invalidation_rules(self) -> None:
         for text in (self.spec, self.policy_epoch):
@@ -58,7 +69,9 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("### 10.4 Bootstrap migration of research memory", self.spec)
         self.assertIn("LEGACY_UNVERIFIED", self.spec)
         self.assertIn("47 legacy", self.spec)
-        self.assertIn("every known legacy research artifact has a migration state", self.spec)
+        self.assertIn(
+            "every known legacy research artifact has a migration state", self.spec
+        )
 
     def test_regime_reopen_and_operator_deviation_are_auditable(self) -> None:
         self.assertIn("reopen_basis=regime_shift", self.spec)
@@ -69,9 +82,23 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
 
     def test_outcome_and_frozen_world_acceptance_are_explicit(self) -> None:
         self.assertIn("### 9.4 Frozen-world meta-evaluation", self.spec)
-        self.assertIn("at least one real admitted hypothesis", self.spec)
-        self.assertIn("classified as a liveness failure", self.spec)
-        self.assertIn("measured value over the deterministic baseline", self.spec)
+        self.assertIn("operator_baseline=NOT_AVAILABLE", self.spec)
+        self.assertIn("AgentNecessityGate", self.spec)
+        self.assertIn("LOOP_RECOVERY", self.spec)
+        self.assertIn("last known-good vertical slice", self.spec)
+
+    def test_state_model_separates_stage_status_and_reason(self) -> None:
+        self.assertIn("stage", self.spec)
+        self.assertIn("status", self.spec)
+        self.assertIn("outcome_reason", self.spec)
+        self.assertIn("EVIDENCE_CAPACITY_RECOVERY", self.spec)
+        self.assertNotIn("SNAPSHOT_READY | SNAPSHOT_INVALID", self.spec)
+
+    def test_program_level_power_failure_changes_the_roadmap(self) -> None:
+        self.assertIn("fewer than 25% of the trailing eight", self.spec)
+        self.assertIn("last four primary prechecks", self.spec)
+        self.assertIn("pauses LLM-selected admissions", self.roadmap)
+        self.assertIn("power-feasible share", self.roadmap)
 
 
 if __name__ == "__main__":

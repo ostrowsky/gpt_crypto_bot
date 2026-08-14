@@ -1,18 +1,13 @@
 # Continuous Improvement Control Plane
 
-Date: 2026-08-14
+Date: 2026-08-14 · Status: architecture design; no runtime behavior implemented
 
-Status: architecture design; no runtime behavior implemented by this spec
+Owner: repository maintainer · Revision: v2.2 — evidence-throughput-first
 
-Owner: repository maintainer
-
-Revision: v2.1 — liveness-first implementation order after independent review
-
-Related: [Scout Optimization Spec](../../SCOUT_OPTIMIZATION_SPEC.md),
-[Truth Harness](truth-harness.md),
-[Learning Loop Architecture Roadmap](learning-loop-architecture-roadmap.md),
-[Hypothesis Queue](hypothesis-queue.md),
-[Canonical Portfolio Alpha](canonical-portfolio-alpha.md)
+Related: [Truth Harness](truth-harness.md),
+[Learning Loop Roadmap](learning-loop-architecture-roadmap.md),
+[Hypothesis Queue](hypothesis-queue.md), and
+[Canonical Portfolio Alpha](canonical-portfolio-alpha.md).
 
 ## 1. Purpose
 
@@ -29,11 +24,13 @@ Define a continuous research and improvement control plane for
    metric, data snapshot, validator, or production configuration;
 6. advances a behavior change only through layer-specific replay, forward
    shadow evidence, and operator approval.
+7. treats powered terminal evidence per unit of calendar time, compute, and
+   operator attention as the program constraint that governs the roadmap.
 
 Continuous improvement means continuous evidence accumulation and explicit
 decision making. It does not mean continuous production mutation. `NO_CHANGE`,
-`WAITING_FOR_DATA`, `UNDERPOWERED`, and `REFUTED` are normal terminal outcomes
-for a research cycle.
+`WAITING_FOR_DATA`, `UNDERPOWERED`, and `REFUTED` are normal research
+outcomes; waiting outcomes always carry an explicit wake-up condition.
 
 ## 2. Honest starting point
 
@@ -57,19 +54,10 @@ therefore optimize two properties together:
 2. **liveness:** every admitted experiment reaches a visible terminal state or
    a named operational failure within a bounded time.
 
-### 2.1 Truth Harness checkpoint on 2026-08-14
-
-The current full Harness is `FAIL` for model/RL evidence:
-
-- RL evidence is older than its freshness budget;
-- the newest model achievement artifact lacks decision/label timing and
-  chronological evaluation provenance;
-- there are no mature provenance-verified model rows.
-
-These findings block current model/RL achievement and promotion claims. They do
-not block documentation, read-only diagnosis, measurement repair, or unrelated
-WATCH-only research. Section 13 defines scoped blocking and remediation
-ownership so a broad Harness result cannot become a permanent, ownerless freeze.
+Current Harness findings belong in timestamped evidence reports, not in this
+architecture contract. Until model/RL timing and holdout provenance are
+verified, model achievement remains diagnostic-only. Section 13 defines scoped
+blocking so an unrelated finding cannot become an ownerless global freeze.
 
 ## 3. Governing principles
 
@@ -102,6 +90,10 @@ ownership so a broad Harness result cannot become a permanent, ownerless freeze.
 11. **Prove the pipe before completing the platform.** A deliberately small
     walking skeleton must reach a verified terminal experiment before Phase 0
     builds comprehensive metric, label, and capability registries.
+12. **Evidence throughput governs the program.** The roadmap prioritizes label
+    coverage, powered populations, reusable evidence, and time-to-terminal
+    before LLM sophistication. The annual forward capacity is a scarce budget,
+    not a target to fill.
 
 ## 4. Target architecture
 
@@ -112,7 +104,7 @@ flowchart LR
     PACK --> SNAP
     SNAP --> POWER["Power / Feasibility Gate"]
     POWER -->|feasible| AGENT["Research Agent"]
-    POWER -->|not feasible| WAIT["WAITING_FOR_DATA or METRIC_REDESIGN"]
+    POWER -->|not feasible| WAIT["Evidence-capacity action or waiting"]
     AGENT --> CONTRACT["Typed Hypothesis Contract"]
     CONTRACT --> PRECHECK["Deterministic Contract Precheck"]
     PRECHECK --> VALIDATOR["Independent Validator / Replay"]
@@ -404,32 +396,18 @@ model implementation may be GPT-5.6, Claude, or another evaluated provider.
 Provider-specific multi-agent or beta API features are optional adapters, never
 architecture dependencies.
 
-The model receives:
-
-- one immutable evidence pack;
-- a bounded capability registry;
-- negative/rejected experiment summaries;
-- the typed output schema;
-- no production-write tool;
-- no snapshot, Harness-execution, or metric-definition tool.
-
-It emits at most three ranked ideas, but only the highest-ranked power-feasible
-idea may become the primary hypothesis for the cycle.
+The model receives one immutable evidence pack, a bounded capability registry,
+negative/rejected experiment summaries, and the typed output schema. It has no
+production-write, snapshot, Harness-execution, or metric-definition tool. It
+emits at most three ranked ideas; only the highest-ranked power-feasible idea may
+become primary.
 
 ### 9.2 Model provenance
 
-Every generation records:
-
-- provider and model identifier;
-- model snapshot/version when available;
-- prompt, skill, and tool-schema hashes;
-- generation parameters;
-- input snapshot ID;
-- structured output and validation errors;
-- token, latency, and monetary budget use.
-
-Changing model/provider requires replaying the agent-evaluation corpus before
-the new adapter can create primary hypotheses.
+Every generation records provider/model identity and snapshot, prompt/skill/tool
+hashes, generation parameters, input snapshot, structured output/errors, tokens,
+latency, and cost. Changing model/provider requires replaying the
+agent-evaluation corpus before the adapter can create primary hypotheses.
 
 ### 9.3 Cost and resource envelope
 
@@ -458,27 +436,26 @@ and capability registries, tool schemas, policy epoch, and model/provider
 snapshot. Run the full propose-only loop without post-`T` evidence, then compare
 its proposals with outcomes and decisions that became available after `T`.
 
-The agent is compared with a deterministic opportunity-priority baseline and
-the operator's recorded historical proposals on proposal validity, supported
-hypothesis precision, avoided harmful validation, incremental objective value,
-cost, and latency. Provider replacement repeats this evaluation. A provider
-that adds no measured value remains a summarizer and cannot select the primary
-hypothesis.
+The deterministic opportunity-priority policy is the mandatory baseline.
+Operator proposals are compared only for periods with a complete timestamped
+proposal log, including rejected ideas; otherwise
+`operator_baseline=NOT_AVAILABLE` is reported and no human baseline is
+reconstructed from later decisions. Before agent evaluation begins, the
+operator log starts collecting prospective proposals so this baseline can
+eventually become usable.
 
-### 9.5 Deferred multi-agent use
+The `AgentNecessityGate` compares proposal validity, supported-hypothesis
+precision, avoided harmful validation, incremental objective value, operator
+minutes, total LLM/validator cost, and latency. The gate's minimum useful
+improvement is registered before the result is seen. A provider that adds no
+net value over the deterministic baseline remains a summarizer and cannot
+select the primary hypothesis. This is also the program-level economic answer
+to whether an LLM researcher is justified at the measured annual throughput.
 
-Author/Adversary/Referee separation is considered only after:
-
-- at least 30 decision-grade terminal experiments exist across at least three
-  mechanism families;
-- a calibrated evaluation shows that the extra role materially improves
-  supported-hypothesis precision or reduces harmful false promotion;
-- the benefit exceeds additional cost, latency, and operational failure rate.
-
-Until then, deterministic prechecks and operator review provide the separation.
-At the expected program cadence in Section 16.4, this evidence threshold may
-take years. Multi-agent decomposition is therefore an unscheduled option, not a
-committed rollout milestone.
+Multi-agent decomposition is not on the rollout plan. It can be reconsidered
+only after at least 30 decision-grade terminal experiments exist and a
+separately registered evaluation shows net value after added cost and failure
+risk.
 
 ## 10. Typed hypothesis contract
 
@@ -637,10 +614,21 @@ objective evidence.
 ### 12.4 Independent result verification
 
 The governor consumes only a `VERIFIED_RESULT`, never the validator's summary
-directly. A deterministic verifier independently recomputes the primary metric,
-mandatory guardrails, denominator, interval, and manifest hashes from the result
-artifacts. A mismatch produces `INVALID_RESULT`, records both payloads, and
-cannot be overridden by the LLM, operator canary, or promotion governor.
+directly. The verifier treats validator-generated metrics and derived artifacts
+as untrusted. It independently reads the orchestrator-frozen immutable raw
+snapshot and registered candidate policy, reconstructs the candidate decision
+trace, then recomputes the primary metric, mandatory guardrails, denominator,
+interval, and manifest hashes against the registered metric contract. The
+validator's decision trace is comparison evidence, not verifier input.
+
+The verifier must not import the validator's aggregation implementation. The
+snapshot manifest was created before validation and binds raw input hashes,
+schema, policy epoch, and metric version; the experiment manifest independently
+binds the candidate policy identity. A mismatch, missing raw input, or inability
+to reproduce the result produces `INVALID_RESULT`,
+records both payloads, and cannot be overridden by the LLM, operator canary, or
+promotion governor. Phase -1 includes both a valid fixture and an intentionally
+corrupted validator bundle to test this boundary.
 
 ## 13. Scoped Truth Harness and remediation ledger
 
@@ -711,23 +699,11 @@ and cannot override a deterministic data-, message-safety-, economic-, or
 Harness block. This makes post-hoc rationalization visible even though a second
 human reviewer is unavailable.
 
-### 14.3 Optional user-visible cohort
-
-If later required, assignment uses the deterministic key
-`hash(symbol, objective_day, candidate_version)`, with:
-
-- a predeclared fraction;
-- exactly one active alert policy per symbol-day/user;
-- no duplicate baseline/candidate notifications;
-- a hard daily message budget;
-- automatic reversion to baseline at the end of the canary window.
-
-### 14.4 Position-affecting canary
+### 14.3 Position-affecting canary
 
 BUY/SELL/portfolio changes remain shadow-only until their replay and forward
-economic gates pass. Any later live canary must additionally specify capital or
-slot exposure, maximum loss, duration, and automatic rollback. This spec does
-not authorize such a canary.
+economic gates pass. Any later live canary requires a separate spec for exposure,
+maximum loss, duration, and rollback; this architecture does not authorize it.
 
 ## 15. Candidate-specific monitoring and rollback
 
@@ -771,22 +747,23 @@ terminal outcome is a liveness failure.
 
 ### 16.1 Durable experiment states
 
-```text
-OBSERVED
-  -> SNAPSHOT_READY | SNAPSHOT_INVALID
-  -> POWER_FEASIBLE | WAITING_FOR_DATA | POWER_EXPANSION | METRIC_REDESIGN
-  -> PROPOSED
-  -> CONTRACT_VALID | NEEDS_VALIDATOR | CONTRACT_REJECTED
-  -> VALIDATION_RUNNING
-  -> SUPPORTED | REFUTED | UNDERPOWERED | INVALID | BUDGET_EXHAUSTED
-  -> SHADOW_RUNNING
-  -> FORWARD_SUPPORTED | FORWARD_REJECTED | FORWARD_WAITING
-  -> OPERATOR_APPROVED | OPERATOR_REJECTED
-  -> ACTIVE | ROLLED_BACK
-```
+The durable model separates progress from outcome instead of encoding every
+combination as a new state:
 
-Every run must reach a terminal or waiting state with an explicit next wake-up
-condition.
+- `stage`: `OBSERVED | PREPARED | REGISTERED | VALIDATING | FORWARD |
+  DECIDED | CLOSED`;
+- `status`: `ACTIVE | WAITING | TERMINAL`;
+- `outcome_reason`: a versioned reason code such as `snapshot_invalid`,
+  `waiting_for_data`, `power_expansion`, `metric_redesign`,
+  `needs_validator`, `contract_rejected`, `supported`, `refuted`,
+  `underpowered`, `accepted_unknown`, `invalid_result`, `budget_exhausted`,
+  `forward_rejected`, `operator_rejected`, or `rolled_back`.
+
+Program mode is separate:
+`NORMAL | EVIDENCE_CAPACITY_RECOVERY | LOOP_RECOVERY | RESEARCH_ONLY`.
+Every attempt must reach `WAITING` or `TERMINAL` with an explicit wake-up or
+repair condition. Reason codes preserve the distinctions without multiplying
+top-level transition states.
 
 ### 16.2 Required controls
 
@@ -804,88 +781,79 @@ condition.
 - no terminal validation result for two consecutive cycles;
 - all generated hypotheses contract-invalid for two cycles;
 - the same operational error in three consecutive attempts;
-- only `UNDERPOWERED` outcomes for four cycles without metric/window redesign;
+- the last four primary prechecks all end `waiting_for_data` or
+  `underpowered`;
+- once eight exist, fewer than 25% of the trailing eight primary prechecks are
+  power-feasible;
 - a blocking Harness finding past its remediation SLO.
 
-The alarm reports the failed stage and owner. It does not create a more
-optimistic trading conclusion.
+Either power condition enters `EVIDENCE_CAPACITY_RECOVERY`: new LLM-selected
+primary admissions pause, and the program chooses exactly one logging repair,
+continuous outcome, dependence-aware pooling, population expansion, or metric
+redesign action per cycle. Exit requires a registered power report showing at
+least one primary question can reach 80% power for its SESOI within eight weeks,
+followed by a real terminal validator result.
+
+A 30-day failure to complete a real admitted hypothesis after the durable loop
+is available enters `LOOP_RECOVERY`. New agent features and promotion work
+stop; deterministic/manual research and measurement may continue. The
+repository maintainer records the root cause and simplification plan at the next
+weekly triage. Normal mode resumes only after the last known-good vertical slice
+again produces a real terminal result. An alarm never creates a more optimistic
+trading conclusion.
 
 ### 16.4 Program cadence and capacity
 
-The operating cadence is deliberately slower than the report cadence:
+The operating cadence is deliberately slower than the report cadence. Initial
+planning assumptions are:
 
 - deterministic evidence/power pack: weekly;
 - new primary historical validation admission: at most one per week;
 - normal forward-label maturity for one hypothesis version: expected 2–4 weeks;
-- planning capacity: at most 12 decision-grade forward hypothesis versions per
+- capacity ceiling: at most 12 decision-grade forward hypothesis versions per
   year until measured throughput demonstrates otherwise;
 - no more than three simultaneous `FORWARD_WAITING` versions, each with a fixed
   wake-up condition and separate testing budget.
 
-The weekly report must not imply weekly self-improvement. At this capacity the
-30-experiment multi-agent gate is at least a multi-year possibility, which is
-why it is not scheduled. Throughput is raised first by eliminating operational
-stalls and choosing powered populations, not by weakening maturity rules.
+Twelve is a scarce ceiling, not a delivery target and not evidence that 12
+informative outcomes are achievable. The quarterly program report publishes:
+
+- power-feasible share of primary prechecks;
+- decision-grade terminal results and their reason distribution;
+- median and p90 calendar time to terminal evidence;
+- compute, LLM, and operator cost per terminal result;
+- label/logging loss and evidence reuse across policy epochs;
+- incremental value of the LLM over the deterministic baseline.
+
+The roadmap is governed first by these capacity metrics. Throughput is raised by
+repairing observation loss, using powered populations, continuous responses,
+dependence-aware pooling, and reusable provenance before adding agent roles or
+weakening maturity rules.
 
 ## 17. Tool and MCP surface
 
-### 17.1 Agent-visible read tools
-
-- `evidence.get_prepared_pack(attempt_id)`
-- `evidence.get_capability(capability_id)`
-- `evidence.find_related_experiments(query)`
-- `experiments.get_status(experiment_id)`
-- `validation.get_result(experiment_id)`
-
-### 17.2 Orchestrator-only tools
-
-- create/freeze snapshot;
-- run Harness;
-- register attempt and transition state;
-- submit validation;
-- register shadow/canary;
-- request operator approval;
-- write signed release or rollback state.
-
-### 17.3 Prohibited agent tools
-
-- metric-definition mutation;
-- dataset or label mutation;
-- direct shell or arbitrary validator code;
-- production config/override writes;
-- Harness retry;
-- production restart or Telegram production send.
+Agent-visible reads are limited to prepared evidence, capability lookup, related
+experiments, experiment status, and signed validation results. Orchestrator-only
+operations create snapshots, run Harness, transition attempts, submit
+validation, register shadow/canary, request approval, and write signed
+release/rollback state. Agents cannot mutate metrics/data/labels, execute shell
+or validator code, write production config, retry Harness, restart production,
+or send production Telegram messages.
 
 MCP is an interface, not a trust boundary by itself. Server-side authorization,
 schemas, service identities, and audit logs enforce capability restrictions.
 
 ## 18. Weekly control-plane report
 
-The weekly report is deterministic before LLM interpretation and contains:
+The deterministic weekly pack contains:
 
-1. **Evidence health**
-   - complete days, active-universe coverage, freshness, label maturity;
-   - Harness findings with scopes, owners, and SLOs.
-2. **Direction toward the objective**
-   - canonical mission metric on its valid horizon;
-   - `Move5` steering coverage/precision;
-   - effect, interval, SESOI, MDE, and effective sample size;
-   - no arrow when the registered inference rule is inconclusive.
-3. **Attribution of applied decisions**
-   - one line per policy version;
-   - forward maturity and causal/paired comparison status;
-   - rollback state.
-4. **Loop liveness**
-   - attempts proposed, contract-valid, validated, terminal, waiting, and stale;
-   - queue age and last successful transition;
-   - no-change versus stalled-loop distinction.
-5. **Power and cost control**
-   - selected power-expansion action for every infeasible primary population;
-   - cycle budget used/remaining and any `BUDGET_EXHAUSTED` terminal state.
-6. **Next action**
-   - at most three ideas;
-   - one selected primary hypothesis, or an explicit measurement/data repair;
-   - expected decision date and compute budget.
+1. evidence health: coverage, freshness, maturity, scoped Harness findings;
+2. objective direction: canonical and `Move5` metrics with interval, SESOI,
+   MDE, effective sample size, and an honest inconclusive result;
+3. applied-policy attribution, forward maturity, and rollback state;
+4. liveness: attempt counts, queue age, last transition, waiting/stale reasons;
+5. power/cost: capacity action, budget use, and terminal reason distribution;
+6. one primary hypothesis or measurement repair with decision date and budget.
 
 The LLM may summarize this pack but cannot alter its numeric verdicts.
 
@@ -896,16 +864,26 @@ The LLM may summarize this pack but cannot alter its numeric verdicts.
 Build the smallest executable vertical slice first:
 
 - one seeded, non-trading smoke hypothesis over a frozen synthetic fixture;
-- one existing deterministic validator adapter;
+- a dedicated `FixtureDeltaValidatorAdapter` implemented at
+  `files/improvement_fixture_validator.py`;
+- a checked-in immutable fixture at
+  `files/testdata/control_plane_smoke_fixture.json`;
 - one minimal snapshot/contract/attempt record;
 - validator result followed by independent result verification;
 - one expected terminal state in the append-only ledger;
 - all LLM, RAG, promotion, broad registries, and live integrations stubbed out.
 
+The adapter is stdlib-only, has no network or production-state access, does not
+import `replay_backtest.py` or trading policy modules, and computes one fixed
+baseline/candidate delta from at most 64 fixture rows. It emits the minimal
+signed result contract plus a test-only corruption mode. This adapter proves the
+control-plane protocol; it is never a market validator and cannot support a
+trading conclusion.
+
 Exit gate:
 
 - one command takes a fresh attempt from `OBSERVED` to the expected verified
-  terminal result in under ten minutes;
+  terminal result in under ten seconds on the bundled runtime;
 - the result is repeatable, restart-safe at the attempt boundary, and cannot
   reach a release store;
 - a deliberately malformed result reaches `INVALID_RESULT` instead of the
@@ -915,13 +893,14 @@ No Phase 0 registry or label work starts until this slice proves that the pipe
 conducts an experiment. The skeleton is intentionally not decision-grade market
 evidence and cannot support a trading conclusion.
 
-### Phase 0: power and canonical labels
+### Phase 0: evidence capacity and canonical labels
 
 Build or verify:
 
 - immutable `MoveEvent` labels;
 - canonical top-mover later labels;
 - effective-sample-size and power report;
+- baseline evidence-throughput report from Section 16.4;
 - action-layer metric registry;
 - current Harness remediation ledger.
 - migrated negative-result inventory from existing reports, decisions,
@@ -935,22 +914,26 @@ Exit gate:
 - every known legacy research artifact has a migration state;
 - no behavior change.
 
-### Phase 1: repair existing loop liveness
+### Phase 1: durable deterministic loop and one real terminal experiment
 
 Add or verify:
 
 - durable experiment states around existing research components;
 - attempt ledger;
 - capability and validator bindings;
-- queue-age, timeout, retry, and dead-letter reporting.
+- queue-age, timeout, retry, and dead-letter reporting;
+- one manually or deterministically selected, power-feasible real hypothesis;
 
 Exit gate:
 
 - the Phase -1 smoke attempt is replayed through the durable state machine;
 - an invented capability and missing validator are surfaced immediately;
-- a process restart does not lose the attempt.
+- a process restart does not lose the attempt;
+- within 30 calendar days of the durable loop becoming available, the real
+  hypothesis reaches a terminal validator result; failure enters
+  `LOOP_RECOVERY` under Section 16.3.
 
-### Phase 2: single-agent propose-only
+### Phase 2: agent-necessity evaluation and propose-only
 
 The evaluated provider adapter reads the prepared pack and emits typed
 hypotheses. It has no write or validation-execution privileges.
@@ -959,14 +942,18 @@ Exit gate:
 
 - at least ten proposals are schema-valid;
 - duplicates and unsupported targets are measured;
-- operator review finds the agent at least as precise as the deterministic
-  priority baseline in the frozen-world evaluation before its proposals consume
-  validation budget.
+- the `AgentNecessityGate` shows registered net value over the deterministic
+  priority baseline after LLM cost, latency, and operator minutes;
+- a historical operator comparison is used only where the complete timestamped
+  baseline exists; otherwise it is reported `NOT_AVAILABLE`.
 
-### Phase 3: one end-to-end decision-grade experiment
+If the gate fails, the LLM remains a summarizer and the deterministic/manual
+loop continues. Failure is not a reason to lower the gate.
 
-Run one power-feasible hypothesis through maximum-period replay and a one-use
-forward cohort.
+### Phase 3: one agent-selected decision-grade experiment
+
+Only after Phase 2 passes, run one power-feasible agent-selected hypothesis
+through maximum-period replay and a one-use forward cohort.
 
 Exit gate:
 
@@ -985,64 +972,28 @@ Exit gate:
 - candidate rollback is demonstrated;
 - no duplicate production alerts.
 
-### Phase 5: optional advanced orchestration
+## 20. Acceptance, non-goals, and rollback
 
-Consider semantic RAG, a separate adversarial judge, multi-agent generation, or
-adaptive research allocation only after the simpler loop demonstrates stable
-yield and the new component passes its own eval. This phase is deliberately
-unscheduled; the evidence threshold may take multiple years at current cadence.
+1. Phase -1 reaches a verified terminal result from its raw fixture and rejects
+   a corrupted bundle before Phase 0 starts.
+2. Every real admission has one primary hypothesis, power report, immutable
+   attempt history, scoped Harness status, and maximum-period actual-population
+   validation.
+3. Forward evidence is time-separated, consumed once per version, and no LLM can
+   freeze evidence, retry Harness, change metrics, or write production state.
+4. Existing negative research is migrated before LLM authoring.
+5. Phase 1 completes one real terminal result within 30 days or enters
+   `LOOP_RECOVERY`; recurring power failures enter
+   `EVIDENCE_CAPACITY_RECOVERY`.
+6. `AgentNecessityGate` proves net value over the deterministic baseline before
+   an agent selects primary hypotheses; missing human history stays unavailable.
+7. WATCH/alert and position-affecting objectives, canaries, and rollback remain
+   layer-specific. Implementing the foundation changes no trading behavior.
 
-## 20. Acceptance criteria
+Non-goals are an LLM in the live path, autonomous metric or BUY/SELL/portfolio
+promotion, mandatory multi-vendor operation, a large permanent sealed holdout,
+or favorable interpretation of stale, partial, proxy, or underpowered evidence.
 
-1. The architecture distinguishes WATCH-only and position-affecting objectives.
-2. An LLM cannot freeze evidence, run Harness repeatedly, modify metrics, or
-   write executable production decisions.
-3. Every admitted experiment has a power report and one registered primary
-   hypothesis.
-4. Every attempt, retry, invalid result, and Harness run remains visible.
-5. A full Harness failure produces scoped blocks, owners, and remediation SLOs.
-6. The validator uses the bot's actual population and maximum available period.
-7. Forward evidence is time-separated and consumed once per hypothesis version.
-8. Alert canary and rollback have concrete message/product semantics.
-9. The control plane detects a stalled pipeline independently of whether any
-   hypothesis deserves promotion.
-10. No production behavior is changed merely by implementing this architecture
-    foundation.
-11. Before Phase 0, the walking skeleton produces the expected verified terminal
-    result and rejects a malformed result before the governor.
-12. Before the first LLM-authored cycle, existing negative and inconclusive
-    research has a visible migration state rather than an empty memory reset.
-13. Within 30 days after Phase 1 completes, at least one real admitted hypothesis
-    reaches a terminal validator result; otherwise the control-plane
-    implementation is classified as a liveness failure even when its structural
-    tests pass.
-14. Before an agent selects primary hypotheses, frozen-world evaluation shows
-    measured value over the deterministic baseline, with cost and latency.
-
-## 21. Non-goals
-
-- no LLM in the live scan or trading decision path;
-- no autonomous metric/denominator change;
-- no autonomous BUY/SELL/portfolio promotion;
-- no requirement to run multiple model vendors simultaneously;
-- no Thompson-sampling research allocator before enough attributed experiments;
-- no large permanently sealed historical holdout at the current event rate;
-- no favorable interpretation of stale, partial, proxy, or underpowered evidence.
-
-## 22. Rollback
-
-This document introduces no runtime behavior. Future implementation must be
-feature-flagged by phase. Rolling back an implementation means disabling its
-control-plane scheduler/flag and returning to the current manual hypothesis,
-replay, and promotion workflow. Evidence and negative results remain append-only
-and are never deleted during rollback.
-
-## 23. Verification for this design change
-
-- register this spec in `docs/FEATURE_SPEC_INDEX.md`;
-- run `pyembed\python.exe files\test_continuous_improvement_control_plane_spec.py`;
-- run `git diff --check`;
-- run the staged Truth Harness profile;
-- confirm that only the architecture spec, linked roadmap/provenance spec, index,
-  and focused contract test are staged;
-- do not commit runtime reports, datasets, logs, positions, or model artifacts.
+Future implementation is feature-flagged by phase. Rollback disables the
+control-plane scheduler/flag and returns to manual research while immutable
+attempts, evidence, and negative results remain append-only.
