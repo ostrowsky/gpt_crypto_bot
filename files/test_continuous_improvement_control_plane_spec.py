@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CONTROL_PLANE = ROOT / "docs" / "specs" / "continuous-improvement-control-plane.md"
 ROADMAP = ROOT / "docs" / "specs" / "learning-loop-architecture-roadmap.md"
 POLICY_EPOCH = ROOT / "docs" / "specs" / "policy-epoch-label-provenance.md"
+PHASE_ZERO = ROOT / "docs" / "specs" / "phase0-evidence-capacity.md"
 SPEC_INDEX = ROOT / "docs" / "FEATURE_SPEC_INDEX.md"
 
 
@@ -17,6 +18,7 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         cls.spec = CONTROL_PLANE.read_text(encoding="utf-8")
         cls.roadmap = ROADMAP.read_text(encoding="utf-8")
         cls.policy_epoch = POLICY_EPOCH.read_text(encoding="utf-8")
+        cls.phase_zero = PHASE_ZERO.read_text(encoding="utf-8")
         cls.index = SPEC_INDEX.read_text(encoding="utf-8")
 
     def test_walking_skeleton_precedes_measurement_platform(self) -> None:
@@ -99,6 +101,16 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("last four primary prechecks", self.spec)
         self.assertIn("pauses LLM-selected admissions", self.roadmap)
         self.assertIn("power-feasible share", self.roadmap)
+
+    def test_phase_zero_is_measurement_only_and_fail_closed(self) -> None:
+        self.assertIn("production trading policy unchanged", self.phase_zero)
+        self.assertIn("ImmutableLabelLedger", self.phase_zero)
+        self.assertIn("day_cluster_binary_v1", self.phase_zero)
+        self.assertIn("null` ratios", self.phase_zero)
+        self.assertIn("LEGACY_UNVERIFIED", self.phase_zero)
+        self.assertIn("Full Phase 0 remains open", self.phase_zero)
+        self.assertIn("phase0-evidence-capacity.md", self.index)
+        self.assertIn("Phase 0 evidence capacity in progress", self.roadmap)
 
 
 if __name__ == "__main__":

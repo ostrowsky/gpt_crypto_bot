@@ -42,6 +42,7 @@ $releaseSuite = @(
     "test_research_universe_shadow_collector",
     "test_report_research_universe_shadow_scorecard",
     "test_v2_shadow_observer"
+    "test_evidence_capacity_phase0"
 )
 
 Write-Host "Running RELEASE smoke/regression suite: $($releaseSuite -join ', ')"

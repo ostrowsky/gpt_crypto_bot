@@ -1,7 +1,7 @@
 ﻿# Learning Loop Architecture Roadmap
 
 Date: 2026-08-14
-Status: active; Phase -1 walking skeleton complete, Phase 0 evidence capacity next
+Status: active; Phase -1 walking skeleton complete, Phase 0 evidence capacity in progress
 
 ## Principle
 
@@ -30,6 +30,9 @@ framework before completing an experiment. Its implementation order is:
 2. **Measure and expand evidence capacity:** canonical labels, power/throughput
    report, logging repair, dependence-aware pooling, continuous outcomes,
    metric/capability bindings, and migration of negative/inconclusive research.
+   The executable Phase 0 contract is
+   [`phase0-evidence-capacity.md`](phase0-evidence-capacity.md). Its first slice
+   is measurement-only and cannot change WATCH/BUY/SELL/portfolio behavior.
 3. **Prove the durable deterministic loop:** leases, retries and recovery reuse
    the skeleton, then one real manually/deterministically selected hypothesis
    must reach a terminal result within 30 days.
