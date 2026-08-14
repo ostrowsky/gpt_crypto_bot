@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-08-12 Europe/Budapest
+Last updated: 2026-08-14 Europe/Budapest
 
 ## Objective
 
@@ -14,6 +14,7 @@ earlier capture of same-day watchlist top movers with a single unified
 |---|---|---|---|---|
 | Spec-first workflow | shipped | `docs/specs/spec-first-workflow.md` | regression safety, reproducibility | use for every non-trivial change |
 | Truth Harness | shipped enforcement; compliance may fail closed | `docs/specs/truth-harness.md` | evidence provenance, denominator integrity, MD/config parity | run `full` before analysis and `change --staged` before handoff |
+| Continuous improvement control plane | architecture design; implementation not started | `docs/specs/continuous-improvement-control-plane.md` | power-feasible hypothesis yield, terminal experiment rate, objective/guardrail truthfulness, loop liveness | implement Phase 0 power/label contracts before adding agent autonomy |
 | Immutable policy epoch and label provenance | shipped measurement safety | `docs/specs/policy-epoch-label-provenance.md` | verified-row coverage, epoch separation, temporal holdout integrity | accumulate provenance-verified labels before ranker retraining/promotion |
 | Full watchlist rotating monitor | shipped under guarded forward canary | `docs/specs/full-watchlist-rotating-monitor.md` | objective-population coverage, sweep latency, early capture | review seven complete forward days before claiming recall uplift |
 | Scout objective and metric contract | shipped | `SCOUT_OPTIMIZATION_SPEC.md` | `watchlist_top_bought`, `early_captures`, `false_positive_buys` | keep current |
