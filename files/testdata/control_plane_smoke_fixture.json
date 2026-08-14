@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "fixture_id": "control-plane-smoke-v1",
+  "rows": [
+    {"row_id": "r01", "score": 0.90, "label": 1},
+    {"row_id": "r02", "score": 0.82, "label": 1},
+    {"row_id": "r03", "score": 0.76, "label": 1},
+    {"row_id": "r04", "score": 0.72, "label": 1},
+    {"row_id": "r05", "score": 0.68, "label": 1},
+    {"row_id": "r06", "score": 0.60, "label": 1},
+    {"row_id": "r07", "score": 0.50, "label": 0},
+    {"row_id": "r08", "score": 0.42, "label": 0},
+    {"row_id": "r09", "score": 0.30, "label": 0},
+    {"row_id": "r10", "score": 0.20, "label": 0},
+    {"row_id": "r11", "score": 0.10, "label": 0},
+    {"row_id": "r12", "score": 0.00, "label": 0}
+  ]
+}

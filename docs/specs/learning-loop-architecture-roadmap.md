@@ -1,7 +1,7 @@
 ﻿# Learning Loop Architecture Roadmap
 
 Date: 2026-08-14
-Status: active; evidence throughput governs control-plane implementation
+Status: active; Phase -1 walking skeleton complete, Phase 0 evidence capacity next
 
 ## Principle
 
@@ -25,7 +25,8 @@ framework before completing an experiment. Its implementation order is:
    `FixtureDeltaValidatorAdapter` validates at most 64 immutable fixture rows,
    independent verification reads the frozen raw fixture, and one append-only
    attempt closes in under ten seconds. It does not import the monolithic market
-   replay or any production policy.
+   replay or any production policy. The executable contract is
+   [`control-plane-walking-skeleton.md`](control-plane-walking-skeleton.md).
 2. **Measure and expand evidence capacity:** canonical labels, power/throughput
    report, logging repair, dependence-aware pooling, continuous outcomes,
    metric/capability bindings, and migration of negative/inconclusive research.

@@ -1,11 +1,12 @@
 # Continuous Improvement Control Plane
 
-Date: 2026-08-14 · Status: architecture design; no runtime behavior implemented
+Date: 2026-08-14 · Status: architecture v2.2; Phase -1 protocol slice implemented, no trading behavior
 
 Owner: repository maintainer · Revision: v2.2 — evidence-throughput-first
 
 Related: [Truth Harness](truth-harness.md),
 [Learning Loop Roadmap](learning-loop-architecture-roadmap.md),
+[Phase -1 Walking Skeleton](control-plane-walking-skeleton.md),
 [Hypothesis Queue](hypothesis-queue.md), and
 [Canonical Portfolio Alpha](canonical-portfolio-alpha.md).
 
@@ -54,10 +55,14 @@ therefore optimize two properties together:
 2. **liveness:** every admitted experiment reaches a visible terminal state or
    a named operational failure within a bounded time.
 
-Current Harness findings belong in timestamped evidence reports, not in this
-architecture contract. Until model/RL timing and holdout provenance are
-verified, model achievement remains diagnostic-only. Section 13 defines scoped
-blocking so an unrelated finding cannot become an ownerless global freeze.
+Current Harness findings belong in timestamped runtime evidence, not in this
+architecture contract. The stable local pointer is
+`.runtime/reports/truth_harness_latest.json`, refreshed with
+`pyembed\python.exe files\truth_harness.py full --json .runtime/reports/truth_harness_latest.json`;
+it is never committed. Until
+model/RL timing and holdout provenance are verified, model achievement remains
+diagnostic-only. Section 13 defines scoped blocking so an unrelated finding
+cannot become an ownerless global freeze.
 
 ## 3. Governing principles
 
@@ -753,11 +758,16 @@ combination as a new state:
 - `stage`: `OBSERVED | PREPARED | REGISTERED | VALIDATING | FORWARD |
   DECIDED | CLOSED`;
 - `status`: `ACTIVE | WAITING | TERMINAL`;
-- `outcome_reason`: a versioned reason code such as `snapshot_invalid`,
+- `outcome_reason`: a member of a **closed, versioned registry**. Registry v1
+  contains `snapshot_invalid`,
   `waiting_for_data`, `power_expansion`, `metric_redesign`,
   `needs_validator`, `contract_rejected`, `supported`, `refuted`,
   `underpowered`, `accepted_unknown`, `invalid_result`, `budget_exhausted`,
   `forward_rejected`, `operator_rejected`, or `rolled_back`.
+
+Adding, renaming, or removing a reason requires a registry-version bump and a
+migration/compatibility rule. Free-text reasons may accompany a record for
+diagnostics but cannot drive transitions or queries.
 
 Program mode is separate:
 `NORMAL | EVIDENCE_CAPACITY_RECOVERY | LOOP_RECOVERY | RESEARCH_ONLY`.
@@ -892,6 +902,11 @@ Exit gate:
 No Phase 0 registry or label work starts until this slice proves that the pipe
 conducts an experiment. The skeleton is intentionally not decision-grade market
 evidence and cannot support a trading conclusion.
+
+Implementation: `docs/specs/control-plane-walking-skeleton.md` implements this
+slice with separate validator/verifier modules, a closed Phase -1 reason
+registry, an append-only idempotent ledger, a 12-row raw fixture, and explicit
+`decision_grade=false` / `trading_conclusion_allowed=false` terminal records.
 
 ### Phase 0: evidence capacity and canonical labels
 
