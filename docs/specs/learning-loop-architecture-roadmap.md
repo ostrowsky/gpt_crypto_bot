@@ -1,7 +1,7 @@
 ﻿# Learning Loop Architecture Roadmap
 
-Date: 2026-08-03
-Status: active, reprioritized after the 2026-08-02 daily report
+Date: 2026-08-14
+Status: active; control-plane implementation reordered for a walking skeleton
 
 ## Principle
 
@@ -10,6 +10,44 @@ Every major target metric should have three layers:
 1. measurement: daily labels and attribution;
 2. shadow learner: model/policy recommendation without trading side effects;
 3. replay/promotion gate: production adoption only after robust evidence.
+
+## 2026-08-14 Control-Plane Implementation Order
+
+The control-plane design is not permission to build another large research
+framework before completing an experiment. Its implementation order is:
+
+1. **Walking skeleton first:** one seeded non-trading hypothesis, one existing
+   validator, independent result verification, and one append-only terminal
+   attempt. LLM/RAG/promotion and broad registries remain stubs.
+2. **Then measurement foundations:** canonical labels, power report, scoped
+   remediation queue, metric/capability bindings, and migration of existing
+   negative/inconclusive research.
+3. **Then liveness:** restart-safe states, leases, timeouts, retries, and
+   dead-letter handling reuse the skeleton rather than creating a parallel path.
+4. **Then propose-only LLM:** only after frozen-world evaluation shows value over
+   the deterministic priority baseline.
+5. **Then one real experiment and alert shadow:** no BUY/SELL or portfolio
+   autonomy is introduced by the control plane.
+
+There is one accountable owner (`repository maintainer`) and one triage queue.
+Subsystem names categorize work but do not pretend five staffed teams exist.
+Blockers have an acknowledgement target at the next weekly triage;
+`ACCEPTED_DEBT(review_at=...)` is an honest outcome while the affected scope
+remains blocked.
+
+Power expansion is a first-class queue: extend a comparable window, use
+dependence-aware partial pooling, adopt a causal continuous response, validate a
+higher-volume event proxy, widen the real candidate population, or repair
+missing outcomes. If none preserves the question, record `ACCEPTED_UNKNOWN`
+rather than repeatedly generating underpowered hypotheses.
+
+Planning assumptions are one evidence pack per week, at most one new primary
+historical validation per week, and normally 2–4 weeks for a forward hypothesis
+version to mature. Capacity is capped initially at 12 decision-grade forward
+versions per year. Multi-agent research is unscheduled at this throughput.
+Every cycle has a versioned compute/token/operator-time envelope; optional LLM
+drafts and diagnostic slices are cut before provenance, the primary validator,
+result verification, or mandatory guardrails.
 
 ## 2026-08-03 Evidence Checkpoint
 

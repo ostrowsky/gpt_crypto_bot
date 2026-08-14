@@ -6,6 +6,8 @@ Status: architecture design; no runtime behavior implemented by this spec
 
 Owner: repository maintainer
 
+Revision: v2.1 — liveness-first implementation order after independent review
+
 Related: [Scout Optimization Spec](../../SCOUT_OPTIMIZATION_SPEC.md),
 [Truth Harness](truth-harness.md),
 [Learning Loop Architecture Roadmap](learning-loop-architecture-roadmap.md),
@@ -97,6 +99,9 @@ ownership so a broad Harness result cannot become a permanent, ownerless freeze.
 10. **Complexity must earn its place.** Multi-agent generation, semantic RAG,
     LLM judges, and adaptive research allocation are added only after a simpler
     loop demonstrates measurable yield.
+11. **Prove the pipe before completing the platform.** A deliberately small
+    walking skeleton must reach a verified terminal experiment before Phase 0
+    builds comprehensive metric, label, and capability registries.
 
 ## 4. Target architecture
 
@@ -112,7 +117,8 @@ flowchart LR
     CONTRACT --> PRECHECK["Deterministic Contract Precheck"]
     PRECHECK --> VALIDATOR["Independent Validator / Replay"]
     VALIDATOR --> RESULT["Validation Result Bundle"]
-    RESULT --> GOVERNOR["Deterministic Decision Policy"]
+    RESULT --> VERIFY["Independent Result Verification"]
+    VERIFY --> GOVERNOR["Deterministic Decision Policy"]
     GOVERNOR -->|refuted or invalid| MEMORY["Experiment Ledger"]
     GOVERNOR -->|supported| SHADOW["Forward Shadow"]
     SHADOW --> CANARY["Operator Alert Canary"]
@@ -293,7 +299,33 @@ Exceptions:
   sampled;
 - an explicitly approved exploratory run that cannot produce promotion.
 
-### 7.3 Weekly reporting rule
+### 7.3 Power-expansion track
+
+`WAITING_FOR_DATA` is not a strategy by itself. When a primary population is
+infeasible, the orchestrator registers exactly one pre-declared power-expansion
+action before another hypothesis version can consume validation budget:
+
+1. extend the calendar window while preserving policy-epoch comparability;
+2. pool exchangeable symbols with a day-clustered hierarchical/partial-pooling
+   model rather than pretending symbol-days are independent;
+3. replace a sparse binary response with a causal continuous response such as
+   remaining return or captured fraction, while retaining the canonical binary
+   objective as a guardrail;
+4. use a lower, higher-volume event threshold only after registering and
+   measuring its transfer relationship to the canonical objective;
+5. widen the real candidate population or prioritize a mechanism with a larger
+   eligible population;
+6. repair missing observation/outcome logging when data loss, not market rarity,
+   is the limiting factor; or
+7. terminate as `ACCEPTED_UNKNOWN` when none of the above preserves the intended
+   causal question.
+
+The choice is made from the pre-result power report, not after inspecting a
+favorable slice. A changed outcome, threshold, population, or pooling model
+creates a new metric/hypothesis version and cannot retroactively rescue the old
+result.
+
+### 7.4 Weekly reporting rule
 
 MDE is a planning statistic, not a verdict threshold. The report publishes:
 
@@ -328,7 +360,29 @@ Byte offsets are incremental-read cursors, not content addresses. Snapshot
 identity requires cryptographic hashes of the consumed content or immutable
 objects.
 
-### 8.2 Prepared evidence pack
+### 8.2 Policy epoch and evidence transport
+
+A `policy_epoch` is the semantic identity of production decision behavior, not
+the identity of every source commit. It changes when a modification can alter:
+
+- candidate eligibility, score, routing, gate order, or action selection;
+- BUY/SELL/re-entry, sizing, position, replacement, or portfolio behavior;
+- decision-time feature or label semantics used by a live model;
+- active-universe eligibility, capacity, fee/slippage, or benchmark contracts;
+- an effective runtime override that changes any item above.
+
+Documentation, tests, logging-only fields, performance refactors, and repairs
+with proven decision-trace equivalence do not create a new epoch. Their code and
+config hashes still remain in the manifest.
+
+An epoch transition does not delete prior evidence. Each prior result becomes
+one of `directly_comparable`, `transportable_with_bridge`, or `historical_only`.
+Pooling across epochs requires a registered overlap/bridge analysis on the same
+candidate population; otherwise the evidence remains a diagnostic historical
+prior. Regime is recorded separately from policy epoch. A market-regime change
+does not rewrite the policy identity.
+
+### 8.3 Prepared evidence pack
 
 Minimal-budget weekly operation uses a deterministic prepared pack rather than
 an open-ended agent query loop. It contains:
@@ -345,7 +399,7 @@ an open-ended agent query loop. It contains:
 
 ### 9.1 Initial topology
 
-Phase 1 uses one provider-neutral `ResearchAgent`, not a six-agent swarm. The
+Phase 2 uses one provider-neutral `ResearchAgent`, not a six-agent swarm. The
 model implementation may be GPT-5.6, Claude, or another evaluated provider.
 Provider-specific multi-agent or beta API features are optional adapters, never
 architecture dependencies.
@@ -377,7 +431,41 @@ Every generation records:
 Changing model/provider requires replaying the agent-evaluation corpus before
 the new adapter can create primary hypotheses.
 
-### 9.3 Deferred multi-agent use
+### 9.3 Cost and resource envelope
+
+Every cycle receives a versioned `CycleBudget` covering LLM calls/tokens/cost,
+validator CPU or wall time, storage, and operator-review minutes. The initial
+minimal policy permits one primary generation plus at most one schema-repair
+generation and one primary validator run. Negative controls that are part of the
+registered protocol share the same validation envelope.
+
+When the envelope is exhausted, work is removed in this order:
+
+1. extra LLM drafts, semantic retrieval, and narrative explanation;
+2. unpowered diagnostic regime slices and optional robustness reports;
+3. exploratory secondary hypotheses.
+
+The snapshot, provenance checks, primary validator, result verification,
+mandatory guardrails, and immutable ledger are never weakened to fit the budget.
+If those cannot complete, the attempt ends as `BUDGET_EXHAUSTED`; it does not
+become a cheaper positive result.
+
+### 9.4 Frozen-world meta-evaluation
+
+Before agent proposals consume real validation budget, freeze the world at an
+historical date `T`: data available at `T`, MD corpus, prompts, skills, metric
+and capability registries, tool schemas, policy epoch, and model/provider
+snapshot. Run the full propose-only loop without post-`T` evidence, then compare
+its proposals with outcomes and decisions that became available after `T`.
+
+The agent is compared with a deterministic opportunity-priority baseline and
+the operator's recorded historical proposals on proposal validity, supported
+hypothesis precision, avoided harmful validation, incremental objective value,
+cost, and latency. Provider replacement repeats this evaluation. A provider
+that adds no measured value remains a summarizer and cannot select the primary
+hypothesis.
+
+### 9.5 Deferred multi-agent use
 
 Author/Adversary/Referee separation is considered only after:
 
@@ -388,6 +476,9 @@ Author/Adversary/Referee separation is considered only after:
 - the benefit exceeds additional cost, latency, and operational failure rate.
 
 Until then, deterministic prechecks and operator review provide the separation.
+At the expected program cadence in Section 16.4, this evidence threshold may
+take years. Multi-agent decomposition is therefore an unscheduled option, not a
+committed rollout milestone.
 
 ## 10. Typed hypothesis contract
 
@@ -446,6 +537,30 @@ Structured matching uses mechanism, target, population, policy epoch, metric
 version, and data regime. Semantic similarity is advisory and cannot hard-reject
 an experiment by itself. Reopening a related refuted idea requires an explicit
 novelty claim and new evidence.
+
+A regime change is a legitimate reopening basis only when the regime definition
+was fixed without using the candidate result and both the original and proposed
+regime populations are identifiable. The contract records
+`reopen_basis=regime_shift`, the old/new regime definitions, support, and the
+mechanism explaining why the effect should change. Merely naming the latest
+market an "altseason" or "bear market" is not new evidence.
+
+### 10.4 Bootstrap migration of research memory
+
+Before the first real or LLM-authored cycle, migrate the existing casebook,
+rejected hypotheses, decision records, roadmap verdicts, and the 47 legacy
+backtests without durable verdicts into the negative-results inventory. Each
+item receives one migration state:
+
+- `CONFIRMED_NEGATIVE` — period, population, metric, and verdict are recoverable;
+- `LEGACY_UNVERIFIED` — an attempt exists but cannot support a decision;
+- `DUPLICATE` — linked to a canonical migrated item; or
+- `MIGRATION_ERROR` — unreadable source with a named repair/debt record.
+
+Migration never invents missing denominators or upgrades legacy evidence. An
+unverified item creates a similarity warning, not an automatic rejection. The
+first production-relevant cycle is blocked until the inventory is complete,
+although the Phase -1 synthetic walking skeleton is not.
 
 ## 11. Attempt and experiment ledger
 
@@ -519,6 +634,14 @@ Every result contains:
 `estimated_objective_delta` from a proxy cannot substitute for direct canonical
 objective evidence.
 
+### 12.4 Independent result verification
+
+The governor consumes only a `VERIFIED_RESULT`, never the validator's summary
+directly. A deterministic verifier independently recomputes the primary metric,
+mandatory guardrails, denominator, interval, and manifest hashes from the result
+artifacts. A mismatch produces `INVALID_RESULT`, records both payloads, and
+cannot be overridden by the LLM, operator canary, or promotion governor.
+
 ## 13. Scoped Truth Harness and remediation ledger
 
 ### 13.1 Finding contract
@@ -529,22 +652,32 @@ Every blocking finding must state:
 - affected claim/action scope;
 - blocked actions;
 - explicitly allowed work;
-- owner role;
+- repository owner and triage category;
 - repair task;
 - verification command or evidence;
-- SLO/deadline and escalation state.
+- acknowledgement SLO, review date, and escalation state.
 
 A finding without owner or remediation is itself a control-plane defect.
+Finding states are `OPEN`, `ACKNOWLEDGED`, `REPAIRING`, `ACCEPTED_DEBT`,
+`VERIFIED`, and `SUPERSEDED`. `ACCEPTED_DEBT` is an honest terminal triage
+outcome, not a waiver: the affected claim/action remains blocked until the
+invariant is repaired or a separately approved, expiring waiver exists.
 
 ### 13.2 Initial scope policy
 
-| Finding class | Blocks | Does not block | Owner role | Initial SLO |
+| Finding class | Blocks | Does not block | Triage category | Acknowledge SLO |
 |---|---|---|---|---|
-| Stale RL/model report | current RL/model achievement and promotion claims | measurement repair, docs, unrelated rule/WATCH research | learning-worker maintainer | restore or mark terminal within 48h |
-| Missing feature/label/evaluation provenance | training artifact promotion | provenance implementation and read-only diagnosis | model-pipeline maintainer | schema fixed before next training artifact; at most 7 days |
-| Zero mature provenance-verified rows | model/ranker promotion | cohort collection, power reporting, rule-based replay | label/cohort maintainer | report maturity ETA every cycle; promotion waits for power gate |
-| Missing canonical portfolio evidence | BUY/SELL/portfolio promotion | WATCH-only shadow and measurement | portfolio-evaluator maintainer | before any position-affecting promotion |
-| Missing/partial active-universe data | claims using affected population | repair and unaffected explicitly scoped populations | market-data maintainer | terminal reason or recovery within one evidence cycle |
+| Stale RL/model report | current RL/model achievement and promotion claims | measurement repair, docs, unrelated rule/WATCH research | learning worker | next weekly triage |
+| Missing feature/label/evaluation provenance | training artifact promotion | provenance implementation and read-only diagnosis | model pipeline | next weekly triage |
+| Zero mature provenance-verified rows | model/ranker promotion | cohort collection, power reporting, rule-based replay | labels/cohort | next weekly triage |
+| Missing canonical portfolio evidence | BUY/SELL/portfolio promotion | WATCH-only shadow and measurement | portfolio evaluator | next weekly triage |
+| Missing/partial active-universe data | claims using affected population | repair and unaffected explicitly scoped populations | market data | next weekly triage |
+
+All rows have the same accountable owner: `repository maintainer`. Categories
+route the queue; they do not pretend that five independently staffed teams or
+on-call rotations exist. Repair dates are estimates recorded at triage, not
+fictional service guarantees. Unscheduled repair is explicitly
+`ACCEPTED_DEBT(review_at=...)`.
 
 ### 13.3 Harness execution ownership
 
@@ -569,6 +702,14 @@ operator channel.
 For the current single-operator product, a successful operator canary may be the
 final alert-quality gate. A user-facing traffic canary is omitted unless the bot
 later serves multiple independent users or alert UX itself must be evaluated.
+
+The operator rates a masked, randomized baseline/candidate digest against a
+pre-registered rubric before policy identity and aggregate results are revealed.
+The ledger stores `rule_verdict`, `operator_decision`, rubric scores, and any
+`decision_deviation` separately. A deviation requires a contemporaneous reason
+and cannot override a deterministic data-, message-safety-, economic-, or
+Harness block. This makes post-hoc rationalization visible even though a second
+human reviewer is unavailable.
 
 ### 14.3 Optional user-visible cohort
 
@@ -633,11 +774,11 @@ terminal outcome is a liveness failure.
 ```text
 OBSERVED
   -> SNAPSHOT_READY | SNAPSHOT_INVALID
-  -> POWER_FEASIBLE | WAITING_FOR_DATA | METRIC_REDESIGN
+  -> POWER_FEASIBLE | WAITING_FOR_DATA | POWER_EXPANSION | METRIC_REDESIGN
   -> PROPOSED
   -> CONTRACT_VALID | NEEDS_VALIDATOR | CONTRACT_REJECTED
   -> VALIDATION_RUNNING
-  -> SUPPORTED | REFUTED | UNDERPOWERED | INVALID
+  -> SUPPORTED | REFUTED | UNDERPOWERED | INVALID | BUDGET_EXHAUSTED
   -> SHADOW_RUNNING
   -> FORWARD_SUPPORTED | FORWARD_REJECTED | FORWARD_WAITING
   -> OPERATOR_APPROVED | OPERATOR_REJECTED
@@ -668,6 +809,23 @@ condition.
 
 The alarm reports the failed stage and owner. It does not create a more
 optimistic trading conclusion.
+
+### 16.4 Program cadence and capacity
+
+The operating cadence is deliberately slower than the report cadence:
+
+- deterministic evidence/power pack: weekly;
+- new primary historical validation admission: at most one per week;
+- normal forward-label maturity for one hypothesis version: expected 2–4 weeks;
+- planning capacity: at most 12 decision-grade forward hypothesis versions per
+  year until measured throughput demonstrates otherwise;
+- no more than three simultaneous `FORWARD_WAITING` versions, each with a fixed
+  wake-up condition and separate testing budget.
+
+The weekly report must not imply weekly self-improvement. At this capacity the
+30-experiment multi-agent gate is at least a multi-year possibility, which is
+why it is not scheduled. Throughput is raised first by eliminating operational
+stalls and choosing powered populations, not by weakening maturity rules.
 
 ## 17. Tool and MCP surface
 
@@ -721,7 +879,10 @@ The weekly report is deterministic before LLM interpretation and contains:
    - attempts proposed, contract-valid, validated, terminal, waiting, and stale;
    - queue age and last successful transition;
    - no-change versus stalled-loop distinction.
-5. **Next action**
+5. **Power and cost control**
+   - selected power-expansion action for every infeasible primary population;
+   - cycle budget used/remaining and any `BUDGET_EXHAUSTED` terminal state.
+6. **Next action**
    - at most three ideas;
    - one selected primary hypothesis, or an explicit measurement/data repair;
    - expected decision date and compute budget.
@@ -729,6 +890,30 @@ The weekly report is deterministic before LLM interpretation and contains:
 The LLM may summarize this pack but cannot alter its numeric verdicts.
 
 ## 19. Rollout plan
+
+### Phase -1: walking skeleton before platform completeness
+
+Build the smallest executable vertical slice first:
+
+- one seeded, non-trading smoke hypothesis over a frozen synthetic fixture;
+- one existing deterministic validator adapter;
+- one minimal snapshot/contract/attempt record;
+- validator result followed by independent result verification;
+- one expected terminal state in the append-only ledger;
+- all LLM, RAG, promotion, broad registries, and live integrations stubbed out.
+
+Exit gate:
+
+- one command takes a fresh attempt from `OBSERVED` to the expected verified
+  terminal result in under ten minutes;
+- the result is repeatable, restart-safe at the attempt boundary, and cannot
+  reach a release store;
+- a deliberately malformed result reaches `INVALID_RESULT` instead of the
+  governor.
+
+No Phase 0 registry or label work starts until this slice proves that the pipe
+conducts an experiment. The skeleton is intentionally not decision-grade market
+evidence and cannot support a trading conclusion.
 
 ### Phase 0: power and canonical labels
 
@@ -739,12 +924,15 @@ Build or verify:
 - effective-sample-size and power report;
 - action-layer metric registry;
 - current Harness remediation ledger.
+- migrated negative-result inventory from existing reports, decisions,
+  casebooks, and legacy backtests.
 
 Exit gate:
 
 - every reported objective has denominator, coverage, label timing, SESOI, MDE,
   and expected decision horizon;
 - current model/RL blockers have owners and visible status;
+- every known legacy research artifact has a migration state;
 - no behavior change.
 
 ### Phase 1: repair existing loop liveness
@@ -758,7 +946,7 @@ Add or verify:
 
 Exit gate:
 
-- a seeded smoke hypothesis reaches an expected terminal validator state;
+- the Phase -1 smoke attempt is replayed through the durable state machine;
 - an invented capability and missing validator are surfaced immediately;
 - a process restart does not lose the attempt.
 
@@ -772,7 +960,8 @@ Exit gate:
 - at least ten proposals are schema-valid;
 - duplicates and unsupported targets are measured;
 - operator review finds the agent at least as precise as the deterministic
-  priority baseline before its proposals consume validation budget.
+  priority baseline in the frozen-world evaluation before its proposals consume
+  validation budget.
 
 ### Phase 3: one end-to-end decision-grade experiment
 
@@ -800,7 +989,8 @@ Exit gate:
 
 Consider semantic RAG, a separate adversarial judge, multi-agent generation, or
 adaptive research allocation only after the simpler loop demonstrates stable
-yield and the new component passes its own eval.
+yield and the new component passes its own eval. This phase is deliberately
+unscheduled; the evidence threshold may take multiple years at current cadence.
 
 ## 20. Acceptance criteria
 
@@ -818,6 +1008,16 @@ yield and the new component passes its own eval.
    hypothesis deserves promotion.
 10. No production behavior is changed merely by implementing this architecture
     foundation.
+11. Before Phase 0, the walking skeleton produces the expected verified terminal
+    result and rejects a malformed result before the governor.
+12. Before the first LLM-authored cycle, existing negative and inconclusive
+    research has a visible migration state rather than an empty memory reset.
+13. Within 30 days after Phase 1 completes, at least one real admitted hypothesis
+    reaches a terminal validator result; otherwise the control-plane
+    implementation is classified as a liveness failure even when its structural
+    tests pass.
+14. Before an agent selects primary hypotheses, frozen-world evaluation shows
+    measured value over the deterministic baseline, with cost and latency.
 
 ## 21. Non-goals
 
@@ -840,7 +1040,9 @@ and are never deleted during rollback.
 ## 23. Verification for this design change
 
 - register this spec in `docs/FEATURE_SPEC_INDEX.md`;
+- run `pyembed\python.exe files\test_continuous_improvement_control_plane_spec.py`;
 - run `git diff --check`;
 - run the staged Truth Harness profile;
-- confirm that only the architecture spec and index are staged;
+- confirm that only the architecture spec, linked roadmap/provenance spec, index,
+  and focused contract test are staged;
 - do not commit runtime reports, datasets, logs, positions, or model artifacts.

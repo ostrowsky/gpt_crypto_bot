@@ -40,6 +40,30 @@ claim improvement in capture, precision, exits, or portfolio alpha.
 - Audit the maximum locally available critic dataset without rewriting or
   pretending that legacy rows belong to the current policy.
 
+## Policy-epoch semantics
+
+`policy_epoch` identifies semantically distinct decision behavior. A new epoch
+is required when a change can alter candidate eligibility, score/routing/gate
+order, BUY/SELL/re-entry or portfolio actions, decision-time feature/label
+semantics, active-universe eligibility, costs/capacity, or an effective runtime
+override for any of those surfaces.
+
+Documentation, tests, observability-only fields, and refactors with proven
+decision-trace equivalence belong to the same semantic epoch even though their
+code/build hashes differ. Market regime is an observation attached to evidence,
+not a policy epoch. It may justify a separately registered regime-conditional
+hypothesis but cannot relabel the policy that generated historical decisions.
+
+Evidence from an older epoch is retained as `directly_comparable`,
+`transportable_with_bridge`, or `historical_only`. Cross-epoch pooling requires
+an explicit overlap/decision-trace bridge on the same candidate population. An
+epoch transition never deletes or silently upgrades old rows.
+
+The shipped implementation currently errs conservatively and can over-segment
+epochs when a non-behavioral source hash changes. That is safe but statistically
+inefficient. A future equivalence bridge may mark such evidence transportable;
+it must not rewrite the immutable epoch stored on existing observations.
+
 Explicitly unchanged:
 
 - BUY/SELL, score, blocker, cooldown, replacement, sizing, and portfolio rules;
@@ -83,8 +107,10 @@ portfolio achievement.
   is intentional fail-closed behavior; an old model must not be presented as
   newly self-improving.
 - Hashing all relevant config and decision-source files creates a new epoch for
-  conservative non-behavioral source changes. False separation is preferable
-  to silently merging policies.
+  conservative non-behavioral source changes in the current implementation.
+  False separation is preferable to silently merging policies, but the control
+  plane reports this as over-segmentation and may use only a verified bridge to
+  recover comparability.
 - A decision upsert can occur under a later epoch than observation. Both epochs
   are retained; training requires verified decision provenance.
 - Legacy rows may still be inspected in a report explicitly marked
