@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,9 @@ _ML_MODEL_CACHE: Optional[dict] = None
 OBJECTIVE_TZ = "Europe/Budapest"
 OBJECTIVE_CUTOFF_HOUR = 22
 BOT_EVENTS_PATH = Path(__file__).resolve().with_name("bot_events.jsonl")
+DEFAULT_MARKET_CACHE_DIR = Path(__file__).resolve().parent.parent / ".runtime" / "signal_quality_cache"
+_CACHE_FILE_RE = re.compile(r"^(?P<symbol>.+)_(?P<tf>15m|1h)_(?P<start>\d+)_(?P<end>\d+)\.json$")
+_KLINE_DTYPE = [("t", "i8"), ("o", "f8"), ("h", "f8"), ("l", "f8"), ("c", "f8"), ("v", "f8")]
 
 
 @dataclass
@@ -442,7 +446,7 @@ async def fetch_klines(
     if len(rows) < 60:
         return None
 
-    arr = np.zeros(len(rows), dtype=[("t", "i8"), ("o", "f8"), ("h", "f8"), ("l", "f8"), ("c", "f8"), ("v", "f8")])
+    arr = np.zeros(len(rows), dtype=_KLINE_DTYPE)
     arr["t"] = [int(x[0]) for x in rows]
     arr["o"] = [float(x[1]) for x in rows]
     arr["h"] = [float(x[2]) for x in rows]
@@ -450,6 +454,85 @@ async def fetch_klines(
     arr["c"] = [float(x[4]) for x in rows]
     arr["v"] = [float(x[5]) for x in rows]
     return arr
+
+
+def _build_market_cache_index(cache_dir: Path) -> dict[tuple[str, str], list[tuple[int, int, Path]]]:
+    index: dict[tuple[str, str], list[tuple[int, int, Path]]] = {}
+    if not cache_dir.exists():
+        return index
+    for path in sorted(cache_dir.glob("*.json")):
+        match = _CACHE_FILE_RE.match(path.name)
+        if not match:
+            continue
+        key = (match.group("symbol").upper(), match.group("tf"))
+        index.setdefault(key, []).append(
+            (int(match.group("start")), int(match.group("end")), path)
+        )
+    return index
+
+
+def _load_cached_klines(
+    cache_dir: Path,
+    symbol: str,
+    interval: str,
+    start_ms: int,
+    end_ms: int,
+    *,
+    cache_index: dict[tuple[str, str], list[tuple[int, int, Path]]] | None = None,
+) -> Optional[np.ndarray]:
+    index = cache_index if cache_index is not None else _build_market_cache_index(cache_dir)
+    files = index.get((symbol.upper(), interval), [])
+    by_ts: dict[int, tuple[float, float, float, float, float]] = {}
+    for file_start, file_end, path in files:
+        if file_end < start_ms or file_start >= end_ms:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, list):
+            continue
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            try:
+                ts = int(row["t"])
+                values = tuple(float(row[key]) for key in ("o", "h", "l", "c", "v"))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if start_ms <= ts < end_ms and all(np.isfinite(value) for value in values):
+                by_ts[ts] = values
+    if not by_ts:
+        return None
+    ordered = sorted(by_ts.items())
+    arr = np.zeros(len(ordered), dtype=_KLINE_DTYPE)
+    arr["t"] = [row[0] for row in ordered]
+    for idx, field in enumerate(("o", "h", "l", "c", "v")):
+        arr[field] = [row[1][idx] for row in ordered]
+    return arr
+
+
+def _aggregate_1h_to_4h(data: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    if data is None or len(data) < 4:
+        return None
+    groups: list[tuple[int, np.ndarray]] = []
+    bucket_ms = BAR_MS["4h"]
+    bucket_ids = data["t"] // bucket_ms
+    for bucket in np.unique(bucket_ids):
+        rows = data[bucket_ids == bucket]
+        expected = int(bucket) * bucket_ms + np.arange(4, dtype=np.int64) * BAR_MS["1h"]
+        if len(rows) == 4 and np.array_equal(rows["t"], expected):
+            groups.append((int(expected[0]), rows))
+    if not groups:
+        return None
+    out = np.zeros(len(groups), dtype=_KLINE_DTYPE)
+    out["t"] = [ts for ts, _ in groups]
+    out["o"] = [rows["o"][0] for _, rows in groups]
+    out["h"] = [float(np.max(rows["h"])) for _, rows in groups]
+    out["l"] = [float(np.min(rows["l"])) for _, rows in groups]
+    out["c"] = [rows["c"][-1] for _, rows in groups]
+    out["v"] = [float(np.sum(rows["v"])) for _, rows in groups]
+    return out
 
 
 def _find_last_closed_index(t_arr: np.ndarray, ts_ms: int) -> Optional[int]:
@@ -3383,6 +3466,8 @@ async def run_replay(
     portfolio_fee_bps: float | None = None,
     portfolio_slippage_bps: float = 5.0,
     end_at: datetime | None = None,
+    market_data_mode: str = "network",
+    market_cache_dir: Path = DEFAULT_MARKET_CACHE_DIR,
 ) -> dict:
     end = end_at or datetime.now(timezone.utc)
     if end.tzinfo is None:
@@ -3391,6 +3476,11 @@ async def run_replay(
     start = end - timedelta(days=days)
     start_ms = int(start.timestamp() * 1000)
     end_ms = int(end.timestamp() * 1000)
+
+    if market_data_mode not in {"network", "local-only", "prefer-local"}:
+        raise ValueError(f"unsupported market_data_mode={market_data_mode!r}")
+    market_cache_dir = Path(market_cache_dir)
+    local_index = _build_market_cache_index(market_cache_dir) if market_data_mode != "network" else {}
 
     async with aiohttp.ClientSession() as session:
         cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]] = {}
@@ -3403,6 +3493,23 @@ async def run_replay(
         fetch_semaphore = asyncio.Semaphore(8)
 
         async def fetch_one(sym: str, tf: str) -> tuple[str, str, Optional[np.ndarray]]:
+            local_tf = "1h" if tf == "4h" else tf
+            local = None
+            if market_data_mode != "network" and local_tf in {"15m", "1h"}:
+                local = _load_cached_klines(
+                    market_cache_dir,
+                    sym,
+                    local_tf,
+                    start_ms,
+                    end_ms,
+                    cache_index=local_index,
+                )
+                if tf == "4h":
+                    local = _aggregate_1h_to_4h(local)
+                if local is not None and len(local) >= 60:
+                    return sym, tf, local
+                if market_data_mode == "local-only":
+                    return sym, tf, None
             async with fetch_semaphore:
                 data = await fetch_klines(session, sym, tf, start_ms, end_ms)
             return sym, tf, data
@@ -3628,6 +3735,12 @@ async def run_replay(
         "variant": variant,
         "top_gainer_score_min": top_gainer_score_min,
         "objective_top_n": objective_top_n,
+        "market_data": {
+            "mode": market_data_mode,
+            "cache_root": str(market_cache_dir.resolve()) if market_data_mode != "network" else None,
+            "loaded_pairs": len(cache),
+            "requested_pairs": len(fetch_pairs),
+        },
         "compare_variant": compare_variant,
         "reports": reports,
         "comparison": comparison,
@@ -3738,6 +3851,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="timezone-aware UTC/ISO cutoff for the maximum-available replay window",
     )
+    parser.add_argument(
+        "--market-data-mode",
+        choices=("network", "local-only", "prefer-local"),
+        default="network",
+    )
+    parser.add_argument("--market-cache-dir", type=Path, default=DEFAULT_MARKET_CACHE_DIR)
     parser.add_argument("--symbols", nargs="*", default=None)
     parser.add_argument("--timeframes", nargs="*", default=["15m", "1h"])
     parser.add_argument("--max-open-positions", type=int, default=getattr(config, "MAX_OPEN_POSITIONS", 6))
@@ -3821,6 +3940,8 @@ def main() -> None:
             portfolio_fee_bps=args.portfolio_fee_bps,
             portfolio_slippage_bps=args.portfolio_slippage_bps,
             end_at=args.end_at,
+            market_data_mode=args.market_data_mode,
+            market_cache_dir=args.market_cache_dir,
         )
     )
     if args.portfolio_alpha_output is not None:

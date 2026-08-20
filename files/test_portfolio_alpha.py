@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 import asyncio
+import json
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 from portfolio_alpha import BENCHMARK_NAME, evaluate_portfolio_alpha
@@ -10,6 +13,7 @@ from replay_backtest import (
     ReplayRunStats,
     ReplayTrade,
     _make_report,
+    _load_cached_klines,
     _parse_end_at,
     parse_args,
     render_text,
@@ -143,6 +147,24 @@ class PortfolioAlphaTest(unittest.TestCase):
         }
         text = render_text(report)
         self.assertIn("alpha=n/a", text)
+
+    def test_local_cache_loader_merges_deduplicates_and_clips(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first = [
+                {"t": 0, "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10},
+                {"t": 900_000, "o": 1.5, "h": 2, "l": 1, "c": 1.7, "v": 11},
+            ]
+            second = [
+                {"t": 900_000, "o": 1.5, "h": 2.1, "l": 1, "c": 1.8, "v": 12},
+                {"t": 1_800_000, "o": 1.8, "h": 2.2, "l": 1.7, "c": 2, "v": 13},
+            ]
+            (root / "AAAUSDT_15m_0_1800000.json").write_text(json.dumps(first), encoding="utf-8")
+            (root / "AAAUSDT_15m_900000_2700000.json").write_text(json.dumps(second), encoding="utf-8")
+            rows = _load_cached_klines(root, "AAAUSDT", "15m", 900_000, 2_700_000)
+
+        self.assertEqual(rows["t"].tolist(), [900_000, 1_800_000])
+        self.assertEqual(rows["c"].tolist(), [1.8, 2.0])
 
     def test_paired_replay_comparison_uses_capital_weighted_alpha(self) -> None:
         import numpy as np

@@ -62,6 +62,30 @@ training claim. The separate current TH-11 portfolio-alpha artifact still lacks
 Legacy migration assigns all `109` discovered artifacts a state. Five reviewed
 negative results pass the period/population/metric/verdict contract and exact
 source hash; `104` remain `LEGACY_UNVERIFIED`. No ambiguous prose was upgraded.
+
+### 2026-08-20 maximum-period replay recovery checkpoint
+
+The network-only validator returned an empty market population for both the
+wall-clock and anchored windows. The replay now has a fail-closed `local-only`
+adapter over the existing signal-quality candle cache, with deterministic
+timestamp merge/deduplication and complete-1h-only 4h aggregation. This is a
+measurement-path change; it does not change candidate, BUY, SELL, replacement,
+or sizing decisions.
+
+The full-watchlist `2026-07-21T09:00Z .. 2026-08-20T09:00Z` 30-day replay is
+decision-grade: period coverage `98.51%`, valuation coverage `100%`, `1,622`
+closed trades, zero portfolio-contract violations, and current policy/source
+provenance. It restores TH-11 and the full Truth Harness is `PASS` with only the
+honest zero-verified-row training warning.
+
+The baseline is economically poor: portfolio return after costs `-47.84%`
+versus BTC `+4.46%`, net alpha `-52.30pp`, cost drag `25.995pp`, and maximum
+drawdown `51.03%`. Top-15 replay recall is `100%`, trade precision `23.7%`,
+median capture ratio `0.0`, median exit efficiency `-0.3043`, and median
+giveback `0.9804pp`. These are baseline measurements, not improvement deltas.
+The next trading hypothesis must use the identical frozen local population and
+report paired objective and portfolio deltas; no production relaxation follows
+from this checkpoint.
 3. **Prove the durable deterministic loop:** leases, retries and recovery reuse
    the skeleton, then one real manually/deterministically selected hypothesis
    must reach a terminal result within 30 days.

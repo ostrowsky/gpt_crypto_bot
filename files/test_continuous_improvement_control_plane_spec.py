@@ -115,6 +115,9 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("MDE=14.07pp", self.roadmap)
         self.assertIn("0` provenance-verified rows", self.roadmap)
         self.assertIn("Five reviewed", self.roadmap)
+        self.assertIn("2026-08-20 maximum-period replay recovery checkpoint", self.roadmap)
+        self.assertIn("net alpha `-52.30pp`", self.roadmap)
+        self.assertIn("baseline measurements, not improvement deltas", self.roadmap)
 
 
 if __name__ == "__main__":
