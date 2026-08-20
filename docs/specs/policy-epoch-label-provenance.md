@@ -39,6 +39,10 @@ claim improvement in capture, precision, exits, or portfolio alpha.
   marked decision-grade under this provenance contract.
 - Audit the maximum locally available critic dataset without rewriting or
   pretending that legacy rows belong to the current policy.
+- A duplicate/upsert of a row that was originally persisted without root
+  observation provenance must not attach a current decision epoch. Such a row
+  remains `legacy_unknown`; only a newly observed record ID can start a verified
+  cohort. This prevents a rescan from laundering historical evidence.
 
 ## Policy-epoch semantics
 
@@ -103,6 +107,8 @@ portfolio achievement.
 8. If the verified cohort is too small, the worker emits a fresh, non-runtime,
    non-achievement readiness report and leaves the existing model artifact
    untouched. Freshness must not be presented as successful retraining.
+9. An end-to-end new-record fixture becomes provenance-verified after an exact
+   mature forward label, while a duplicate legacy record remains unverified.
 
 ## Risks and trade-offs
 

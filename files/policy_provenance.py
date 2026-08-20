@@ -249,6 +249,15 @@ def update_decision_provenance(record: dict[str, Any], provenance: dict[str, Any
     previous = record.get("decision_provenance")
     if previous == provenance:
         return False
+    root_observation = record.get("provenance")
+    if not isinstance(previous, dict) or not previous:
+        # Never retrofit a current decision epoch onto a legacy observation.
+        # A rescan is not evidence of when or under which policy the original
+        # features were observed.
+        if not isinstance(root_observation, dict) or not root_observation:
+            return False
+        record["decision_provenance"] = provenance
+        return True
     if isinstance(previous, dict) and previous:
         identity = ("policy_epoch", "policy_hash", "source")
         if all(previous.get(key) == provenance.get(key) for key in identity):

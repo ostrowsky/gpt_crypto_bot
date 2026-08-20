@@ -80,6 +80,53 @@ def _verified_row(ts: str, epoch: str = "pe-test") -> dict:
 
 
 class PolicyProvenanceTests(unittest.TestCase):
+    def test_duplicate_legacy_candidate_cannot_gain_current_decision_provenance(self) -> None:
+        legacy = {
+            "id": "legacy",
+            "provenance": {},
+            "decision_provenance": {},
+            "decision": {"action": "candidate", "stage": "collector"},
+        }
+        changed = policy_provenance.update_decision_provenance(
+            legacy,
+            {
+                "policy_epoch": "pe-current",
+                "policy_hash": "current",
+                "decision_time": "2026-08-20T10:00:00Z",
+                "source": "main_monitor",
+            },
+        )
+        self.assertFalse(changed)
+        self.assertEqual(legacy["decision_provenance"], {})
+
+    def test_new_mature_candidate_is_counted_as_verified(self) -> None:
+        data, feat, i = _market_fixture()
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            critic_dataset, "CRITIC_FILE", Path(td) / "critic.jsonl"
+        ):
+            critic_dataset._logged_candidates.clear()
+            rec_id = critic_dataset.log_candidate(
+                sym="XUSDT", tf="15m", bar_ts=int(data["t"][i]),
+                signal_type="trend", is_bull_day=False, feat=feat, i=i,
+                data=data, action="take", stage="entry",
+            )
+            label_time = policy_provenance.forward_label_time(
+                bar_ts=int(data["t"][i]), tf="15m", horizon=5
+            )
+            with patch(
+                "policy_provenance.datetime"
+            ) as mocked_datetime:
+                mocked_datetime.now.return_value = label_time + timedelta(minutes=1)
+                mocked_datetime.fromtimestamp.side_effect = datetime.fromtimestamp
+                critic_dataset.fill_forward_label(rec_id, 5, 1.2)
+            coverage = ml_candidate_ranker.training_provenance_coverage(
+                critic_dataset.CRITIC_FILE
+            )
+
+        self.assertEqual(coverage["labeled_rows"], 1)
+        self.assertEqual(coverage["verified_rows"], 1)
+        self.assertEqual(coverage["legacy_unknown_rows"], 0)
+
     def test_candidate_keeps_observation_epoch_and_records_decision_epoch_history(self) -> None:
         data, feat, i = _market_fixture()
         first = policy_provenance.build_observation_provenance(
