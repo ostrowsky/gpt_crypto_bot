@@ -140,6 +140,9 @@ MAX_POLL_PER_CYCLE: int = 45
 # Fail closed when ranker rows or model payloads lack immutable policy/label
 # provenance. Rollback is diagnostic-only; it must never authorize promotion.
 POLICY_PROVENANCE_REQUIRED_FOR_RANKER: bool = True
+# Measurement-only candidate cohort used by critic/ranker evidence. Keep this
+# explicit: monitor's fail-closed fallback is False when the setting is absent.
+CRITIC_DATASET_ENABLED: bool = True
 
 # в”Ђв”Ђ РќРѕРІС‹Рµ С„РёР»СЊС‚СЂС‹ РІС…РѕРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # РњР°РєСЃ. СЂРѕСЃС‚ РѕС‚ РјРёРЅРёРјСѓРјР° РїРѕСЃР»РµРґРЅРёС… 96 Р±Р°СЂРѕРІ (24С‡ РЅР° 15m)

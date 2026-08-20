@@ -13,6 +13,7 @@ from unittest.mock import patch
 import numpy as np
 
 import critic_dataset
+import config
 import ml_candidate_ranker
 import monitor
 import policy_provenance
@@ -80,6 +81,9 @@ def _verified_row(ts: str, epoch: str = "pe-test") -> dict:
 
 
 class PolicyProvenanceTests(unittest.TestCase):
+    def test_live_critic_candidate_collection_is_explicitly_enabled(self) -> None:
+        self.assertIs(config.CRITIC_DATASET_ENABLED, True)
+
     def test_duplicate_legacy_candidate_cannot_gain_current_decision_provenance(self) -> None:
         legacy = {
             "id": "legacy",

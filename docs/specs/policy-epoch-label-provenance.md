@@ -43,6 +43,10 @@ claim improvement in capture, precision, exits, or portfolio alpha.
   observation provenance must not attach a current decision epoch. Such a row
   remains `legacy_unknown`; only a newly observed record ID can start a verified
   cohort. This prevents a rescan from laundering historical evidence.
+- Keep `CRITIC_DATASET_ENABLED=True` as an explicit configuration contract.
+  Missing configuration must not silently disable candidate collection through
+  a `getattr(..., False)` fallback while reports claim the cohort is merely
+  waiting to mature.
 
 ## Policy-epoch semantics
 
@@ -109,6 +113,8 @@ portfolio achievement.
    untouched. Freshness must not be presented as successful retraining.
 9. An end-to-end new-record fixture becomes provenance-verified after an exact
    mature forward label, while a duplicate legacy record remains unverified.
+10. Release tests assert that live critic candidate collection is explicitly
+    enabled; disabling it is an intentional reviewed measurement outage.
 
 ## Risks and trade-offs
 
@@ -140,6 +146,14 @@ relaxation, so a PnL backtest cannot approve or reject it. Verification is:
 No capture/PnL uplift may be claimed from this change. A later model promotion
 still requires maximum-period causal replay, untouched chronological holdout,
 and unified ten-slot portfolio alpha after costs.
+
+## Canary
+
+After restart, observe one complete monitor sweep and require at least one new
+critic candidate row with current observation provenance. The canary must not
+change BUY/SELL decisions or Telegram delivery. Ranker readiness remains
+blocked until those new rows receive mature exact-forward labels; a growing
+raw-row count alone is not evidence of model or trading improvement.
 
 ## Rollback switch
 
