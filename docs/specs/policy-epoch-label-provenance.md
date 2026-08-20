@@ -100,6 +100,9 @@ portfolio achievement.
 6. The runtime rejects unproven/legacy candidate-ranker payloads when the
    provenance guard is enabled.
 7. Focused tests and the maximum-period local provenance audit pass.
+8. If the verified cohort is too small, the worker emits a fresh, non-runtime,
+   non-achievement readiness report and leaves the existing model artifact
+   untouched. Freshness must not be presented as successful retraining.
 
 ## Risks and trade-offs
 

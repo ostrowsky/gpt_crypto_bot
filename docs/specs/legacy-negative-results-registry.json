@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-14",
+  "review_policy": "period_population_metric_verdict_and_source_hash_required",
+  "entries": [
+    {
+      "negative_id": "early-rsi-weak-static-relaxations-v1",
+      "source": "docs/specs/early-rsi-weak-exit-causal-replay.md",
+      "source_sha256": "9e081f96424baf1e21b66c4b112884863ad846fa3bb3ffa14171f38ec1186a34",
+      "period": {
+        "start": "2026-05-03",
+        "end": "2026-08-04"
+      },
+      "population": "831 valid RSI-divergence WEAK exits from 938 locally observed exits",
+      "metric": "candidate-minus-actual-SELL net PnL delta, median delta, p10 and harmed-case rate",
+      "verdict": "rejected",
+      "evidence_summary": "All frozen static grace, confirmation, structure-veto and partial-tail variants failed the validation/holdout gate; broad relaxation harmed roughly 70-72% of cases.",
+      "policy_epoch": "historical_only_unbridged",
+      "decision_scope": "SELL relaxation"
+    },
+    {
+      "negative_id": "impulse-expansion-protected-tail-v1",
+      "source": "docs/specs/impulse-expansion-profit-tail-replay.md",
+      "source_sha256": "49092b794a10177646878496ba42e426f7b03686f6859f371a5a9de96dc0712c",
+      "period": {
+        "start": "2026-05-03",
+        "end": "2026-08-06"
+      },
+      "population": "301 reconstructed candle paths from 314 eligible 15m impulse_speed soft-WEAK exits",
+      "metric": "protected-tail net delta, median delta, worse rate and chronological validation/holdout guardrails",
+      "verdict": "rejected",
+      "evidence_summary": "The selected expansion profile averaged -0.0829pp, median -0.1772pp and harmed 82.0% of selected exits.",
+      "policy_epoch": "historical_only_unbridged",
+      "decision_scope": "SELL protected tail"
+    },
+    {
+      "negative_id": "post-block-causal-discriminator-v1",
+      "source": "docs/specs/post-block-causal-discriminator-audit.md",
+      "source_sha256": "0d361ec7faaa68127a58d470847eca486d8f9a64d7bcf969fef0792aaaaaa0b5",
+      "period": {
+        "start": "2026-04-23",
+        "end": "2026-05-17"
+      },
+      "population": "1937 post-block rows: 1411 train rows and 526 chronological holdout rows",
+      "metric": "holdout useful-winner precision, top15 precision and selected candidate pressure",
+      "verdict": "rejected",
+      "evidence_summary": "The best frozen discriminator selected seven holdout candidates with 14.29% useful precision and insufficient useful-winner recall.",
+      "policy_epoch": "historical_only_unbridged",
+      "decision_scope": "BUY rescue admission"
+    },
+    {
+      "negative_id": "btc-benchmark-admission-profiles-v1",
+      "source": "docs/specs/btc-benchmark-admission-replay.md",
+      "source_sha256": "dad8b598cdd3337b84e28ea8c36efa0783338a820cd1bb86674fdb1c75058653",
+      "period": {
+        "start": "2026-05-31",
+        "end": "2026-07-14"
+      },
+      "population": "64481 causal candidates over 95 history-complete symbols from a requested 105-symbol watchlist",
+      "metric": "after-cost summed trade-return delta, chronological holdout delta, BTC net return and independent policy admissions",
+      "verdict": "rejected",
+      "evidence_summary": "All frozen admission profiles were worse, inactive or insufficient; the only positive rotation observation was one case and failed the preregistered support gate.",
+      "policy_epoch": "historical_only_unbridged",
+      "decision_scope": "BTC BUY admission and replacement"
+    },
+    {
+      "negative_id": "regime-start-base-recovery-v1",
+      "source": "docs/specs/regime-start-watch.md",
+      "source_sha256": "8e58ec31e21bacd746f1992ccbc615a50e376b14dc73b95a4709983846f59bdb",
+      "period": {
+        "start": "2017-08-17",
+        "end": "2026-07-13"
+      },
+      "population": "maximum available history for all 105 symbols returned by the runtime watchlist",
+      "metric": "chronological useful precision, 5-day return/MFE/MAE, alert pressure and POL detection timing",
+      "verdict": "rejected",
+      "evidence_summary": "The profile detected the POL case but failed preregistered holdout precision and return gates; operator WATCH remained disabled.",
+      "policy_epoch": "historical_only_unbridged",
+      "decision_scope": "WATCH regime-start alert"
+    }
+  ]
+}

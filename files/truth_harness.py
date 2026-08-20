@@ -227,7 +227,63 @@ def audit_model_provenance(audit: Audit, root: Path = ROOT) -> None:
     missing = [key for key in ("feature_time", "label_time", "label_definition", "evaluation_scope") if not provenance.get(key)]
     if missing:
         audit.add("TH03_MODEL_PROVENANCE", "TH-03/TH-04", "error", "Model achievement evidence lacks timing/holdout provenance", f"missing={missing}", "Keep model metrics diagnostic-only until training artifacts record immutable timing and chronological holdout scope.")
-    elif provenance.get("evaluation_scope") != "out_of_sample_time_holdout":
+    blocked_readiness = latest.get("evidence_status") == "blocked_insufficient_provenance"
+    if blocked_readiness:
+        if latest.get("runtime_eligible") is not False or latest.get("achievement_claimed") is not False:
+            audit.add(
+                "TH03_MODEL_PROVENANCE",
+                "TH-03/TH-04",
+                "error",
+                "Blocked training evidence claims runtime eligibility or achievement",
+                json.dumps(
+                    {
+                        "runtime_eligible": latest.get("runtime_eligible"),
+                        "achievement_claimed": latest.get("achievement_claimed"),
+                    }
+                ),
+            )
+        if provenance.get("evaluation_scope") != "not_evaluated_insufficient_provenance":
+            audit.add(
+                "TH04_MODEL_HOLDOUT",
+                "TH-04",
+                "error",
+                "Blocked readiness report misstates evaluation scope",
+                str(provenance.get("evaluation_scope")),
+            )
+        watermark = latest.get("dataset_watermark") or {}
+        if not latest.get("generated_at_utc") or not {
+            "path",
+            "byte_count",
+            "mtime_ns",
+        }.issubset(watermark):
+            audit.add(
+                "TH10_EVIDENCE_FRESHNESS",
+                "TH-10",
+                "error",
+                "Blocked readiness freshness lacks a dataset watermark",
+                json.dumps(watermark),
+            )
+        data_provenance = provenance.get("data_provenance") or latest.get("data_provenance") or {}
+        required_counts = {"labeled_rows", "verified_rows", "legacy_unknown_rows"}
+        if not required_counts.issubset(data_provenance):
+            audit.add(
+                "TH03_MODEL_PROVENANCE",
+                "TH-03",
+                "error",
+                "Blocked readiness report lacks provenance denominators",
+                json.dumps(data_provenance, ensure_ascii=False),
+            )
+        else:
+            audit.add(
+                "TH03_MODEL_PROVENANCE",
+                "TH-03",
+                "warning",
+                "Ranker training is honestly blocked on provenance-verified cohort size",
+                json.dumps(data_provenance, ensure_ascii=False),
+                "Collect new forward provenance; do not train or promote from legacy rows.",
+            )
+        return
+    if not missing and provenance.get("evaluation_scope") != "out_of_sample_time_holdout":
         audit.add("TH04_MODEL_HOLDOUT", "TH-04", "error", "Model evaluation is not a chronological out-of-sample holdout", str(provenance.get("evaluation_scope")))
     if int(provenance.get("cross_split_group_overlap_count") or 0) != 0:
         audit.add("TH04_MODEL_HOLDOUT", "TH-04", "error", "Chronological holdout shares decision groups across splits", json.dumps(provenance.get("cross_split_group_overlap_examples") or []))

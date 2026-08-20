@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import io
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -256,6 +259,60 @@ class PolicyProvenanceTests(unittest.TestCase):
             truth_harness.audit_model_provenance(audit, root)
 
         self.assertFalse(any(f.severity == "error" for f in audit.findings))
+
+    def test_training_readiness_is_fresh_but_does_not_claim_training(self) -> None:
+        legacy = _verified_row("2026-08-13T10:00:00Z")
+        legacy["provenance"] = {}
+        legacy["decision_provenance"] = {}
+        legacy["label_provenance"] = {}
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "critic.jsonl"
+            dataset.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+            report = ml_candidate_ranker.build_training_readiness_report(
+                dataset,
+                min_verified_rows=500,
+                generated_at="2026-08-14T12:00:00+00:00",
+            )
+            dataset_size = dataset.stat().st_size
+
+        self.assertEqual(report["evidence_status"], "blocked_insufficient_provenance")
+        self.assertFalse(report["runtime_eligible"])
+        self.assertFalse(report["achievement_claimed"])
+        self.assertEqual(report["data_provenance"]["labeled_rows"], 1)
+        self.assertEqual(report["data_provenance"]["verified_rows"], 0)
+        self.assertEqual(
+            report["evaluation_provenance"]["evaluation_scope"],
+            "not_evaluated_insufficient_provenance",
+        )
+        self.assertEqual(report["dataset_watermark"]["byte_count"], dataset_size)
+
+    def test_readiness_cli_does_not_write_model_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dataset = root / "critic.jsonl"
+            dataset.write_text("", encoding="utf-8")
+            model = root / "model.json"
+            report = root / "readiness.json"
+            argv = [
+                "ml_candidate_ranker.py",
+                "--dataset",
+                str(dataset),
+                "--model-out",
+                str(model),
+                "--report-out",
+                str(report),
+                "--readiness-only",
+                "--min-verified-rows",
+                "500",
+                "--json",
+            ]
+            with patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+                ml_candidate_ranker.main()
+
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertFalse(model.exists())
+
+        self.assertEqual(payload["evidence_status"], "blocked_insufficient_provenance")
 
 
 if __name__ == "__main__":

@@ -111,6 +111,10 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("Full Phase 0 remains open", self.phase_zero)
         self.assertIn("phase0-evidence-capacity.md", self.index)
         self.assertIn("Phase 0 evidence capacity in progress", self.roadmap)
+        self.assertIn("2026-08-14 Phase 0 evidence checkpoint", self.roadmap)
+        self.assertIn("MDE=14.07pp", self.roadmap)
+        self.assertIn("0` provenance-verified rows", self.roadmap)
+        self.assertIn("Five reviewed", self.roadmap)
 
 
 if __name__ == "__main__":

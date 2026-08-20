@@ -30,6 +30,11 @@ artifacts, or write release configuration. Its public contracts are:
 - `migrate_legacy_research_inventory(...)`;
 - `verify_objective_report_contract(...)`.
 
+`files/phase0_canonical_audit.py` is the repository adapter for the maximum
+locally available final-critic history. It is read-only and accepts only exact
+`top_gainer_critic_YYYY-MM-DD_final.json` names. Manual, midday, temporary, and
+similarly named artifacts are outside the population.
+
 Generated audits are runtime evidence and are not committed. The source
 contracts, tests, and versioned registries are committed.
 
@@ -81,6 +86,40 @@ This contract intentionally does not claim equivalence with a different
 rolling-24h exchange statistic. A consumer must name the metric version. A
 partial member makes the whole day non-decision-grade; it cannot silently
 shrink the top-mover denominator.
+
+### Existing mission-objective bridge
+
+The production mission currently defines a top mover as an exchange top-N row
+filtered to symbols that were in the watchlist. The maximum-history adapter
+therefore emits `exchange_top_filtered_watchlist_v1` labels from the
+`exchange_top_gainers` detail rows, not from the stored summary and not by
+ranking only the watchlist. Each label binds:
+
+- target day, exchange rank, symbol, and `in_watchlist=true`;
+- bought/early-captured outcomes recomputed from row status, capture ratio, and
+  the report's registered early threshold;
+- source file SHA-256 and a deterministic population-snapshot hash;
+- final cutoff and label availability time;
+- exchange-top population size and filtered watchlist denominator.
+
+The adapter validates target day, final phase, unique symbols, open/close/change
+consistency, exchange-top count, and every summary numerator/rate against the
+detail rows. A mismatch excludes the entire day with a named integrity reason.
+It never repairs a report by trusting whichever side is more favorable.
+
+Calendar coverage uses every day between the first and last exact final report.
+Missing days remain named exclusions. For example, 118 final files inside a
+135-day span are coverage `118/135`, not a complete 118-day history. A valid
+zero-event day contributes to coverage but not to the event denominator; it is
+neither a miss nor a success.
+
+The aggregate objective audit publishes exact numerator/denominator, coverage,
+deterministic day-cluster bootstrap interval, `SESOI=5pp`, conservative power
+report, expected horizon, source manifest hash, and contract-verification
+errors. It uses `baseline_only_no_directional_verdict`: a historical baseline
+cannot label itself `IMPROVING` without a registered paired candidate/control
+comparison. Partial calendar coverage can be measurement evidence but cannot
+be promotion-grade evidence.
 
 ## Immutability ledger
 
@@ -147,6 +186,29 @@ Missing owner or remediation makes the Phase 0 audit fail closed.
 The ledger does not waive a failing Harness. A stale model/RL artifact continues
 to block current achievement/promotion claims while allowing measurement repair.
 
+### Fresh blocked-training evidence
+
+Freshness describes when readiness was checked, not proof that a model trained
+or improved. When provenance-verified rows are below the configured training
+minimum, the worker writes a fresh
+`blocked_insufficient_provenance` readiness report instead of retaining a stale
+successful-looking training report or retraining on legacy rows. The report:
+
+- records the dataset watermark and labeled/verified/legacy denominators;
+- declares `achievement_claimed=false` and `runtime_eligible=false`;
+- publishes feature-time, label-time, label-definition, and evaluation-scope
+  contracts, with `evaluation_scope=not_evaluated_insufficient_provenance`;
+- does not overwrite the live model payload;
+- remains a promotion blocker until enough forward verified rows mature.
+
+The Truth Harness treats this as an honest warning, not model achievement and
+not a provenance violation. It still fails if a blocked report claims runtime
+eligibility, uses a holdout claim that never ran, or omits the evidence
+denominators. Rewriting a timestamp alone is forbidden: each readiness refresh
+must rescan the current dataset and bind its size, mtime, and provenance counts.
+`ml_candidate_ranker.py --readiness-only` is the manual recovery path; it writes
+only the readiness report and must not create or replace a model artifact.
+
 ## Legacy research migration
 
 The bootstrap migrator enumerates the declared roots (`docs/reports` plus
@@ -164,6 +226,15 @@ The first implementation defaults ambiguous prose to `LEGACY_UNVERIFIED`; it
 never infers a denominator or promotes prose into decision-grade evidence.
 The inventory publishes discovered, migrated, and per-state counts so omissions
 cannot look like completion.
+
+Human-reviewed upgrades live in
+`docs/specs/legacy-negative-results-registry.json`. A
+`CONFIRMED_NEGATIVE` entry is accepted only when it has an ISO period,
+population, canonical metric, explicit rejected verdict, evidence summary, and
+the exact SHA-256 of the reviewed source. A later source edit invalidates the
+upgrade back to `LEGACY_UNVERIFIED` until it is reviewed again. Registry entries
+outside the discovered inventory or with duplicate IDs are reported as registry
+errors; they cannot silently increase the confirmed count.
 
 ## Objective report completeness gate
 
@@ -200,6 +271,10 @@ be rewritten as `IMPROVING`.
 
 `test_evidence_capacity_phase0` is part of the curated release suite so an
 operational restart cannot silently bypass the Phase 0 evidence invariants.
+
+10. The maximum-history critic adapter excludes manual/midday names, detects
+    missing calendar days, recomputes summary metrics, and reports a baseline
+    without a directional improvement claim.
 
 ## Phase 0 exit status
 

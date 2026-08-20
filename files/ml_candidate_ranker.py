@@ -8,7 +8,7 @@ import math
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -475,6 +475,75 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
         "verified_rate_pct": round(verified_rows / labeled_rows * 100.0, 4) if labeled_rows else None,
         "policy_epoch_counts": dict(sorted(epoch_counts.items())),
         "feature_time_range": {"first": first_feature_time, "last": last_feature_time},
+    }
+
+
+def build_training_readiness_report(
+    dataset_path: Path,
+    *,
+    min_verified_rows: int,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Describe training readiness without training or changing a model.
+
+    A fresh blocked report is operational evidence that the cohort was checked;
+    it is deliberately not model-achievement evidence.
+    """
+    if min_verified_rows <= 0:
+        raise ValueError("min_verified_rows must be positive")
+    observed = (
+        policy_provenance.parse_utc(generated_at)
+        if generated_at is not None
+        else datetime.now(timezone.utc)
+    )
+    if observed is None:
+        raise ValueError("generated_at must be a timezone-aware ISO timestamp")
+    coverage = training_provenance_coverage(dataset_path)
+    verified_rows = int(coverage.get("verified_rows") or 0)
+    eligible = verified_rows >= min_verified_rows
+    stat = dataset_path.stat() if dataset_path.exists() else None
+    evaluation_scope = (
+        "not_evaluated_ready_for_training"
+        if eligible
+        else "not_evaluated_insufficient_provenance"
+    )
+    evidence_status = (
+        "ready_for_training" if eligible else "blocked_insufficient_provenance"
+    )
+    evaluation_provenance = {
+        "schema_version": 1,
+        "feature_time": "closed decision-bar cutoff required per row before every target label",
+        "label_time": "per-target maturity and recording time required strictly after feature_time",
+        "label_definition": dict(policy_provenance.TARGET_LABEL_DEFINITIONS),
+        "evaluation_scope": evaluation_scope,
+        "split_method": "not_run",
+        "cross_split_group_overlap_count": 0,
+        "cross_split_group_overlap_examples": [],
+        "data_provenance": coverage,
+    }
+    return {
+        "schema_version": 1,
+        "generated_at_utc": observed.astimezone(timezone.utc).isoformat(),
+        "evidence_status": evidence_status,
+        "training_eligible": eligible,
+        "runtime_eligible": False,
+        "achievement_claimed": False,
+        "blocked_reason": None
+        if eligible
+        else f"verified_rows={verified_rows} below minimum={min_verified_rows}",
+        "minimum_verified_rows": min_verified_rows,
+        "data_provenance": coverage,
+        "evaluation_provenance": evaluation_provenance,
+        "dataset_watermark": {
+            "path": str(dataset_path.resolve()),
+            "byte_count": int(stat.st_size) if stat else 0,
+            "mtime_ns": int(stat.st_mtime_ns) if stat else 0,
+        },
+        "model_artifact_written": False,
+        "limitations": [
+            "freshness proves only that readiness was checked",
+            "no training, holdout evaluation, model improvement, or trading uplift is claimed",
+        ],
     }
 
 
@@ -1514,11 +1583,31 @@ def main() -> None:
     parser.add_argument("--min-date", type=str, default="")
     parser.add_argument("--model-out", type=Path, default=DEFAULT_MODEL_FILE)
     parser.add_argument("--report-out", type=Path, default=DEFAULT_REPORT_FILE)
+    parser.add_argument("--readiness-only", action="store_true")
+    parser.add_argument("--min-verified-rows", type=int, default=500)
     parser.set_defaults(require_catboost=True)
     parser.add_argument("--require-catboost", dest="require_catboost", action="store_true")
     parser.add_argument("--allow-fallback", dest="require_catboost", action="store_false")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()
+
+    if args.readiness_only:
+        readiness = build_training_readiness_report(
+            args.dataset,
+            min_verified_rows=args.min_verified_rows,
+        )
+        save_json(args.report_out, readiness)
+        if args.as_json:
+            print(json.dumps(readiness, ensure_ascii=False, indent=2))
+        else:
+            print(
+                "Ranker readiness: "
+                f"{readiness['evidence_status']} "
+                f"verified={readiness['data_provenance']['verified_rows']}/"
+                f"{readiness['minimum_verified_rows']}"
+            )
+            print(f"Readiness report saved to: {args.report_out}")
+        return
 
     min_ts = _parse_ts(args.min_date) if args.min_date else None
     report = train_and_evaluate(

@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 MOVE_EVENT_VERSION = "move5_v1"
 TOP_MOVER_VERSION = "watchlist_top_close_v1"
+MISSION_TOP_MOVER_VERSION = "exchange_top_filtered_watchlist_v1"
 POWER_METHOD_VERSION = "day_cluster_binary_v1"
 THROUGHPUT_METHOD_VERSION = "attempt_throughput_v1"
 METRIC_REGISTRY_VERSION = "action_metrics_v1"
@@ -644,8 +645,8 @@ def action_layer_metric_registry() -> list[dict[str, Any]]:
     entries = [
         ("coverage_move5_v1", "WATCH", "early Move5 alerts", "confirmed Move5 events", MOVE_EVENT_VERSION, "steering_only", ["RESEARCH_PRIORITIZATION"]),
         ("precision_alert5_v1", "WATCH", "eligible alerts later confirming Move5", "unique eligible symbol-day alerts", MOVE_EVENT_VERSION, "watch_guardrail", ["WATCH_SHADOW"]),
-        ("watchlist_top_capture_v1", "BUY", "canonical top movers bought", "canonical top movers", TOP_MOVER_VERSION, "mission_objective", ["BUY_REPLAY"]),
-        ("watchlist_top_early_capture_v1", "BUY", "top movers bought before registered early cutoff", "canonical top movers", TOP_MOVER_VERSION, "mission_objective", ["BUY_REPLAY"]),
+        ("watchlist_top_capture_v1", "BUY", "canonical top movers bought", "canonical top movers", MISSION_TOP_MOVER_VERSION, "mission_objective", ["BUY_REPLAY"]),
+        ("watchlist_top_early_capture_v1", "BUY", "top movers bought before registered early cutoff", "canonical top movers", MISSION_TOP_MOVER_VERSION, "mission_objective", ["BUY_REPLAY"]),
         ("trade_precision_v1", "BUY", "BUY decisions meeting registered outcome", "unique BUY decisions", "buy_outcome_v1", "buy_guardrail", ["BUY_REPLAY"]),
         ("exit_efficiency_v1", "SELL", "realized return relative to post-entry MFE", "mature closed positions with MFE", "exit_path_v1", "sell_objective", ["SELL_REPLAY"]),
         ("giveback_v1", "SELL", "MFE minus realized return", "mature closed positions with MFE", "exit_path_v1", "sell_guardrail", ["SELL_REPLAY"]),
@@ -773,27 +774,96 @@ def _research_sources(root: Path, feature_index_path: Path) -> list[Path]:
     return sorted(candidates, key=lambda path: path.as_posix().lower())
 
 
-def _has_structured_negative_contract(text: str) -> bool:
-    fields = ("period", "population", "metric", "verdict")
-    lowered = text.lower()
-    return all(re.search(rf"(?m)^\s*{field}\s*:\s*\S+", lowered) for field in fields)
+def _load_negative_registry(
+    root: Path, registry_path: Path
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    if not registry_path.exists():
+        return {}, []
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, [f"registry_unreadable:{type(exc).__name__}"]
+    if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
+        return {}, ["registry_schema_invalid"]
+    by_source: dict[str, dict[str, Any]] = {}
+    seen_ids: set[str] = set()
+    errors: list[str] = []
+    for index, raw in enumerate(payload["entries"]):
+        prefix = f"entry_{index}"
+        if not isinstance(raw, dict):
+            errors.append(f"{prefix}:not_object")
+            continue
+        negative_id = raw.get("negative_id")
+        source = raw.get("source")
+        digest = raw.get("source_sha256")
+        period = raw.get("period")
+        required_text = ("population", "metric", "evidence_summary")
+        if not isinstance(negative_id, str) or not negative_id:
+            errors.append(f"{prefix}:negative_id_invalid")
+            continue
+        if negative_id in seen_ids:
+            errors.append(f"{prefix}:duplicate_negative_id:{negative_id}")
+            continue
+        seen_ids.add(negative_id)
+        if not isinstance(source, str) or not source or source.startswith(("/", "\\")):
+            errors.append(f"{prefix}:source_invalid")
+            continue
+        if not isinstance(digest, str) or not _HEX_64.fullmatch(digest):
+            errors.append(f"{prefix}:source_sha256_invalid")
+            continue
+        if raw.get("verdict") != "rejected":
+            errors.append(f"{prefix}:verdict_not_rejected")
+            continue
+        if not all(isinstance(raw.get(field), str) and raw.get(field) for field in required_text):
+            errors.append(f"{prefix}:required_text_invalid")
+            continue
+        if not isinstance(period, dict):
+            errors.append(f"{prefix}:period_invalid")
+            continue
+        try:
+            period_start = datetime.fromisoformat(str(period.get("start"))).date()
+            period_end = datetime.fromisoformat(str(period.get("end"))).date()
+        except ValueError:
+            errors.append(f"{prefix}:period_invalid")
+            continue
+        if period_end < period_start:
+            errors.append(f"{prefix}:period_reversed")
+            continue
+        normalized_source = Path(source).as_posix()
+        if normalized_source in by_source:
+            errors.append(f"{prefix}:duplicate_source:{normalized_source}")
+            continue
+        by_source[normalized_source] = dict(raw)
+    return by_source, errors
 
 
 def migrate_legacy_research_inventory(
-    root: Path | str, feature_index_path: Path | str
+    root: Path | str,
+    feature_index_path: Path | str,
+    confirmed_registry_path: Path | str | None = None,
 ) -> dict[str, Any]:
     root_path = Path(root).resolve()
     index_path = Path(feature_index_path)
     if not index_path.is_absolute():
         index_path = root_path / index_path
+    registry_path = (
+        Path(confirmed_registry_path)
+        if confirmed_registry_path is not None
+        else root_path / "docs" / "specs" / "legacy-negative-results-registry.json"
+    )
+    if not registry_path.is_absolute():
+        registry_path = root_path / registry_path
+    registry, registry_errors = _load_negative_registry(root_path, registry_path)
     sources = _research_sources(root_path, index_path)
     items: list[dict[str, Any]] = []
     canonical_by_hash: dict[str, str] = {}
     counts: Counter[str] = Counter()
+    registry_accepted = 0
+    registry_hash_mismatch = 0
     for path in sources:
         try:
             payload = path.read_bytes()
-            text = payload.decode("utf-8-sig")
+            payload.decode("utf-8-sig")
         except (OSError, UnicodeError) as exc:
             state = "MIGRATION_ERROR"
             item = {
@@ -822,11 +892,13 @@ def migrate_legacy_research_inventory(
                 }
             else:
                 canonical_by_hash[content_hash] = relative
-                state = (
-                    "CONFIRMED_NEGATIVE"
-                    if _has_structured_negative_contract(text)
-                    else "LEGACY_UNVERIFIED"
+                reviewed = registry.get(relative)
+                reviewed_match = bool(
+                    reviewed and reviewed.get("source_sha256") == content_hash
                 )
+                if reviewed and not reviewed_match:
+                    registry_hash_mismatch += 1
+                state = "CONFIRMED_NEGATIVE" if reviewed_match else "LEGACY_UNVERIFIED"
                 item = {
                     "source": relative,
                     "state": state,
@@ -836,8 +908,24 @@ def migrate_legacy_research_inventory(
                     if state == "CONFIRMED_NEGATIVE"
                     else "warning_only",
                 }
+                if reviewed_match:
+                    registry_accepted += 1
+                    item["negative_id"] = reviewed["negative_id"]
+                    item["period"] = reviewed["period"]
+                    item["population"] = reviewed["population"]
+                    item["metric"] = reviewed["metric"]
+                    item["verdict"] = reviewed["verdict"]
+                    item["evidence_summary"] = reviewed["evidence_summary"]
+                elif reviewed:
+                    item["registry_status"] = "hash_mismatch"
         counts[state] += 1
         items.append(item)
+    discovered_relative = {
+        path.relative_to(root_path).as_posix()
+        for path in sources
+        if path.is_relative_to(root_path)
+    }
+    registry_orphans = sorted(set(registry) - discovered_relative)
     return {
         "schema_version": LEGACY_INVENTORY_VERSION,
         "declared_roots": ["docs/reports", "docs/FEATURE_SPEC_INDEX.md research entries"],
@@ -845,6 +933,15 @@ def migrate_legacy_research_inventory(
         "migrated_count": len(items),
         "state_counts": dict(sorted(counts.items())),
         "complete": len(sources) == len(items),
+        "registry": {
+            "path": str(registry_path),
+            "entry_count": len(registry),
+            "accepted_count": registry_accepted,
+            "hash_mismatch_count": registry_hash_mismatch,
+            "orphan_count": len(registry_orphans),
+            "orphan_sources": registry_orphans,
+            "errors": registry_errors,
+        },
         "items": items,
     }
 

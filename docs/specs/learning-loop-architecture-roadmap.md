@@ -33,6 +33,35 @@ framework before completing an experiment. Its implementation order is:
    The executable Phase 0 contract is
    [`phase0-evidence-capacity.md`](phase0-evidence-capacity.md). Its first slice
    is measurement-only and cannot change WATCH/BUY/SELL/portfolio behavior.
+
+### 2026-08-14 Phase 0 evidence checkpoint
+
+The exact-name maximum final-critic audit found `118` artifacts from
+`2026-04-01` through `2026-08-13`. Seventeen calendar days are missing and two
+additional days (`2026-06-10`, `2026-07-09`) fail the complete top-N integrity
+contract, leaving coverage `116/135`. Recomputed mission labels contain `256`
+watchlist-filtered exchange top movers and `153` early captures (`59.77%`),
+with a deterministic day-cluster bootstrap interval of approximately
+`51.04%..67.97%`.
+
+This is a baseline, not an improvement verdict. The conservative power report
+has `ESS=97` event-bearing days, `MDE=14.07pp` against `SESOI=5pp`, and estimated
+inconclusive probability `89.29%`; status is `UNDERPOWERED`. The nominal
+additional horizon is `672` complete event-bearing days, so the next action is
+power expansion/continuous-response design and coverage repair, not waiting two
+years or weakening the evidence gate.
+
+The maximum critic-dataset provenance audit covers `26,202` total rows and
+`22,163` labeled rows but `0` provenance-verified rows. Ranker evidence is now a
+fresh `blocked_insufficient_provenance` readiness record with
+`achievement_claimed=false` and `runtime_eligible=false`; no model artifact was
+rewritten. TH-03 is therefore a visible collection warning rather than a false
+training claim. The separate current TH-11 portfolio-alpha artifact still lacks
+`current_policy_epoch` and remains blocked in its own scope.
+
+Legacy migration assigns all `109` discovered artifacts a state. Five reviewed
+negative results pass the period/population/metric/verdict contract and exact
+source hash; `104` remain `LEGACY_UNVERIFIED`. No ambiguous prose was upgraded.
 3. **Prove the durable deterministic loop:** leases, retries and recovery reuse
    the skeleton, then one real manually/deterministically selected hypothesis
    must reach a terminal result within 30 days.

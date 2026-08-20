@@ -248,6 +248,14 @@ class CapacityAndGovernanceTest(unittest.TestCase):
         self.assertEqual(move5["action_layer"], "WATCH")
         self.assertEqual(move5["decision_use"], "steering_only")
         self.assertNotIn("BUY", move5["allowed_decisions"])
+        mission = next(
+            entry
+            for entry in registry
+            if entry["metric_id"] == "watchlist_top_early_capture_v1"
+        )
+        self.assertEqual(
+            mission["label_version"], "exchange_top_filtered_watchlist_v1"
+        )
 
     def test_harness_findings_receive_owned_non_waiving_remediation(self) -> None:
         payload = {
@@ -299,6 +307,48 @@ class CapacityAndGovernanceTest(unittest.TestCase):
             self.assertEqual(sum(inventory["state_counts"].values()), 3)
             self.assertIn("DUPLICATE", inventory["state_counts"])
             self.assertIn("LEGACY_UNVERIFIED", inventory["state_counts"])
+
+    def test_reviewed_negative_requires_matching_source_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports = root / "docs" / "reports"
+            specs = root / "docs" / "specs"
+            reports.mkdir(parents=True)
+            specs.mkdir(parents=True)
+            source = reports / "negative.md"
+            source.write_text("Result: rejected with complete evidence", encoding="utf-8")
+            source_hash = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
+            index = root / "docs" / "FEATURE_SPEC_INDEX.md"
+            index.write_text("", encoding="utf-8")
+            registry = specs / "legacy-negative-results-registry.json"
+            registry.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "entries": [
+                            {
+                                "negative_id": "negative-v1",
+                                "source": "docs/reports/negative.md",
+                                "source_sha256": source_hash,
+                                "period": {"start": "2026-01-01", "end": "2026-01-31"},
+                                "population": "all eligible cases",
+                                "metric": "registered_net_delta",
+                                "verdict": "rejected",
+                                "evidence_summary": "candidate failed the registered gate",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            inventory = migrate_legacy_research_inventory(root, index, registry)
+            self.assertEqual(inventory["state_counts"]["CONFIRMED_NEGATIVE"], 1)
+            self.assertEqual(inventory["registry"]["accepted_count"], 1)
+
+            source.write_text("changed after review", encoding="utf-8")
+            stale = migrate_legacy_research_inventory(root, index, registry)
+            self.assertEqual(stale["state_counts"]["LEGACY_UNVERIFIED"], 1)
+            self.assertEqual(stale["registry"]["hash_mismatch_count"], 1)
 
     def test_objective_report_contract_fails_closed(self) -> None:
         valid = {

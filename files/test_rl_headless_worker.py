@@ -14,6 +14,7 @@ import rl_headless_worker
 from rl_headless_worker import (
     WorkerState,
     _claim_learning_progress_telegram_slot,
+    _build_training_readiness_session_report,
     _release_learning_progress_telegram_slot,
     build_status_snapshot,
     _render_top_gainer_telegram,
@@ -28,6 +29,40 @@ from rl_headless_worker import (
 
 
 class TestDailyCriticSchedulerRecovery(unittest.TestCase):
+    def test_training_readiness_session_is_non_achievement_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dataset = Path(td) / "critic.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "ts_signal": "2026-08-03T10:00:00Z",
+                        "signal_type": "trend",
+                        "labels": {"ret_5": 1.0},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            state = WorkerState(
+                train_interval_sec=3600,
+                status_interval_sec=60,
+                min_rows=500,
+                min_new_rows=10,
+                collector_enabled=False,
+            )
+            report = _build_training_readiness_session_report(
+                state=state,
+                dataset_path=dataset,
+                critic_rows_total=1,
+                ml_rows_total=0,
+            )
+
+        self.assertEqual(report["evidence_status"], "blocked_insufficient_provenance")
+        self.assertFalse(report["achievement_claimed"])
+        self.assertFalse(report["runtime_eligible"])
+        self.assertEqual(report["critic_rows_total"], 1)
+        self.assertEqual(report["data_provenance"]["verified_rows"], 0)
+
     def test_trend_attribution_runner_enforces_bounded_positive_lookback(self) -> None:
         with patch.object(
             rl_headless_worker.report_trend_lifecycle_attribution,
@@ -81,7 +116,10 @@ class TestDailyCriticSchedulerRecovery(unittest.TestCase):
         self.assertEqual(report["rows_last_24h"], 1)
         self.assertEqual(report["actions"], {"take": 1, "blocked": 1})
         self.assertEqual(rows_total, 3)
-        self.assertEqual(ranker_rows, 1)
+        # Status uses the same fail-closed provenance population as training.
+        # The legacy labeled row is visible to the dataset report but is not a
+        # provenance-verified ranker row.
+        self.assertEqual(ranker_rows, 0)
 
     def test_missing_previous_final_is_due_after_nominal_window(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -756,6 +756,33 @@ def _build_train_session_report(
     }
 
 
+def _build_training_readiness_session_report(
+    *,
+    state: "WorkerState",
+    dataset_path: Path,
+    critic_rows_total: int,
+    ml_rows_total: int,
+) -> Dict[str, Any]:
+    readiness = ml_candidate_ranker.build_training_readiness_report(
+        dataset_path,
+        min_verified_rows=state.min_rows,
+    )
+    return {
+        **readiness,
+        "worker_started_at": state.started_at,
+        "training_run_index": state.train_runs_ok,
+        "model_name": "",
+        "rows_total": int(
+            (readiness.get("data_provenance") or {}).get("verified_rows") or 0
+        ),
+        "top1_delta": None,
+        "critic_rows_total": critic_rows_total,
+        "ml_rows_total": ml_rows_total,
+        "train_report": {},
+        "shadow_report": {},
+    }
+
+
 def _render_train_session_text(report: Dict[str, Any]) -> str:
     lines = [
         f"RL training session {report.get('training_run_index')} at {report.get('generated_at_utc')}",
@@ -1295,7 +1322,40 @@ async def _training_loop(state: WorkerState) -> None:
             _restore_training_state(state)
             rows_total = await asyncio.to_thread(_count_ranker_rows, critic_dataset.CRITIC_FILE)
             dataset_mtime = _file_mtime(critic_dataset.CRITIC_FILE)
-            if not should_train(
+            if rows_total < state.min_rows:
+                critic_rows_total = await asyncio.to_thread(
+                    _count_jsonl_rows, critic_dataset.CRITIC_FILE
+                )
+                ml_rows_total = await asyncio.to_thread(_count_jsonl_rows, ml_dataset.ML_FILE)
+                readiness_report = await asyncio.to_thread(
+                    _build_training_readiness_session_report,
+                    state=state,
+                    dataset_path=critic_dataset.CRITIC_FILE,
+                    critic_rows_total=critic_rows_total,
+                    ml_rows_total=ml_rows_total,
+                )
+                state.train_last_started_at = readiness_report.get("generated_at_utc")
+                state.train_last_finished_at = readiness_report.get("generated_at_utc")
+                state.train_last_error = ""
+                report_paths = await asyncio.to_thread(
+                    _save_train_session_report, readiness_report
+                )
+                state.latest_training_report_json = str(report_paths.get("json", ""))
+                state.latest_training_report_txt = str(report_paths.get("txt", ""))
+                state.latest_training_latest_json = str(
+                    report_paths.get("latest_json", "")
+                )
+                state.latest_training_latest_txt = str(
+                    report_paths.get("latest_txt", "")
+                )
+                log.info(
+                    "Ranker readiness blocked: verified_rows=%s minimum=%s dataset_mtime=%s",
+                    rows_total,
+                    state.min_rows,
+                    dataset_mtime,
+                )
+                await _write_status_now(state)
+            elif not should_train(
                 rows_total=rows_total,
                 min_rows=state.min_rows,
                 last_trained_rows=state.last_trained_rows,

@@ -59,6 +59,71 @@ class TruthHarnessTest(unittest.TestCase):
         self.assertTrue(truth_harness._is_runtime("files/ml_candidate_ranker_report.json"))
         self.assertFalse(truth_harness._is_runtime("files/monitor.py"))
 
+    def test_honest_blocked_training_report_is_warning_not_achievement_error(self) -> None:
+        latest = {
+            "generated_at_utc": "2026-08-14T12:00:00+00:00",
+            "evidence_status": "blocked_insufficient_provenance",
+            "runtime_eligible": False,
+            "achievement_claimed": False,
+            "dataset_watermark": {"path": "critic.jsonl", "byte_count": 10, "mtime_ns": 1},
+            "evaluation_provenance": {
+                "feature_time": "closed decision-bar cutoff required per row",
+                "label_time": "mature future-label availability required per row",
+                "label_definition": {"ret_5": "exact T+5 closed bar"},
+                "evaluation_scope": "not_evaluated_insufficient_provenance",
+                "cross_split_group_overlap_count": 0,
+                "data_provenance": {
+                    "labeled_rows": 100,
+                    "verified_rows": 0,
+                    "legacy_unknown_rows": 100,
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / ".runtime" / "reports"
+            reports.mkdir(parents=True)
+            (reports / "rl_train_latest.json").write_text(
+                json.dumps(latest), encoding="utf-8"
+            )
+            audit = truth_harness.Audit("full")
+            truth_harness.audit_model_provenance(audit, root)
+
+        self.assertFalse(any(f.severity == "error" for f in audit.findings))
+        self.assertTrue(
+            any(
+                f.check_id == "TH03_MODEL_PROVENANCE" and f.severity == "warning"
+                for f in audit.findings
+            )
+        )
+
+    def test_blocked_training_report_cannot_be_runtime_eligible(self) -> None:
+        latest = {
+            "generated_at_utc": "2026-08-14T12:00:00+00:00",
+            "evidence_status": "blocked_insufficient_provenance",
+            "runtime_eligible": True,
+            "achievement_claimed": False,
+            "dataset_watermark": {"path": "critic.jsonl", "byte_count": 10, "mtime_ns": 1},
+            "evaluation_provenance": {
+                "feature_time": "required",
+                "label_time": "required",
+                "label_definition": {"ret_5": "required"},
+                "evaluation_scope": "not_evaluated_insufficient_provenance",
+                "data_provenance": {"labeled_rows": 1, "verified_rows": 0},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / ".runtime" / "reports"
+            reports.mkdir(parents=True)
+            (reports / "rl_train_latest.json").write_text(
+                json.dumps(latest), encoding="utf-8"
+            )
+            audit = truth_harness.Audit("full")
+            truth_harness.audit_model_provenance(audit, root)
+
+        self.assertTrue(any(f.severity == "error" for f in audit.findings))
+
     def test_model_provenance_rejects_overlap_and_empty_verified_cohort(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
