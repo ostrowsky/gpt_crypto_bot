@@ -3382,8 +3382,12 @@ async def run_replay(
     portfolio_initial_capital: float = 10_000.0,
     portfolio_fee_bps: float | None = None,
     portfolio_slippage_bps: float = 5.0,
+    end_at: datetime | None = None,
 ) -> dict:
-    end = datetime.now(timezone.utc)
+    end = end_at or datetime.now(timezone.utc)
+    if end.tzinfo is None:
+        raise ValueError("end_at must be timezone-aware")
+    end = end.astimezone(timezone.utc)
     start = end - timedelta(days=days)
     start_ms = int(start.timestamp() * 1000)
     end_ms = int(end.timestamp() * 1000)
@@ -3660,11 +3664,13 @@ def render_text(report: dict) -> str:
         if alpha:
             portfolio = alpha.get("portfolio") or {}
             benchmark = alpha.get("benchmark") or {}
+            alpha_value = alpha.get("net_alpha_after_costs")
+            alpha_text = "n/a" if alpha_value is None else f"{float(alpha_value):+.4f}%"
             lines.append(
                 "  Canonical alpha: "
                 f"portfolio={portfolio.get('net_return_after_costs_pct', 0.0):+.4f}% "
                 f"benchmark={benchmark.get('net_return_after_costs_pct', 0.0):+.4f}% "
-                f"alpha={alpha.get('net_alpha_after_costs', 0.0):+.4f}% "
+                f"alpha={alpha_text} "
                 f"grade={alpha.get('evidence_grade', 'diagnostic')}"
             )
         for key in ("ret_3", "ret_5", "ret_10"):
@@ -3713,9 +3719,25 @@ def render_text(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _parse_end_at(raw: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"invalid --end-at timestamp: {raw!r}") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("--end-at must be timezone-aware")
+    return parsed.astimezone(timezone.utc)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Replay strategy backtest on Binance historical candles")
     parser.add_argument("--days", type=int, default=7)
+    parser.add_argument(
+        "--end-at",
+        type=_parse_end_at,
+        default=None,
+        help="timezone-aware UTC/ISO cutoff for the maximum-available replay window",
+    )
     parser.add_argument("--symbols", nargs="*", default=None)
     parser.add_argument("--timeframes", nargs="*", default=["15m", "1h"])
     parser.add_argument("--max-open-positions", type=int, default=getattr(config, "MAX_OPEN_POSITIONS", 6))
@@ -3798,6 +3820,7 @@ def main() -> None:
             portfolio_initial_capital=args.portfolio_initial_capital,
             portfolio_fee_bps=args.portfolio_fee_bps,
             portfolio_slippage_bps=args.portfolio_slippage_bps,
+            end_at=args.end_at,
         )
     )
     if args.portfolio_alpha_output is not None:

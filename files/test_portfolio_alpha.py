@@ -6,7 +6,15 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from portfolio_alpha import BENCHMARK_NAME, evaluate_portfolio_alpha
-from replay_backtest import ReplayRunStats, ReplayTrade, _make_report, parse_args, run_replay
+from replay_backtest import (
+    ReplayRunStats,
+    ReplayTrade,
+    _make_report,
+    _parse_end_at,
+    parse_args,
+    render_text,
+    run_replay,
+)
 
 
 DAY_MS = 86_400_000
@@ -93,6 +101,48 @@ class PortfolioAlphaTest(unittest.TestCase):
         self.assertEqual(args.portfolio_fee_bps, 8.0)
         self.assertEqual(args.portfolio_slippage_bps, 6.0)
         self.assertTrue(str(args.portfolio_alpha_output).endswith("canonical_portfolio_alpha.json"))
+
+    def test_replay_accepts_explicit_timezone_aware_end_cutoff(self) -> None:
+        parsed = _parse_end_at("2026-08-13T18:22:00Z")
+        self.assertEqual(parsed, datetime(2026, 8, 13, 18, 22, tzinfo=timezone.utc))
+        with self.assertRaisesRegex(ValueError, "timezone-aware"):
+            _parse_end_at("2026-08-13T18:22:00")
+
+    def test_incomplete_portfolio_alpha_renders_without_false_numeric_claim(self) -> None:
+        report = {
+            "window_start": "x",
+            "window_end": "y",
+            "symbols": [],
+            "timeframes": ["15m"],
+            "max_open_positions": 10,
+            "replace_min_delta": 8.0,
+            "reports": {"portfolio": {
+                "trades_total": 0,
+                "totals": {"pnl_total": 0.0, "pnl_avg": 0.0, "win_rate": 0.0},
+                "run_stats": {
+                    "candidates_total": 0,
+                    "skipped_portfolio_full": 0,
+                    "replacements_total": 0,
+                },
+                "objective": {
+                    "symbol_precision": 0.0,
+                    "trade_precision": 0.0,
+                    "capture_rate": 0.0,
+                    "captured_top_symbols": [],
+                    "final_top_n": 0,
+                },
+                "summary": {},
+                "suggestions": [],
+                "portfolio_alpha": {
+                    "portfolio": {"net_return_after_costs_pct": 0.0},
+                    "benchmark": {"status": "insufficient_data"},
+                    "net_alpha_after_costs": None,
+                    "evidence_grade": "diagnostic",
+                },
+            }},
+        }
+        text = render_text(report)
+        self.assertIn("alpha=n/a", text)
 
     def test_paired_replay_comparison_uses_capital_weighted_alpha(self) -> None:
         import numpy as np

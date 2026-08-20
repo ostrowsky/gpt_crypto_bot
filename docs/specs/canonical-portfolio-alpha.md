@@ -99,6 +99,13 @@ production hypothesis.
   consistency, checks the current policy epoch, and refuses a stale/newer
   malformed artifact instead of falling back to an older valid file.
 - A maximum-period full-watchlist run produces the standalone artifact.
+- The replay accepts an explicit timezone-aware `--end-at` cutoff so a data
+  outage after the last complete market bar cannot turn "maximum available"
+  into an empty wall-clock window. The requested cutoff is recorded in the
+  artifact; it may move the window backward but may not shorten the registered
+  30-day period.
+- Diagnostic/incomplete artifacts render safely with `n/a` alpha instead of
+  crashing after the JSON has been written.
 - The final result is reported as evidence, not as a live-policy promotion.
 
 ## Risks and trade-offs
@@ -117,7 +124,7 @@ Run:
 
 ```powershell
 pyembed\python.exe -m unittest files.test_portfolio_alpha files.test_truth_harness
-pyembed\python.exe files\replay_backtest.py --days 30 --max-open-positions 10 --variant replacement_block_non_losing --top-gainer-score-min 34 --objective-top-n 15 --no-baseline --portfolio-alpha-output .runtime\reports\canonical_portfolio_alpha_30d_latest.json --json
+pyembed\python.exe files\replay_backtest.py --days 30 --end-at <latest-complete-UTC-cutoff> --max-open-positions 10 --variant replacement_block_non_losing --top-gainer-score-min 34 --objective-top-n 15 --no-baseline --portfolio-alpha-output .runtime\reports\canonical_portfolio_alpha_30d_latest.json --json
 pyembed\python.exe files\truth_harness.py full
 ```
 
