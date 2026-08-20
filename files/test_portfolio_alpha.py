@@ -273,6 +273,38 @@ class PortfolioAlphaTest(unittest.TestCase):
         self.assertGreater(payload["portfolio"]["slippage_quote"], 0.0)
         self.assertEqual(payload["benchmark"]["name"], BENCHMARK_NAME)
 
+    def test_same_timestamp_boundary_liquidation_closes_after_its_entry(self) -> None:
+        benchmark = _series([100.0] * 31)
+        trade = _trade(
+            "ETHUSDT",
+            entry_ts=31 * DAY_MS,
+            exit_ts=31 * DAY_MS,
+            entry_price=100.0,
+            exit_price=100.0,
+        )
+        payload = evaluate_portfolio_alpha(
+            [trade],
+            price_series_by_symbol={"ETHUSDT": benchmark},
+            benchmark_series=benchmark,
+            window_start_ms=0,
+            window_end_ms=31 * DAY_MS,
+            requested_days=30,
+            universe=["BTCUSDT", "ETHUSDT"],
+            variant="boundary-liquidation-test",
+            fee_bps=7.5,
+            slippage_bps=5.0,
+            policy_manifest=_manifest(),
+        )
+
+        self.assertTrue(payload["decision_grade"])
+        self.assertFalse(
+            any(
+                row.startswith("open_positions_at_end")
+                for row in payload["coverage"]["contract_violations"]
+            )
+        )
+        self.assertLess(payload["portfolio"]["net_return_after_costs_pct"], 0.0)
+
     def test_complete_max_period_ten_slot_contract_is_decision_grade(self) -> None:
         benchmark = _series([100.0 + idx for idx in range(31)])
         trade = _trade(

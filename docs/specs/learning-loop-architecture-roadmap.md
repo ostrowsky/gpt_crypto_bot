@@ -439,6 +439,23 @@ candidates and 6 mature T+10 labels versus a minimum of 30 over 5 days. Its
 average T+10 partial delta is currently `-0.0013%` and median is `+0.0552%`.
 Both remain shadow-only.
 
+## 2026-08-21 Objective Leader Admission Checkpoint
+
+Three materially different causal profiles were tested over the frozen
+maximum 30-day, 105-symbol, ten-slot replay: a quality-bounded continuation
+chase bypass, a reserved objective-leader slot, and their interaction. All
+retained 15/15 Top-15 recall, but none improved the mission gate. Against the
+same-snapshot production control, average capture changed from 16.38% to
+16.28%, 16.48%, and 16.41%; median capture remained 0% and median lead remained
+570 minutes. The reserve admitted only one leader while suppressing 2,064
+ordinary candidates; the combined profile admitted two while suppressing
+2,144. Their lower drawdown is inactivity, not evidence of better leader
+capture. A same-timestamp boundary-accounting defect was repaired and the four
+canonical reports are now decision-grade with complete coverage and no
+contract violations. Reject all profiles and do not change production. Next
+priority is causal ranking among simultaneous admissible candidates with
+explicit incumbent/candidate regret attribution.
+
 The replacement stability audit was also refreshed over 510 closed cases. Its
 recent slice remains favorable, but train still fails median, positive-rate,
 and regret gates, while holdout blocked-positive regret is `53.85%`. Keep the

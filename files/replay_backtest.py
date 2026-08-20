@@ -165,6 +165,8 @@ class ReplayRunStats:
     btc_1h_leader_admitted: int = 0
     btc_benchmark_policy_admitted: int = 0
     btc_benchmark_replacements: int = 0
+    objective_slot_reserved_skips: int = 0
+    objective_slot_admitted: int = 0
 
 
 def _load_ml_model_payload() -> dict:
@@ -2198,6 +2200,9 @@ async def _build_candidates_for_symbol(
                 mode=mode,
                 rsi=rsi,
                 daily_range=daily_range,
+                candidate_score=candidate_score,
+                adx=adx,
+                vol_x=preview_vol,
             ):
                 continue
             if _top_gainer_objective_gate_reason(
@@ -2552,7 +2557,13 @@ def _replacement_policy_block_reason(
     These variants are intentionally causal: they use only fields available at
     rotation time, not future top-mover labels or later trade outcomes.
     """
-    if variant in {"replacement_block_non_losing", "score_replace_cluster_non_losing"} and replaced_pnl_pct >= 0.0:
+    if variant in {
+        "replacement_block_non_losing",
+        "score_replace_cluster_non_losing",
+        "chase_guard_strong_continuation",
+        "objective_slot_reserve",
+        "objective_leader_combined",
+    } and replaced_pnl_pct >= 0.0:
         return f"block non-losing replacement pnl={replaced_pnl_pct:.2f}%"
     if variant == "replacement_block_leader_delta_lt_10" and leader_delta < 10.0:
         return f"block low leader delta {leader_delta:.2f} < 10.00"
@@ -2572,6 +2583,9 @@ def _chase_guard_reason_for_replay_variant(
     mode: str,
     rsi: float,
     daily_range: float,
+    candidate_score: float = 0.0,
+    adx: float = 0.0,
+    vol_x: float = 0.0,
 ) -> Optional[str]:
     """Replay-only chase-guard variants.
 
@@ -2600,7 +2614,40 @@ def _chase_guard_reason_for_replay_variant(
         finally:
             config.TOP_GAINER_CHASE_GUARD_ENABLED = original_enabled
             config.TOP_GAINER_CHASE_GUARD_MAX_RSI = original_rsi_max
+    if variant in {"chase_guard_strong_continuation", "objective_leader_combined"}:
+        baseline_reason = _top_gainer_chase_guard_reason(
+            tf=tf,
+            mode=mode,
+            rsi=rsi,
+            daily_range=daily_range,
+        )
+        if baseline_reason is None:
+            return None
+        hard_range_max = float(
+            getattr(config, "TOP_GAINER_CHASE_GUARD_MAX_DAILY_RANGE_PCT", 25.0)
+        )
+        continuation_ok = (
+            mode in {"strong_trend", "impulse_speed"}
+            and float(rsi) <= 82.0
+            and float(daily_range) <= hard_range_max
+            and float(candidate_score) >= 150.0
+            and float(adx) >= 20.0
+            and float(vol_x) >= 1.2
+        )
+        return None if continuation_ok else baseline_reason
     return _top_gainer_chase_guard_reason(tf=tf, mode=mode, rsi=rsi, daily_range=daily_range)
+
+
+def _objective_leader_replay_candidate_ok(candidate: ReplayCandidate) -> bool:
+    """Return whether a candidate may consume the research-only reserved slot."""
+    return (
+        float(candidate.top_gainer_score) >= 80.0
+        and float(candidate.intraday_change_pct) >= 1.0
+        and float(candidate.daily_range) <= 12.0
+        and float(candidate.rsi) <= 76.0
+        and float(candidate.adx) >= 20.0
+        and float(candidate.vol_x) >= 1.2
+    )
 
 
 def _series_price_at_or_before(
@@ -3000,6 +3047,9 @@ async def simulate_portfolio(
             "chase_guard_off",
             "chase_guard_rsi_off",
             "chase_guard_rsi_82",
+            "chase_guard_strong_continuation",
+            "objective_slot_reserve",
+            "objective_leader_combined",
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",
@@ -3124,6 +3174,24 @@ async def simulate_portfolio(
                         continue
 
             effective_max_positions = max_open_positions
+            objective_reserve_variant = variant in {
+                "objective_slot_reserve",
+                "objective_leader_combined",
+            }
+            objective_leader = (
+                objective_reserve_variant
+                and _objective_leader_replay_candidate_ok(candidate)
+            )
+            if (
+                objective_reserve_variant
+                and not objective_leader
+                and len(open_positions) >= max(1, max_open_positions - 1)
+            ):
+                stats.objective_slot_reserved_skips += 1
+                stats.skipped_portfolio_full += 1
+                continue
+            if objective_leader and len(open_positions) == max(1, max_open_positions - 1):
+                stats.objective_slot_admitted += 1
             reserve_slots = int(getattr(config, "FRESH_SIGNAL_RESERVED_SLOTS", 0))
             if reserve_slots > 0 and not _is_fresh_priority_mode(candidate.mode):
                 effective_max_positions = max(1, max_open_positions - reserve_slots)
@@ -3416,6 +3484,8 @@ def _make_report(
             "btc_1h_leader_admitted": run_stats.btc_1h_leader_admitted,
             "btc_benchmark_policy_admitted": run_stats.btc_benchmark_policy_admitted,
             "btc_benchmark_replacements": run_stats.btc_benchmark_replacements,
+            "objective_slot_reserved_skips": run_stats.objective_slot_reserved_skips,
+            "objective_slot_admitted": run_stats.objective_slot_admitted,
         },
         "summary": summary,
         "objective": objective,
@@ -3541,6 +3611,9 @@ async def run_replay(
         "chase_guard_off",
         "chase_guard_rsi_off",
         "chase_guard_rsi_82",
+        "chase_guard_strong_continuation",
+        "objective_slot_reserve",
+        "objective_leader_combined",
         "btc_cluster_exempt",
         "btc_1h_leader_admission",
         "btc_benchmark_combined",
@@ -3885,6 +3958,9 @@ def parse_args() -> argparse.Namespace:
             "chase_guard_off",
             "chase_guard_rsi_off",
             "chase_guard_rsi_82",
+            "chase_guard_strong_continuation",
+            "objective_slot_reserve",
+            "objective_leader_combined",
             "btc_cluster_exempt",
             "btc_1h_leader_admission",
             "btc_benchmark_combined",

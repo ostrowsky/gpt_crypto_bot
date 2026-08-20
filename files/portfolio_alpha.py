@@ -189,7 +189,11 @@ def _simulate_account(
         partial_taken = bool(_trade_value(trade, "partial_exit_taken", False))
         if partial_taken and 0.0 < partial_fraction < 1.0 and entry_ts <= partial_ts <= exit_ts and partial_price > 0:
             events.setdefault(partial_ts, []).append((0, trade_id, "partial", partial_price))
-        events.setdefault(exit_ts, []).append((1, trade_id, "exit", exit_price))
+        # Preserve the normal portfolio ordering (older exits before new entries),
+        # but a boundary-liquidated trade must exist before its own same-timestamp
+        # exit is booked. Otherwise the later entry becomes a phantom open position.
+        exit_priority = 3 if exit_ts == entry_ts else 1
+        events.setdefault(exit_ts, []).append((exit_priority, trade_id, "exit", exit_price))
 
     def liquidation_equity(ts_ms: int) -> tuple[float, float, bool]:
         equity = cash

@@ -93,6 +93,10 @@ production hypothesis.
 
 - Unit tests prove capital weighting, two-sided costs, benchmark parity,
   symbol/capacity fail-closed behavior, and decision-grade gating.
+- A trade opened on the final replay timestamp and liquidated at the same
+  frozen boundary is booked entry-before-exit for that trade, while exits from
+  older positions still precede new admissions. It pays both-side costs and
+  must not leave a phantom `open_positions_at_end` violation.
 - Replay JSON exposes the canonical result without removing compatibility
   fields.
 - Truth Harness TH-11 validates the complete contract, recomputes alpha
