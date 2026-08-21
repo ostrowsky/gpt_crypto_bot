@@ -3438,22 +3438,89 @@ def _make_report(
     trades: List[ReplayTrade],
     run_stats: ReplayRunStats,
     label: str,
-    final_top_symbols: Optional[set[str]] = None,
+    daily_objective: Optional[dict] = None,
 ) -> dict:
     summary = summarize_trades(trades)
-    final_top_symbols = final_top_symbols or set()
-    traded_symbols = {t.sym for t in trades}
-    captured_symbols = sorted(traded_symbols & final_top_symbols)
+    daily_objective = daily_objective or {}
+    label_pairs = set(daily_objective.get("label_pairs") or set())
+    eligible_days = set(daily_objective.get("eligible_days") or [])
+    first_trade_by_pair: Dict[Tuple[str, str], ReplayTrade] = {}
+    eligible_trades: List[ReplayTrade] = []
+    for trade in sorted(trades, key=lambda row: row.entry_ts):
+        local_entry = datetime.fromtimestamp(trade.entry_ts / 1000, tz=timezone.utc).astimezone(_objective_tz())
+        cutoff = datetime.combine(
+            local_entry.date(),
+            datetime.min.time().replace(hour=OBJECTIVE_CUTOFF_HOUR),
+            tzinfo=_objective_tz(),
+        )
+        day_key = local_entry.date().isoformat()
+        if day_key not in eligible_days or local_entry > cutoff:
+            continue
+        eligible_trades.append(trade)
+        first_trade_by_pair.setdefault((day_key, trade.sym), trade)
+
+    captured_pairs = sorted(label_pairs & set(first_trade_by_pair))
+    captured_rows = [first_trade_by_pair[pair] for pair in captured_pairs]
+    early_rows = [
+        row for row in captured_rows
+        if row.capture_ratio_at_entry is not None and row.capture_ratio_at_entry >= 0.35
+    ]
+    objective_trades = [
+        row for row in eligible_trades
+        if (
+            datetime.fromtimestamp(row.entry_ts / 1000, tz=timezone.utc)
+            .astimezone(_objective_tz()).date().isoformat(),
+            row.sym,
+        ) in label_pairs
+    ]
+    traded_symbols = {row.sym for row in eligible_trades}
+    objective_symbols = {sym for _, sym in label_pairs}
+    captured_symbols = sorted({sym for _, sym in captured_pairs})
+    label_pair_count = len(label_pairs)
+    eligible_trade_count = len(eligible_trades)
+    objective_top_n = int(daily_objective.get("top_n") or 0)
+    expected_label_pair_count = len(eligible_days) * objective_top_n
+    objective_decision_grade = bool(
+        eligible_days
+        and objective_top_n > 0
+        and label_pair_count == expected_label_pair_count
+    )
     objective = {
-        "final_top_n": len(final_top_symbols),
+        "schema": "same_day_watchlist_top_at_22_v1",
+        "timezone": OBJECTIVE_TZ,
+        "cutoff_hour": OBJECTIVE_CUTOFF_HOUR,
+        "evidence_grade": "decision" if objective_decision_grade else "diagnostic",
+        "decision_grade": objective_decision_grade,
+        "coverage_status": "complete_available_population" if objective_decision_grade else "insufficient",
+        "objective_top_n_per_day": objective_top_n,
+        "eligible_day_count": len(eligible_days),
+        "eligible_days": sorted(eligible_days),
+        "excluded_boundary_day_count": int(daily_objective.get("excluded_boundary_day_count") or 0),
+        "label_pair_count": label_pair_count,
+        "expected_label_pair_count": expected_label_pair_count,
+        "captured_pair_count": len(captured_pairs),
+        "early_pair_count": len(early_rows),
+        "eligible_trade_count": eligible_trade_count,
+        "objective_trade_count": len(objective_trades),
+        # Compatibility key: this is now the day-symbol denominator, not one
+        # whole-window set of unique symbols.
+        "final_top_n": label_pair_count,
         "captured_top_symbols": captured_symbols,
-        "capture_rate": round(len(captured_symbols) / len(final_top_symbols), 4) if final_top_symbols else 0.0,
-        "symbol_precision": round(len(captured_symbols) / len(traded_symbols), 4) if traded_symbols and final_top_symbols else 0.0,
-        "trade_precision": round(
-            sum(1 for t in trades if t.sym in final_top_symbols) / len(trades),
-            4,
-        ) if trades and final_top_symbols else 0.0,
-        "non_objective_symbols": sorted(traded_symbols - final_top_symbols),
+        "capture_rate": round(len(captured_pairs) / label_pair_count, 4) if label_pair_count else None,
+        "early_capture_rate": round(len(early_rows) / label_pair_count, 4) if label_pair_count else None,
+        "symbol_precision": round(len(captured_symbols) / len(traded_symbols), 4) if traded_symbols and label_pair_count else None,
+        "trade_precision": round(len(objective_trades) / eligible_trade_count, 4) if eligible_trade_count and label_pair_count else None,
+        "captured_pair_capture_ratio": _metric_stats([
+            row.capture_ratio_at_entry for row in captured_rows if row.capture_ratio_at_entry is not None
+        ]),
+        "captured_pair_lead_time_to_final_top_min": _metric_stats([
+            row.lead_time_to_final_top_min for row in captured_rows if row.lead_time_to_final_top_min is not None
+        ]),
+        "available_symbol_count_by_day": dict(daily_objective.get("available_symbol_count_by_day") or {}),
+        "minimum_available_symbol_count": daily_objective.get("minimum_available_symbol_count"),
+        "maximum_available_symbol_count": daily_objective.get("maximum_available_symbol_count"),
+        "requested_symbol_count": int(daily_objective.get("requested_symbol_count") or len(symbols)),
+        "non_objective_symbols": sorted(traded_symbols - objective_symbols),
     }
     return {
         "label": label,
@@ -3494,30 +3561,85 @@ def _make_report(
     }
 
 
-def _final_top_symbols(
+def _daily_top_objective(
     symbols: List[str],
     cache: Dict[Tuple[str, str], Tuple[np.ndarray, dict]],
-    top_n: int = 10,
-) -> set[str]:
-    ranked: List[tuple[float, str]] = []
-    for sym in symbols:
-        item = cache.get((sym, "15m"))
-        if not item:
+    *,
+    start_ms: int,
+    end_ms: int,
+    top_n: int,
+) -> dict:
+    """Build evaluator-only same-day leader labels on complete local days."""
+    tz = _objective_tz()
+    start_date = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc).astimezone(tz).date()
+    end_date = datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc).astimezone(tz).date()
+    day = start_date
+    label_pairs: set[Tuple[str, str]] = set()
+    eligible_days: List[str] = []
+    available_by_day: Dict[str, int] = {}
+    excluded_boundary_days = 0
+    requested_top_n = max(0, int(top_n))
+
+    while day <= end_date:
+        day_start = datetime.combine(day, datetime.min.time(), tzinfo=tz)
+        cutoff = datetime.combine(
+            day,
+            datetime.min.time().replace(hour=OBJECTIVE_CUTOFF_HOUR),
+            tzinfo=tz,
+        )
+        day_start_ms = int(day_start.astimezone(timezone.utc).timestamp() * 1000)
+        cutoff_ms = int(cutoff.astimezone(timezone.utc).timestamp() * 1000)
+        if day_start_ms < start_ms or cutoff_ms > end_ms:
+            excluded_boundary_days += 1
+            day += timedelta(days=1)
             continue
-        data, _ = item
-        try:
-            c_arr = data["c"]
-        except Exception:
-            c_arr = None
-        if c_arr is None or len(c_arr) < 3:
-            continue
-        start_price = float(c_arr[0])
-        end_price = float(c_arr[-2])
-        if start_price <= 0 or not np.isfinite(start_price) or not np.isfinite(end_price):
-            continue
-        ranked.append(((end_price / start_price - 1.0) * 100.0, sym))
-    ranked.sort(reverse=True)
-    return {sym for _, sym in ranked[:top_n]}
+
+        ranked: List[Tuple[float, str]] = []
+        for sym in symbols:
+            item = cache.get((sym, "15m"))
+            if not item:
+                continue
+            data, _ = item
+            if len(data) == 0:
+                continue
+            times = data["t"]
+            indices = np.where(
+                (times >= day_start_ms)
+                & ((times + BAR_MS["15m"]) <= cutoff_ms)
+            )[0]
+            if len(indices) == 0:
+                continue
+            first_idx = int(indices[0])
+            last_idx = int(indices[-1])
+            first_gap = int(times[first_idx]) - day_start_ms
+            last_gap = cutoff_ms - (int(times[last_idx]) + BAR_MS["15m"])
+            if first_gap > BAR_MS["15m"] or last_gap > BAR_MS["15m"]:
+                continue
+            open_price = float(data["o"][first_idx])
+            final_price = float(data["c"][last_idx])
+            if open_price <= 0 or not np.isfinite(open_price) or not np.isfinite(final_price):
+                continue
+            ranked.append(((final_price / open_price - 1.0) * 100.0, sym))
+
+        if requested_top_n > 0 and ranked:
+            ranked.sort(reverse=True)
+            day_key = day.isoformat()
+            eligible_days.append(day_key)
+            available_by_day[day_key] = len(ranked)
+            label_pairs.update((day_key, sym) for _, sym in ranked[:requested_top_n])
+        day += timedelta(days=1)
+
+    return {
+        "schema": "same_day_watchlist_top_at_22_v1",
+        "top_n": requested_top_n,
+        "eligible_days": eligible_days,
+        "label_pairs": label_pairs,
+        "available_symbol_count_by_day": available_by_day,
+        "minimum_available_symbol_count": min(available_by_day.values()) if available_by_day else None,
+        "maximum_available_symbol_count": max(available_by_day.values()) if available_by_day else None,
+        "requested_symbol_count": len(symbols),
+        "excluded_boundary_day_count": excluded_boundary_days,
+    }
 
 
 async def run_replay(
@@ -3594,7 +3716,13 @@ async def run_replay(
     cache_15m = {sym: cache[(sym, "15m")] for sym in symbols if (sym, "15m") in cache}
     cache_4h = {sym: cache[(sym, "4h")] for sym in symbols if (sym, "4h") in cache}
     market_ctx = _build_bull_day_context(cache.get(("BTCUSDT", "1h"), (None, None))[0] if ("BTCUSDT", "1h") in cache else None)
-    final_top_symbols = _final_top_symbols(symbols, cache, top_n=objective_top_n)
+    daily_objective = _daily_top_objective(
+        symbols,
+        cache,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        top_n=objective_top_n,
+    )
     enable_replacement = variant in {
         "score_replace",
         "score_replace_cluster",
@@ -3643,7 +3771,7 @@ async def run_replay(
             trades=portfolio_trades,
             run_stats=portfolio_stats,
             label="portfolio",
-            final_top_symbols=final_top_symbols,
+            daily_objective=daily_objective,
         )
     }
 
@@ -3722,7 +3850,7 @@ async def run_replay(
             trades=control_trades,
             run_stats=control_stats,
             label=f"control:{compare_variant}",
-            final_top_symbols=final_top_symbols,
+            daily_objective=daily_objective,
         )
         reports["control"]["portfolio_alpha"] = build_portfolio_alpha(
             control_trades,
@@ -3751,7 +3879,7 @@ async def run_replay(
             trades=baseline_trades,
             run_stats=baseline_stats,
             label="baseline",
-            final_top_symbols=final_top_symbols,
+            daily_objective=daily_objective,
         )
         reports["baseline"]["portfolio_alpha"] = build_portfolio_alpha(
             baseline_trades,
@@ -3823,6 +3951,9 @@ async def run_replay(
 
 
 def render_text(report: dict) -> str:
+    def pct(value: object) -> str:
+        return "n/a" if value is None else f"{float(value):.1%}"
+
     lines = [
         "Replay Backtest",
         f"Window: {report['window_start']} .. {report['window_end']}",
@@ -3840,7 +3971,11 @@ def render_text(report: dict) -> str:
                 f"  Trades: {sub['trades_total']}",
                 f"  Diagnostic trade sum: pnl_total={totals['pnl_total']:+.4f}% pnl_avg={totals['pnl_avg']:+.4f}% win_rate={totals['win_rate']:.1%}",
                 f"  Flow: candidates={run_stats['candidates_total']} skipped_full={run_stats['skipped_portfolio_full']} replacements={run_stats['replacements_total']}",
-                f"  Objective: symbol_precision={sub['objective']['symbol_precision']:.1%} trade_precision={sub['objective']['trade_precision']:.1%} recall={sub['objective']['capture_rate']:.1%} captured={len(sub['objective']['captured_top_symbols'])}/{sub['objective']['final_top_n']}",
+                "  Objective: "
+                f"trade_precision={pct(sub['objective'].get('trade_precision'))} "
+                f"recall={pct(sub['objective'].get('capture_rate'))} "
+                f"early={pct(sub['objective'].get('early_capture_rate'))} "
+                f"captured={sub['objective'].get('captured_pair_count', 0)}/{sub['objective'].get('label_pair_count', sub['objective'].get('final_top_n', 0))}",
                 f"  Score/cluster skips: score={run_stats.get('skipped_top_gainer_score', 0)} cluster={run_stats.get('skipped_cluster_cap', 0)}",
                 f"  Cooldown harm: skips={run_stats.get('cooldown_skipped_candidates', 0)} positive={run_stats.get('cooldown_positive_skips', 0)} harm={run_stats.get('cooldown_harm_pct', 0.0):+.4f}%",
                 "  By mode:",

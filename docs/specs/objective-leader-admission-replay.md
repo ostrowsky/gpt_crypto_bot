@@ -1,7 +1,7 @@
 # Objective Leader Admission Replay
 
 Date: 2026-08-21
-Status: maximum-period replay complete; all variants rejected; production policy unchanged
+Status: old objective evidence superseded; variants remain disabled pending corrected daily-label replay
 
 ## Problem
 
@@ -98,6 +98,12 @@ by these replay variants.
 - TH-12: spec, focused tests, maximum-period replay, staged Harness.
 
 ## Maximum-period result
+
+> Superseded measurement: this section used one set of 15 symbols ranked over
+> the whole 30-day window and all-trade capture averages. It is retained under
+> TH-08 as historical negative evidence, but none of its recall/capture values
+> may support promotion. The corrected contract and production control are in
+> `docs/specs/daily-watchlist-objective-replay.md`.
 
 Frozen requested window: `2026-07-21T09:00:00Z` through
 `2026-08-20T09:00:00Z`; 105 symbols; `15m` and `1h`; ten slots; Top-15

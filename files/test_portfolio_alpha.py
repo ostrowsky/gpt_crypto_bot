@@ -198,7 +198,7 @@ class PortfolioAlphaTest(unittest.TestCase):
             "replay_backtest.compute_features", return_value={}
         ), patch("replay_backtest.simulate_portfolio", side_effect=fake_simulate), patch(
             "replay_backtest._build_bull_day_context", return_value=None
-        ), patch("replay_backtest._final_top_symbols", return_value=set()):
+        ), patch("replay_backtest._daily_top_objective", return_value={}):
             report = asyncio.run(
                 run_replay(
                     ["BTCUSDT"], 30, ["15m"], max_open_positions=10,

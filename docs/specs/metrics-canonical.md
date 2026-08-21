@@ -18,6 +18,11 @@ between incompatible success definitions.
 | Does trading beat the alternative use of capital? | `net_alpha_after_costs` | net portfolio return, named benchmark return, fees, slippage, drawdown | Must use the canonical unified ten-slot capital curve. Sum of per-trade percentages is not portfolio return. |
 | Is the evaluator trustworthy today? | `coverage.status` | event-file presence, trades paired, candle coverage | A zero report is not automatically informative. |
 
+Replay `capture_rate`, `early_captures`, and `trade_precision` use the
+`same_day_watchlist_top_at_22_v1` population: complete local days, daily
+watchlist Top-N day-symbol labels, and entries no later than 22:00
+`Europe/Budapest`. A whole-window set of best symbols is not the same metric.
+
 ## Decision Rules
 
 1. Prefer the canonical metric for the question being answered.

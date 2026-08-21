@@ -441,6 +441,10 @@ Both remain shadow-only.
 
 ## 2026-08-21 Objective Leader Admission Checkpoint
 
+The objective values in this checkpoint were later superseded by the daily
+watchlist objective correction below. The variants remain disabled; their
+mission comparison must be rerun before any conclusion is reused.
+
 Three materially different causal profiles were tested over the frozen
 maximum 30-day, 105-symbol, ten-slot replay: a quality-bounded continuation
 chase bypass, a reserved objective-leader slot, and their interaction. All
@@ -455,6 +459,19 @@ canonical reports are now decision-grade with complete coverage and no
 contract violations. Reject all profiles and do not change production. Next
 priority is causal ranking among simultaneous admissible candidates with
 explicit incumbent/candidate regret attribution.
+
+## 2026-08-21 Daily Objective Denominator Correction
+
+Replay measurement was found to rank one Top-15 set over the whole 30-day
+window and average capture over all trades. This did not represent the bot's
+same-day watchlist mission. The corrected decision-grade control covers 29
+complete local days and 435 Top-15 day-symbol labels: captured `353/435`
+(`81.15%`), early `132/435` (`30.34%`), with trade precision `828/1509`
+(`54.87%`). Captured-pair median capture is `21.43%`. Daily available symbols
+range down to 91 of 105 requested, so coverage remains explicit. The portfolio
+guardrail is still weak: net `-47.2765%`, BTC-relative alpha `-55.1296pp`, and
+drawdown `51.0277%`. All later ranking work must use daily pair labels; prior
+whole-window `15/15` claims are superseded.
 
 The replacement stability audit was also refreshed over 510 closed cases. Its
 recent slice remains favorable, but train still fails median, positive-rate,
