@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean, median
@@ -72,6 +72,7 @@ class ReplayTrade:
     ranker_final_score: float = 0.0
     ranker_top_gainer_prob: float = 0.0
     top_gainer_score: float = 0.0
+    allocation_score: float = 0.0
     entry_rsi: float = 50.0
     entry_daily_range: float = 0.0
     entry_intraday_change_pct: float = 0.0
@@ -167,6 +168,8 @@ class ReplayRunStats:
     btc_benchmark_replacements: int = 0
     objective_slot_reserved_skips: int = 0
     objective_slot_admitted: int = 0
+    capacity_competition_events: List[dict] = field(default_factory=list)
+    capacity_regret_summary: dict = field(default_factory=dict)
 
 
 def _load_ml_model_payload() -> dict:
@@ -2563,6 +2566,8 @@ def _replacement_policy_block_reason(
         "chase_guard_strong_continuation",
         "objective_slot_reserve",
         "objective_leader_combined",
+        "objective_rank_structural",
+        "objective_rank_extension_efficiency",
     } and replaced_pnl_pct >= 0.0:
         return f"block non-losing replacement pnl={replaced_pnl_pct:.2f}%"
     if variant == "replacement_block_leader_delta_lt_10" and leader_delta < 10.0:
@@ -2648,6 +2653,127 @@ def _objective_leader_replay_candidate_ok(candidate: ReplayCandidate) -> bool:
         and float(candidate.adx) >= 20.0
         and float(candidate.vol_x) >= 1.2
     )
+
+
+OBJECTIVE_RANK_VARIANTS = {
+    "objective_rank_structural",
+    "objective_rank_extension_efficiency",
+}
+
+
+def _candidate_allocation_score(candidate: ReplayCandidate, variant: str) -> float:
+    """Return a causal replay-only score for scarce-slot ordering."""
+    if variant not in OBJECTIVE_RANK_VARIANTS:
+        return float(candidate.top_gainer_score)
+    structural = _top_gainer_replay_score(
+        tf=candidate.tf,
+        mode=candidate.mode,
+        intraday_change_pct=float(candidate.intraday_change_pct),
+        daily_range=float(candidate.daily_range),
+        vol_x=float(candidate.vol_x),
+        adx=float(candidate.adx),
+        rsi=float(candidate.rsi),
+        ranker_final_score=0.0,
+        ranker_top_gainer_prob=0.0,
+    )
+    if variant == "objective_rank_structural":
+        return structural
+    quality_bonus = min(12.0, max(0.0, float(candidate.adx) - 20.0) * 0.5)
+    quality_bonus += min(10.0, max(0.0, float(candidate.vol_x) - 1.2) * 4.0)
+    extension_penalty = min(18.0, max(0.0, float(candidate.daily_range) - 6.0) * 1.5)
+    extension_penalty += min(10.0, max(0.0, float(candidate.rsi) - 68.0))
+    return round(structural + quality_bonus - extension_penalty, 4)
+
+
+def _trade_allocation_score(trade: ReplayTrade) -> float:
+    value = float(getattr(trade, "allocation_score", 0.0))
+    return value if value != 0.0 else float(getattr(trade, "top_gainer_score", 0.0))
+
+
+def _record_capacity_competition(
+    stats: ReplayRunStats,
+    *,
+    ts_ms: int,
+    candidate: ReplayCandidate,
+    open_positions: Dict[Tuple[str, str], ReplayTrade],
+    variant: str,
+) -> None:
+    if not open_positions:
+        return
+    incumbent = min(open_positions.values(), key=_trade_allocation_score)
+    stats.capacity_competition_events.append({
+        "ts_ms": int(ts_ms),
+        "candidate_sym": candidate.sym,
+        "incumbent_sym": incumbent.sym,
+        "candidate_score": round(_candidate_allocation_score(candidate, variant), 6),
+        "incumbent_score": round(_trade_allocation_score(incumbent), 6),
+    })
+
+
+def _forward_15m_return(
+    cache_15m: Dict[str, Tuple[np.ndarray, dict]],
+    symbol: str,
+    ts_ms: int,
+    bars: int,
+) -> Optional[float]:
+    item = cache_15m.get(symbol)
+    if not item:
+        return None
+    data, _ = item
+    start = _series_price_at_or_before(data, ts_ms, tf="15m")
+    end = _series_price_at_or_before(
+        data,
+        ts_ms + max(1, int(bars)) * BAR_MS["15m"],
+        tf="15m",
+    )
+    if start is None or end is None or start[1] <= 0 or end[0] <= start[0]:
+        return None
+    return (float(end[1]) / float(start[1]) - 1.0) * 100.0
+
+
+def _capacity_regret_report(
+    events: List[dict],
+    *,
+    cache_15m: Dict[str, Tuple[np.ndarray, dict]],
+    daily_objective: dict,
+) -> dict:
+    label_pairs = set(daily_objective.get("label_pairs") or set())
+    eligible_days = set(daily_objective.get("eligible_days") or [])
+    deltas: List[float] = []
+    wins = 0
+    missed_objective_events = 0
+    missed_objective_pairs: set[Tuple[str, str]] = set()
+    mature_events = 0
+    for event in events:
+        ts_ms = int(event.get("ts_ms") or 0)
+        candidate_sym = str(event.get("candidate_sym") or "")
+        incumbent_sym = str(event.get("incumbent_sym") or "")
+        candidate_ret = _forward_15m_return(cache_15m, candidate_sym, ts_ms, 5)
+        incumbent_ret = _forward_15m_return(cache_15m, incumbent_sym, ts_ms, 5)
+        if candidate_ret is None or incumbent_ret is None:
+            continue
+        mature_events += 1
+        delta = candidate_ret - incumbent_ret
+        deltas.append(delta)
+        if delta > 0:
+            wins += 1
+        local_ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).astimezone(_objective_tz())
+        day_key = local_ts.date().isoformat()
+        if day_key in eligible_days:
+            candidate_pair = (day_key, candidate_sym)
+            incumbent_pair = (day_key, incumbent_sym)
+            if candidate_pair in label_pairs and incumbent_pair not in label_pairs:
+                missed_objective_events += 1
+                missed_objective_pairs.add(candidate_pair)
+    return {
+        "event_count": len(events),
+        "mature_forward_5_count": mature_events,
+        "candidate_win_count": wins,
+        "candidate_win_rate": round(wins / mature_events, 4) if mature_events else None,
+        "missed_objective_event_count": missed_objective_events,
+        "missed_objective_pair_count": len(missed_objective_pairs),
+        "candidate_minus_incumbent_ret5": _metric_stats(deltas),
+    }
 
 
 def _series_price_at_or_before(
@@ -3050,6 +3176,8 @@ async def simulate_portfolio(
             "chase_guard_strong_continuation",
             "objective_slot_reserve",
             "objective_leader_combined",
+            "objective_rank_structural",
+            "objective_rank_extension_efficiency",
             "trend_start",
             "agent_allowed",
             "agent_mode_rescue",
@@ -3074,7 +3202,9 @@ async def simulate_portfolio(
         }
         ts_candidates.sort(
             key=lambda item: (
-                item.top_gainer_score if use_top_gainer_score else item.score,
+                _candidate_allocation_score(item, variant)
+                if variant in OBJECTIVE_RANK_VARIANTS
+                else (item.top_gainer_score if use_top_gainer_score else item.score),
                 item.score,
                 _signal_priority(item.mode),
                 item.price,
@@ -3208,6 +3338,13 @@ async def simulate_portfolio(
                         daily_range=candidate.daily_range,
                     )
                     if late_rotation_reason is not None:
+                        _record_capacity_competition(
+                            stats,
+                            ts_ms=ts_ms,
+                            candidate=candidate,
+                            open_positions=open_positions,
+                            variant=variant,
+                        )
                         stats.skipped_portfolio_full += 1
                         continue
                 replaceable: List[Tuple[float, Tuple[str, str], ReplayTrade, int, float]] = []
@@ -3222,10 +3359,19 @@ async def simulate_portfolio(
                     and not _candidate_ranker_rotation_ok(candidate)
                     and not btc_rotation_override
                 ):
+                    _record_capacity_competition(
+                        stats,
+                        ts_ms=ts_ms,
+                        candidate=candidate,
+                        open_positions=open_positions,
+                        variant=variant,
+                    )
                     stats.skipped_portfolio_full += 1
                     continue
                 candidate_rotation_score = (
-                    float(candidate.top_gainer_score)
+                    _candidate_allocation_score(candidate, variant)
+                    if variant in OBJECTIVE_RANK_VARIANTS
+                    else float(candidate.top_gainer_score)
                     if use_top_gainer_score
                     else (_candidate_rotation_score(candidate) if use_ranker_rotation else float(candidate.score))
                 )
@@ -3272,7 +3418,10 @@ async def simulate_portfolio(
                         ):
                             continue
                         weakest_rotation_score = _trade_rotation_score(open_trade)
-                    if use_top_gainer_score:
+                    if variant in OBJECTIVE_RANK_VARIANTS:
+                        score_to_compare = candidate_rotation_score
+                        baseline_score = _trade_allocation_score(open_trade)
+                    elif use_top_gainer_score:
                         score_to_compare = candidate_rotation_score
                         baseline_score = float(getattr(open_trade, "top_gainer_score", 0.0))
                     else:
@@ -3319,6 +3468,13 @@ async def simulate_portfolio(
                         stats.btc_benchmark_replacements += 1
 
                 if not replaceable:
+                    _record_capacity_competition(
+                        stats,
+                        ts_ms=ts_ms,
+                        candidate=candidate,
+                        open_positions=open_positions,
+                        variant=variant,
+                    )
                     stats.skipped_portfolio_full += 1
                     continue
 
@@ -3366,6 +3522,7 @@ async def simulate_portfolio(
                 ranker_final_score=float(getattr(candidate, "ranker_final_score", 0.0)),
                 ranker_top_gainer_prob=float(getattr(candidate, "ranker_top_gainer_prob", 0.0)),
                 top_gainer_score=float(getattr(candidate, "top_gainer_score", 0.0)),
+                allocation_score=_candidate_allocation_score(candidate, variant),
                 entry_rsi=float(getattr(candidate, "rsi", 50.0)),
                 entry_daily_range=float(getattr(candidate, "daily_range", 0.0)),
                 entry_intraday_change_pct=float(getattr(candidate, "intraday_change_pct", 0.0)),
@@ -3556,6 +3713,7 @@ def _make_report(
         },
         "summary": summary,
         "objective": objective,
+        "capacity_regret": dict(run_stats.capacity_regret_summary),
         "suggestions": build_suggestions(summary),
         "examples": [_trade_to_example(t) for t in trades[:20]],
     }
@@ -3742,6 +3900,8 @@ async def run_replay(
         "chase_guard_strong_continuation",
         "objective_slot_reserve",
         "objective_leader_combined",
+        "objective_rank_structural",
+        "objective_rank_extension_efficiency",
         "btc_cluster_exempt",
         "btc_1h_leader_admission",
         "btc_benchmark_combined",
@@ -3761,6 +3921,11 @@ async def run_replay(
         replace_min_delta=replace_min_delta,
         variant=variant,
         top_gainer_score_min=top_gainer_score_min,
+    )
+    portfolio_stats.capacity_regret_summary = _capacity_regret_report(
+        portfolio_stats.capacity_competition_events,
+        cache_15m=cache_15m,
+        daily_objective=daily_objective,
     )
     reports = {
         "portfolio": _make_report(
@@ -3842,6 +4007,11 @@ async def run_replay(
             variant=compare_variant,
             top_gainer_score_min=top_gainer_score_min,
         )
+        control_stats.capacity_regret_summary = _capacity_regret_report(
+            control_stats.capacity_competition_events,
+            cache_15m=cache_15m,
+            daily_objective=daily_objective,
+        )
         reports["control"] = _make_report(
             start=start,
             end=end,
@@ -3870,6 +4040,11 @@ async def run_replay(
             replace_min_delta=replace_min_delta,
             variant="baseline",
             top_gainer_score_min=0.0,
+        )
+        baseline_stats.capacity_regret_summary = _capacity_regret_report(
+            baseline_stats.capacity_competition_events,
+            cache_15m=cache_15m,
+            daily_objective=daily_objective,
         )
         reports["baseline"] = _make_report(
             start=start,
@@ -4096,6 +4271,8 @@ def parse_args() -> argparse.Namespace:
             "chase_guard_strong_continuation",
             "objective_slot_reserve",
             "objective_leader_combined",
+            "objective_rank_structural",
+            "objective_rank_extension_efficiency",
             "btc_cluster_exempt",
             "btc_1h_leader_admission",
             "btc_benchmark_combined",

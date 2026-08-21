@@ -35,6 +35,7 @@ $releaseSuite = @(
     "test_replay_chase_guard_variants",
     "test_objective_leader_admission_replay",
     "test_replay_daily_objective",
+    "test_objective_candidate_ranking_replay",
     "test_market_signal_agent_replacement_policy",
     "test_learning_progress_report",
     "test_replay_protected_trailing_exit_candle",

@@ -473,6 +473,21 @@ guardrail is still weak: net `-47.2765%`, BTC-relative alpha `-55.1296pp`, and
 drawdown `51.0277%`. All later ranking work must use daily pair labels; prior
 whole-window `15/15` claims are superseded.
 
+## 2026-08-21 Causal Candidate Ranking Checkpoint
+
+Two frozen replay-only allocation ranks were tested against the corrected 435
+daily-label objective. Removing unverified ML inputs from ordering produced no
+decision or metric change. A structural strength-before-extension rank added
+only one early pair (`133/435` versus `132/435`), lost one captured pair,
+reduced precision from `54.87%` to `53.63%`, and reduced pair median capture
+from `21.43%` to `20.00%`; reject both and keep production unchanged. The new
+post-simulation capacity audit labeled all `1667/1667` control conflicts:
+candidate beat the lowest allocation-ranked incumbent in `952` (`57.11%`),
+with average/median 5-bar delta `+0.1496pp/+0.1361pp`. Repeated conflicts map
+to 242 missed-objective events but only 79 unique day-symbol pairs. Next
+priority: a provenance-bound capacity-conflict dataset and chronological
+causal discriminator, not another hand-tuned score on this window.
+
 The replacement stability audit was also refreshed over 510 closed cases. Its
 recent slice remains favorable, but train still fails median, positive-rate,
 and regret gates, while holdout blocked-positive regret is `53.85%`. Keep the
