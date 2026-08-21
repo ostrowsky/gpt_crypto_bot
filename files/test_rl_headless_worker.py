@@ -409,5 +409,24 @@ class TestResearchUniverseShadowStatus(unittest.TestCase):
         self.assertEqual(section["cycle_status"]["symbols_total"], 80)
 
 
+class TestStaticTargetTop50ShadowStatus(unittest.TestCase):
+    def test_status_snapshot_exposes_shadow_without_claiming_production_effect(self) -> None:
+        state = WorkerState(60, 60, 1, 1, False)
+        state.static_target_shadow_runs_total = 3
+        state.static_target_shadow_runs_ok = 2
+        state.static_target_shadow_last_action = "finalize"
+        state.static_target_shadow_last_target_day_local = "2026-08-22"
+        state.static_target_shadow_last_status = "complete"
+
+        snapshot = build_status_snapshot(state, critic_report={}, ml_rows_total=0)
+        section = snapshot["static_target_top50_shadow"]
+
+        self.assertTrue(section["enabled"])
+        self.assertEqual(section["runs_total"], 3)
+        self.assertEqual(section["last_action"], "finalize")
+        self.assertEqual(section["last_target_day_local"], "2026-08-22")
+        self.assertEqual(section["production_effect"], "none_shadow_only")
+
+
 if __name__ == "__main__":
     unittest.main()

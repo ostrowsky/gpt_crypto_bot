@@ -31,6 +31,7 @@ import report_research_universe_shadow_scorecard
 import research_universe_shadow_collector
 import learning_progress_report
 import signal_quality_feedback
+import static_target_top50_shadow
 import top_gainer_critic
 import v2_shadow_daily_summary
 import watchlist_top_gainer_goal
@@ -271,6 +272,23 @@ def build_status_snapshot(
             "critic_dataset": critic_report,
         },
         "research_universe_shadow": research_shadow_section,
+        "static_target_top50_shadow": {
+            "enabled": state.static_target_shadow_enabled,
+            "runs_total": state.static_target_shadow_runs_total,
+            "runs_ok": state.static_target_shadow_runs_ok,
+            "runs_failed": state.static_target_shadow_runs_failed,
+            "last_action": state.static_target_shadow_last_action,
+            "last_started_at": state.static_target_shadow_last_started_at,
+            "last_finished_at": state.static_target_shadow_last_finished_at,
+            "last_error": state.static_target_shadow_last_error,
+            "last_target_day_local": state.static_target_shadow_last_target_day_local,
+            "last_status": state.static_target_shadow_last_status,
+            "last_files": state.static_target_shadow_last_files,
+            "production_effect": "none_shadow_only",
+            "scorecard": _load_json_file(
+                REPORT_DIR / "static_target_top50_shadow_scorecard_latest.json"
+            ),
+        },
         "top_gainer_critic": {
             "enabled": state.top_gainer_enabled,
             "runs_total": state.top_gainer_runs_total,
@@ -577,6 +595,22 @@ def _restore_daily_report_state(
                 "last_median_lead_time_min": "last_median_lead_time_min",
                 "last_precision_first_10_pct": "last_precision_first_10_pct",
                 "last_positive_coverage_pct": "last_mandatory_positive_coverage_pct",
+            },
+        ),
+        (
+            "static_target_top50_shadow",
+            "static_target_shadow",
+            {
+                "runs_total": "runs_total",
+                "runs_ok": "runs_ok",
+                "runs_failed": "runs_failed",
+                "last_action": "last_action",
+                "last_started_at": "last_started_at",
+                "last_finished_at": "last_finished_at",
+                "last_error": "last_error",
+                "last_target_day_local": "last_target_day_local",
+                "last_status": "last_status",
+                "last_files": "last_files",
             },
         ),
     )
@@ -1146,6 +1180,19 @@ class WorkerState:
     research_universe_shadow_last_pairs_scanned: int = 0
     research_universe_shadow_last_rows_written: int = 0
     research_universe_shadow_last_labels_updated: int = 0
+    static_target_shadow_enabled: bool = bool(
+        getattr(config, "STATIC_TARGET_TOP50_SHADOW_ENABLED", True)
+    )
+    static_target_shadow_runs_total: int = 0
+    static_target_shadow_runs_ok: int = 0
+    static_target_shadow_runs_failed: int = 0
+    static_target_shadow_last_action: str = ""
+    static_target_shadow_last_started_at: Optional[str] = None
+    static_target_shadow_last_finished_at: Optional[str] = None
+    static_target_shadow_last_error: str = ""
+    static_target_shadow_last_target_day_local: str = ""
+    static_target_shadow_last_status: str = ""
+    static_target_shadow_last_files: Dict[str, Any] = field(default_factory=dict)
     train_runs_total: int = 0
     train_runs_ok: int = 0
     train_runs_failed: int = 0
@@ -1290,6 +1337,53 @@ async def _research_universe_shadow_loop(state: WorkerState) -> None:
             log.exception("Research universe shadow cycle failed: %s", exc)
             await _write_status_now(state)
         await asyncio.sleep(interval_sec)
+
+
+async def _static_target_top50_shadow_loop(state: WorkerState) -> None:
+    """Collect causal forward evidence without affecting trading behavior."""
+    log = logging.getLogger("rl_headless_worker.static_target_top50_shadow")
+    while True:
+        if not state.static_target_shadow_enabled:
+            await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+            continue
+        try:
+            result = await static_target_top50_shadow.run_scheduled_once(
+                reports_dir=REPORT_DIR
+            )
+            action = str(result.get("action") or "")
+            if not action:
+                await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
+                continue
+            state.static_target_shadow_runs_total += 1
+            state.static_target_shadow_last_started_at = str(
+                result.get("generated_at_utc") or _utc_now_iso()
+            )
+            state.static_target_shadow_runs_ok += 1
+            state.static_target_shadow_last_action = action
+            state.static_target_shadow_last_finished_at = _utc_now_iso()
+            state.static_target_shadow_last_error = ""
+            state.static_target_shadow_last_target_day_local = str(
+                result.get("local_day") or ""
+            )
+            state.static_target_shadow_last_status = str(result.get("status") or "")
+            state.static_target_shadow_last_files = dict(result.get("files") or {})
+            log.info(
+                "Static-target Top-50 shadow: action=%s day=%s status=%s",
+                action,
+                state.static_target_shadow_last_target_day_local,
+                state.static_target_shadow_last_status,
+            )
+            await _write_status_now(state)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.static_target_shadow_runs_total += 1
+            state.static_target_shadow_runs_failed += 1
+            state.static_target_shadow_last_finished_at = _utc_now_iso()
+            state.static_target_shadow_last_error = f"{type(exc).__name__}: {exc}"
+            log.exception("Static-target Top-50 shadow failed: %s", exc)
+            await _write_status_now(state)
+        await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
 
 
 async def _training_loop(state: WorkerState) -> None:
@@ -1876,6 +1970,10 @@ async def _amain(args: argparse.Namespace) -> int:
         asyncio.create_task(_signal_quality_loop(state), name="signal_quality_evaluator"),
         asyncio.create_task(_learning_progress_loop(state), name="learning_progress_report"),
         asyncio.create_task(_research_universe_shadow_loop(state), name="research_universe_shadow"),
+        asyncio.create_task(
+            _static_target_top50_shadow_loop(state),
+            name="static_target_top50_shadow",
+        ),
     ]
     if args.enable_collector:
         tasks.insert(0, asyncio.create_task(_collector_supervisor(state), name="collector"))
