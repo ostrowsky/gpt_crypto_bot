@@ -16,6 +16,7 @@ from evidence_capacity import (
     build_power_report,
     build_top_mover_labels,
     migrate_legacy_research_inventory,
+    repository_audit,
     verify_objective_report_contract,
 )
 
@@ -144,6 +145,118 @@ class CanonicalLabelTest(unittest.TestCase):
 
 
 class CapacityAndGovernanceTest(unittest.TestCase):
+    def test_repository_audit_completes_with_honest_partial_canonical_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs" / "reports").mkdir(parents=True)
+            (root / "docs" / "specs").mkdir(parents=True)
+            (root / "docs" / "FEATURE_SPEC_INDEX.md").write_text("", encoding="utf-8")
+            harness_path = root / "harness.json"
+            harness_path.write_text(
+                json.dumps({
+                    "generated_at": "2026-08-22T08:00:00+00:00",
+                    "status": "pass",
+                    "findings": [{
+                        "check_id": "TH03_MODEL_PROVENANCE",
+                        "invariant": "TH-03",
+                        "severity": "warning",
+                        "message": "waiting for verified rows",
+                        "evidence": "verified_rows=0",
+                        "remediation": "collect forward rows",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            objective = {
+                "metric_id": "watchlist_top_early_capture_v1",
+                "action_layer": "BUY",
+                "metric_version": "v1",
+                "label_version": "exchange_top_filtered_watchlist_v1",
+                "method_version": "day_cluster_bootstrap_baseline_v1",
+                "numerator": 0,
+                "denominator": 100,
+                "coverage_numerator": 90,
+                "coverage_denominator": 100,
+                "coverage_status": "partial",
+                "exclusions": ["2026-01-02"],
+                "feature_cutoff": "2026-01-01T00:00:00+00:00",
+                "label_cutoff": "2026-04-11T00:00:00+00:00",
+                "label_available_at": "2026-04-11T00:00:00+00:00",
+                "estimate": 0.0,
+                "interval_low": 0.0,
+                "interval_high": 0.1,
+                "sesoi": 0.05,
+                "mde": 0.12,
+                "effective_sample_size": 80,
+                "expected_decision_horizon_days": 500,
+                "evidence_status": "INSUFFICIENT_EVIDENCE",
+                "verdict_rule": "baseline_only_no_directional_verdict",
+                "verdict_rule_passed": False,
+            }
+            canonical_path = root / "canonical.json"
+            canonical_path.write_text(
+                json.dumps({
+                    "status": "PARTIAL",
+                    "trading_behavior_changed": False,
+                    "objective_contract_errors": [],
+                    "objective_report": objective,
+                    "power_report": {
+                        "base_rate_numerator": 0,
+                        "base_rate_denominator": 100,
+                        "effective_sample_size": 80,
+                        "status": "UNDERPOWERED",
+                    },
+                    "snapshot": {
+                        "manifest_hash": "a" * 64,
+                        "report_directory": "frozen-reports",
+                    },
+                }),
+                encoding="utf-8",
+            )
+
+            result = repository_audit(
+                root,
+                harness_path,
+                review_at="2026-08-29T09:00:00+00:00",
+                canonical_audit=canonical_path,
+            )
+
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(result["exit_blockers"], [])
+        self.assertEqual(result["canonical_objective"]["coverage_status"], "partial")
+        self.assertFalse(result["trading_behavior_changed"])
+
+    def test_repository_audit_fails_closed_on_power_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs" / "reports").mkdir(parents=True)
+            (root / "docs" / "specs").mkdir(parents=True)
+            (root / "docs" / "FEATURE_SPEC_INDEX.md").write_text("", encoding="utf-8")
+            harness = root / "harness.json"
+            harness.write_text(json.dumps({
+                "generated_at": "2026-08-22T08:00:00+00:00",
+                "status": "pass",
+                "findings": [],
+            }), encoding="utf-8")
+            canonical = root / "canonical.json"
+            canonical.write_text(json.dumps({
+                "objective_contract_errors": [],
+                "objective_report": {"numerator": 1, "denominator": 2, "effective_sample_size": 2},
+                "power_report": {"base_rate_numerator": 2, "base_rate_denominator": 2, "effective_sample_size": 2},
+                "snapshot": {"manifest_hash": "a" * 64, "report_directory": "x"},
+            }), encoding="utf-8")
+
+            result = repository_audit(
+                root,
+                harness,
+                review_at="2026-08-29T09:00:00+00:00",
+                canonical_audit=canonical,
+            )
+
+        self.assertEqual(result["status"], "IN_PROGRESS")
+        self.assertIn("canonical_objective_contract_invalid", result["exit_blockers"])
+        self.assertIn("canonical_power_mismatch", result["exit_blockers"])
+
     def test_power_report_uses_days_not_symbol_rows(self) -> None:
         observations = [
             {"objective_day": day, "outcome": outcome, "coverage_status": "complete"}

@@ -1,12 +1,14 @@
 # Continuous Improvement Control Plane
 
-Date: 2026-08-14 · Status: architecture v2.2; Phase -1 protocol slice implemented, no trading behavior
+Date: 2026-08-22 · Status: architecture v2.2; Phase 0 and Phase 1 exit gates complete; no trading behavior
 
 Owner: repository maintainer · Revision: v2.2 — evidence-throughput-first
 
 Related: [Truth Harness](truth-harness.md),
 [Learning Loop Roadmap](learning-loop-architecture-roadmap.md),
 [Phase -1 Walking Skeleton](control-plane-walking-skeleton.md),
+[Phase 0 Evidence Capacity](phase0-evidence-capacity.md),
+[Phase 1 Durable Loop](phase1-durable-experiment-loop.md),
 [Hypothesis Queue](hypothesis-queue.md), and
 [Canonical Portfolio Alpha](canonical-portfolio-alpha.md).
 

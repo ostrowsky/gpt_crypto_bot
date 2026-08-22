@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-08-14 Europe/Budapest
+Last updated: 2026-08-22 Europe/Budapest
 
 ## Objective
 
@@ -16,7 +16,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Static-target Top-50 forward shadow | shadow-only implementation | `docs/specs/static-target-top50-forward-shadow.md` | forward Top-1, Top-10 precision, entrant recall, base-rate lift, paired precision delta, scheduled-slot coverage | collect at least 30 eligible forward days; passing gate requires separate production review and cannot auto-promote |
 | Spec-first workflow | shipped | `docs/specs/spec-first-workflow.md` | regression safety, reproducibility | use for every non-trivial change |
 | Truth Harness | shipped enforcement; compliance may fail closed | `docs/specs/truth-harness.md` | evidence provenance, denominator integrity, MD/config parity | run `full` before analysis and `change --staged` before handoff |
-| Continuous improvement control plane | architecture v2.2; Phase -1 `FixtureDeltaValidatorAdapter` complete; Phase 0 maximum-history audit and honest blocked-training readiness implemented, evidence repair still open | `docs/specs/continuous-improvement-control-plane.md`, `docs/specs/control-plane-walking-skeleton.md`, `docs/specs/phase0-evidence-capacity.md` | immutable canonical labels, calendar coverage, day-clustered power, evidence throughput, action-layer registry, visible Harness remediation, hash-bound legacy migration | repair missing critic days and accumulate provenance-verified rows; no agent or trading integration yet |
+| Continuous improvement control plane | architecture v2.2; Phase -1 `FixtureDeltaValidatorAdapter` complete; Phase 0 measurement foundation complete; Phase 1 durable loop completed one decision-grade real terminal result; production unchanged | `docs/specs/continuous-improvement-control-plane.md`, `docs/specs/control-plane-walking-skeleton.md`, `docs/specs/phase0-evidence-capacity.md`, `docs/specs/phase1-durable-experiment-loop.md` | immutable evidence, power precheck, attempt throughput, terminal reasons, independent verifier agreement, evidence cost | run Phase 2 frozen-world AgentNecessityGate before admitting LLM-selected experiments |
 | Immutable policy epoch and label provenance | shipped measurement safety; live cohort collection restored and legacy-rescan laundering blocked | `docs/specs/policy-epoch-label-provenance.md` | verified-row coverage, epoch separation, temporal holdout integrity | observe new causal rows and mature labels before ranker retraining/promotion |
 | Objective leader admission replay | old objective evidence superseded; all profiles remain disabled | `docs/specs/objective-leader-admission-replay.md` | early capture, lead time, precision, canonical alpha, drawdown | rerun only against daily day-symbol labels before reusing a conclusion |
 | Daily watchlist objective replay | shipped; corrected 30d control established on 435 day-symbol labels | `docs/specs/daily-watchlist-objective-replay.md` | daily leader-pair capture, early capture, precision, coverage | use only this denominator for subsequent ranking replay |

@@ -9,6 +9,7 @@ CONTROL_PLANE = ROOT / "docs" / "specs" / "continuous-improvement-control-plane.
 ROADMAP = ROOT / "docs" / "specs" / "learning-loop-architecture-roadmap.md"
 POLICY_EPOCH = ROOT / "docs" / "specs" / "policy-epoch-label-provenance.md"
 PHASE_ZERO = ROOT / "docs" / "specs" / "phase0-evidence-capacity.md"
+PHASE_ONE = ROOT / "docs" / "specs" / "phase1-durable-experiment-loop.md"
 SPEC_INDEX = ROOT / "docs" / "FEATURE_SPEC_INDEX.md"
 
 
@@ -19,6 +20,7 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         cls.roadmap = ROADMAP.read_text(encoding="utf-8")
         cls.policy_epoch = POLICY_EPOCH.read_text(encoding="utf-8")
         cls.phase_zero = PHASE_ZERO.read_text(encoding="utf-8")
+        cls.phase_one = PHASE_ONE.read_text(encoding="utf-8")
         cls.index = SPEC_INDEX.read_text(encoding="utf-8")
 
     def test_walking_skeleton_precedes_measurement_platform(self) -> None:
@@ -108,9 +110,9 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("day_cluster_binary_v1", self.phase_zero)
         self.assertIn("null` ratios", self.phase_zero)
         self.assertIn("LEGACY_UNVERIFIED", self.phase_zero)
-        self.assertIn("Full Phase 0 remains open", self.phase_zero)
+        self.assertIn("Repository completion artifact", self.phase_zero)
         self.assertIn("phase0-evidence-capacity.md", self.index)
-        self.assertIn("Phase 0 evidence capacity in progress", self.roadmap)
+        self.assertIn("Phase 0 complete", self.roadmap)
         self.assertIn("2026-08-14 Phase 0 evidence checkpoint", self.roadmap)
         self.assertIn("MDE=14.07pp", self.roadmap)
         self.assertIn("0` provenance-verified rows", self.roadmap)
@@ -118,6 +120,15 @@ class ContinuousImprovementControlPlaneSpecTest(unittest.TestCase):
         self.assertIn("2026-08-20 maximum-period replay recovery checkpoint", self.roadmap)
         self.assertIn("net alpha `-52.30pp`", self.roadmap)
         self.assertIn("baseline measurements, not improvement deltas", self.roadmap)
+
+    def test_phase_one_real_terminal_loop_is_documented(self) -> None:
+        self.assertIn("Phase 1 complete", self.roadmap)
+        self.assertIn("phase1-durable-experiment-loop.md", self.index)
+        self.assertIn("phase1_experiment_loop.py", self.phase_one)
+        self.assertIn("independent verifier", self.phase_one.lower())
+        self.assertIn("SUPPORTED", self.phase_one)
+        self.assertIn("425", self.phase_one)
+        self.assertIn("+9.15pp", self.phase_one)
 
 
 if __name__ == "__main__":

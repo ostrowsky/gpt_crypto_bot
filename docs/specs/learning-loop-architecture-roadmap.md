@@ -1,7 +1,7 @@
 ﻿# Learning Loop Architecture Roadmap
 
-Date: 2026-08-14
-Status: active; Phase -1 walking skeleton complete, Phase 0 evidence capacity in progress
+Date: 2026-08-22
+Status: active; Phase 0 complete; Phase 1 complete with one real terminal result
 
 ## Principle
 
@@ -33,6 +33,37 @@ framework before completing an experiment. Its implementation order is:
    The executable Phase 0 contract is
    [`phase0-evidence-capacity.md`](phase0-evidence-capacity.md). Its first slice
    is measurement-only and cannot change WATCH/BUY/SELL/portfolio behavior.
+
+### 2026-08-22 Phase 0 and Phase 1 completion checkpoint
+
+Phase 0 is complete as a measurement foundation. The full Truth Harness is
+`PASS` with one honest TH-03 warning: the ranker has `22,163` labeled legacy
+rows and zero provenance-verified rows, so model training/promotion stays
+blocked. The maximum final-critic audit reports `172/284` early captures
+(`60.56%`), calendar coverage `124/143`, `ESS=105`, `MDE=13.53pp` versus
+`SESOI=5pp`, and `UNDERPOWERED`. All `115/115` discovered legacy artifacts have
+a migration state. These are measurement facts, not an improvement verdict.
+
+TH-11 was restored by a fresh current-policy 30-day ten-slot replay rather than
+editing provenance. The baseline remains economically poor: `1,659` trades,
+portfolio return `-44.66%` after costs, BTC benchmark `+10.26%`, and net alpha
+`-54.92pp`. This blocks profitability claims but not WATCH-only research.
+
+Phase 1 is also complete. `files/phase1_experiment_loop.py` now provides the
+durable deterministic state path, capability/validator bindings, pre-power
+gate, leases, subprocess timeout, retry/dead-letter evidence, append-only
+ledger, independent verification, deterministic governor, and status report.
+The first real operational attempt failed visibly because of a relative
+validator-key path; the corrected attempt used a new ID and `retry_of`. The
+manifest-hardened terminal attempt is decision-grade `SUPPORTED` over `425`
+eligible days and `37,060` actual candidates: static-target Top-10 precision
+`24.40%` versus current-rank `15.25%`, paired delta `+9.15pp`, bootstrap 95%
+`[+7.95pp,+10.33pp]`, and `MDE=1.67pp < SESOI=2pp`. It authorizes only the
+existing silent forward shadow; production behavior remains unchanged.
+
+The next architecture gate is Phase 2: frozen-world `AgentNecessityGate`
+evaluation against the deterministic/manual priority baseline. An LLM may not
+select primary experiments or receive production privileges before that gate.
 
 ### 2026-08-14 Phase 0 evidence checkpoint
 

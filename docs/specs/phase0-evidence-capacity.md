@@ -1,7 +1,7 @@
 # Phase 0 Evidence Capacity and Canonical Labels
 
 Date: 2026-08-14
-Status: implementation contract; measurement-only; production trading policy unchanged
+Status: implemented; Phase 0 exit artifact complete 2026-08-22; measurement-only; production trading policy unchanged
 
 ## Purpose
 
@@ -283,3 +283,45 @@ until a maximum-available local audit proves that every reported
 objective satisfies the completeness gate, current model/RL findings are
 repaired or visibly owned, and the discovered legacy inventory is complete.
 No uplift or production-readiness claim follows from this implementation.
+
+### Repository completion artifact
+
+`evidence_capacity.py repository-audit` may mark Phase 0 `COMPLETE` only when
+it consumes an orchestrator-produced canonical audit artifact and verifies all
+of the following without repairing its contents:
+
+- the canonical objective row passes `verify_objective_report_contract` and
+  publishes its explicit partial/complete calendar coverage;
+- a dependence-aware power report is present and uses the same numerator,
+  denominator, and effective sample size as the objective row;
+- the canonical snapshot has a non-empty manifest hash and named source
+  population;
+- the Truth Harness full profile has no blocking errors; warnings remain
+  visible in the remediation ledger and retain their blocked scope;
+- every discovered legacy artifact has exactly one migration state and the
+  reviewed-negative registry has no errors;
+- `trading_behavior_changed=false`.
+
+Partial historical calendar coverage and an honest `UNDERPOWERED` result do
+not prevent completion of the measurement foundation when exclusions and the
+expected decision horizon are explicit. They continue to prevent directional
+improvement or promotion claims. Missing or malformed canonical evidence does
+prevent Phase 0 completion.
+
+### 2026-08-22 completion evidence
+
+The current maximum-available audit is `COMPLETE` for the Phase 0 foundation:
+
+- full Truth Harness: `PASS` with the explicit TH-03 warning that all `22,163`
+  labeled ranker rows remain `legacy_unknown` and zero are provenance-verified;
+- canonical objective: `172 / 284` early captures (`60.56%`) with named partial
+  calendar coverage `124 / 143` and no objective-contract error;
+- power: `ESS=105`, `MDE=13.53pp`, `SESOI=5pp`, `UNDERPOWERED`;
+- legacy inventory: `115 / 115` discovered artifacts assigned a state, including
+  five hash-bound confirmed negative results;
+- production behavior changed: `false`.
+
+The completion verdict applies to measurement infrastructure, not objective
+uplift, ML readiness, or production promotion. The partial calendar history,
+underpowered mission comparison, and zero verified training rows remain visible
+limitations.

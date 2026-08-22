@@ -1065,6 +1065,7 @@ def repository_audit(
     *,
     review_at: str,
     attempt_ledger: Path | None = None,
+    canonical_audit: Path | None = None,
 ) -> dict[str, Any]:
     harness_payload = _load_json(harness_json)
     remediation = build_harness_remediation_ledger(harness_payload, review_at=review_at)
@@ -1072,12 +1073,82 @@ def repository_audit(
         root, root / "docs" / "FEATURE_SPEC_INDEX.md"
     )
     throughput = build_evidence_throughput_report(_load_jsonl(attempt_ledger))
-    blockers = [
-        "canonical_snapshot_not_supplied",
-        "objective_power_report_not_computed",
-    ]
+    blockers: list[str] = []
+    canonical_summary: dict[str, Any] | None = None
+    if canonical_audit is None or not canonical_audit.exists():
+        blockers.extend(
+            ["canonical_snapshot_not_supplied", "objective_power_report_not_computed"]
+        )
+    else:
+        try:
+            canonical = _load_json(canonical_audit)
+        except (OSError, ValueError, json.JSONDecodeError):
+            canonical = {}
+            blockers.append("canonical_snapshot_invalid")
+        objective = canonical.get("objective_report")
+        power = canonical.get("power_report")
+        snapshot = canonical.get("snapshot")
+        objective = objective if isinstance(objective, Mapping) else {}
+        power = power if isinstance(power, Mapping) else {}
+        snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+        contract_errors = list(canonical.get("objective_contract_errors") or [])
+        contract_errors.extend(verify_objective_report_contract(objective))
+        if contract_errors:
+            blockers.append("canonical_objective_contract_invalid")
+        matched_fields = (
+            ("base_rate_numerator", "numerator"),
+            ("base_rate_denominator", "denominator"),
+            ("effective_sample_size", "effective_sample_size"),
+        )
+        power_matches = bool(power) and all(
+            isinstance(power.get(power_field), int)
+            and not isinstance(power.get(power_field), bool)
+            and isinstance(objective.get(objective_field), int)
+            and not isinstance(objective.get(objective_field), bool)
+            and power[power_field] == objective[objective_field]
+            for power_field, objective_field in matched_fields
+        )
+        if not power_matches:
+            blockers.append("canonical_power_mismatch")
+        manifest_hash = str(snapshot.get("manifest_hash") or "")
+        source_population = str(snapshot.get("report_directory") or "")
+        if len(manifest_hash) != 64 or not source_population:
+            blockers.append("canonical_snapshot_provenance_invalid")
+        if canonical.get("trading_behavior_changed") is not False:
+            blockers.append("phase0_behavior_change_detected")
+        canonical_summary = {
+            "source": str(canonical_audit),
+            "source_status": canonical.get("status"),
+            "metric_id": objective.get("metric_id"),
+            "numerator": objective.get("numerator"),
+            "denominator": objective.get("denominator"),
+            "estimate": objective.get("estimate"),
+            "coverage_numerator": objective.get("coverage_numerator"),
+            "coverage_denominator": objective.get("coverage_denominator"),
+            "coverage_status": objective.get("coverage_status"),
+            "effective_sample_size": objective.get("effective_sample_size"),
+            "mde": objective.get("mde"),
+            "sesoi": objective.get("sesoi"),
+            "evidence_status": objective.get("evidence_status"),
+            "power_status": power.get("status"),
+            "objective_contract_errors": sorted(set(contract_errors)),
+            "snapshot_manifest_hash": manifest_hash or None,
+        }
     if remediation["source_harness_status"].lower() != "pass":
         blockers.append("truth_harness_not_pass")
+    discovered_count = inventory.get("discovered_count")
+    migrated_count = inventory.get("migrated_count")
+    if (
+        not inventory.get("complete")
+        or not isinstance(discovered_count, int)
+        or not isinstance(migrated_count, int)
+        or discovered_count != migrated_count
+    ):
+        blockers.append("legacy_inventory_incomplete")
+    registry = inventory.get("registry") if isinstance(inventory.get("registry"), Mapping) else {}
+    if registry.get("errors"):
+        blockers.append("legacy_negative_registry_invalid")
+    blockers = sorted(set(blockers))
     return {
         "schema_version": "phase0_repository_audit_v1",
         "phase": "PHASE_0",
@@ -1087,6 +1158,7 @@ def repository_audit(
         "harness_remediation": remediation,
         "legacy_inventory": inventory,
         "evidence_throughput": throughput,
+        "canonical_objective": canonical_summary,
         "exit_blockers": blockers,
     }
 
@@ -1099,6 +1171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     audit.add_argument("--harness-json", type=Path, required=True)
     audit.add_argument("--review-at", required=True)
     audit.add_argument("--attempt-ledger", type=Path)
+    audit.add_argument("--canonical-audit", type=Path)
     audit.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     if args.command == "repository-audit":
@@ -1107,6 +1180,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.harness_json.resolve(),
             review_at=args.review_at,
             attempt_ledger=args.attempt_ledger.resolve() if args.attempt_ledger else None,
+            canonical_audit=args.canonical_audit.resolve() if args.canonical_audit else None,
         )
         rendered = json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         if args.output:
