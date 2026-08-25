@@ -5515,6 +5515,65 @@ class TestEvidenceIoResponsiveness(unittest.IsolatedAsyncioTestCase):
             bot_src,
         )
 
+    def test_T236C_critic_records_are_resolved_in_one_dataset_scan(self):
+        from contextlib import nullcontext
+
+        import critic_dataset
+
+        with tempfile.TemporaryDirectory() as td:
+            dataset_path = Path(td) / "critic_dataset.jsonl"
+            dataset_path.write_text(
+                '\n'.join(
+                    json.dumps({"id": record_id, "decision": {"candidate_score": score}})
+                    for record_id, score in (("r1", 11.0), ("unused", 0.0), ("r2", 22.0))
+                ) + '\n',
+                encoding="utf-8",
+            )
+            dataset_proxy = MagicMock()
+            dataset_proxy.exists.return_value = True
+            dataset_proxy.open.side_effect = dataset_path.open
+
+            with (
+                patch.object(critic_dataset, "CRITIC_FILE", dataset_proxy),
+                patch.object(critic_dataset, "_dataset_io_lock", return_value=nullcontext()),
+            ):
+                records = critic_dataset.get_records({"r1", "r2"})
+
+            self.assertEqual(set(records), {"r1", "r2"})
+            self.assertEqual(records["r2"]["decision"]["candidate_score"], 22.0)
+            self.assertEqual(dataset_proxy.open.call_count, 1)
+
+    def test_T236D_position_restore_batches_historical_metadata_reads(self):
+        import config
+        import monitor
+
+        p1 = types.SimpleNamespace(symbol="AAAUSDT", critic_record_id="r1", signal_mode="trend")
+        p2 = types.SimpleNamespace(symbol="BBBUSDT", critic_record_id="r2", signal_mode="trend")
+        with tempfile.TemporaryDirectory() as td:
+            positions_path = Path(td) / "positions.json"
+            positions_path.write_text('{"AAAUSDT": {}, "BBBUSDT": {}}', encoding="utf-8")
+            with (
+                patch.object(config, "POSITIONS_FILE", str(positions_path), create=True),
+                patch.object(config, "MAX_OPEN_POSITIONS", 10),
+                patch.object(monitor, "_pos_from_dict", side_effect=[p1, p2]),
+                patch.object(monitor.critic_dataset, "get_records", return_value={"r1": {}, "r2": {}}) as get_records,
+                patch.object(
+                    monitor,
+                    "_load_ranker_shadow_snapshots_for_positions",
+                    return_value={"AAAUSDT": {}, "BBBUSDT": {}},
+                ) as load_ranker,
+                patch.object(monitor, "_maybe_backfill_position_metadata", return_value=False) as backfill,
+            ):
+                restored = monitor.load_positions()
+
+            self.assertEqual(set(restored), {"AAAUSDT", "BBBUSDT"})
+            get_records.assert_called_once_with({"r1", "r2"})
+            load_ranker.assert_called_once()
+            self.assertEqual(backfill.call_count, 2)
+            for call in backfill.call_args_list:
+                self.assertIn("critic_record", call.kwargs)
+                self.assertIn("ranker_snapshot", call.kwargs)
+
 
 class TestNightSignalQualityGuards(unittest.TestCase):
     def test_restored_position_is_not_removed_at_day_boundary(self):

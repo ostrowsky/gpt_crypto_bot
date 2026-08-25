@@ -21,6 +21,8 @@ Make the menu/control plane observable and resilient:
 - audit control delivery attempts/results in `bot_events.jsonl`.
 - keep Telegram update polling and menu handling responsive while monitoring
   persists large evidence datasets.
+- restore persisted position metadata with at most one sequential scan of each
+  historical evidence file during cold start, independent of position count.
 
 ## Guardrails
 
@@ -44,13 +46,18 @@ Make the menu/control plane observable and resilient:
   completes.
 - Heavy critic/ML evidence mutation uses a dedicated serialized executor so it
   cannot starve Telegram polling or race concurrent JSONL rewrites.
+- Restoring multiple open positions performs no per-position full-file scan:
+  critic records are resolved in one batch and ranker shadow events are tailed
+  once, while missing evidence remains missing rather than being invented.
 
 ## Maximum-load verification
 
 This is an operational scheduling change, not a trading-policy hypothesis, so
 a market replay is not an applicable promotion gate. Verification uses the
 maximum currently available live evidence files (critic and ML JSONL) and a
-synthetic blocking-write regression test. Trading-policy backtests remain
+synthetic blocking-write regression test. Cold-start verification uses the
+maximum current positions and evidence files and asserts one scan per evidence
+source rather than one scan per position. Trading-policy backtests remain
 unchanged because selection, entry, exit, scoring, and portfolio policy are
 unchanged.
 

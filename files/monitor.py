@@ -3448,15 +3448,25 @@ def _parse_event_ts_ms(raw: object) -> Optional[int]:
     return None
 
 
-def _load_ranker_shadow_snapshot_for_position(pos: "OpenPosition") -> Optional[dict]:
+def _read_ranker_shadow_tail() -> deque:
     if not _BOT_EVENTS_FILE.exists():
-        return None
+        return deque()
     try:
         tail = deque(maxlen=8000)
         with _BOT_EVENTS_FILE.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 if line.strip():
                     tail.append(line)
+        return tail
+    except Exception:
+        return deque()
+
+
+def _select_ranker_shadow_snapshot_for_position(
+    pos: "OpenPosition",
+    tail: deque,
+) -> Optional[dict]:
+    try:
         best: Optional[dict] = None
         best_delta: Optional[int] = None
         expected_candidate_score = float(getattr(pos, "candidate_score_at_entry", 0.0))
@@ -3506,11 +3516,52 @@ def _load_ranker_shadow_snapshot_for_position(pos: "OpenPosition") -> Optional[d
         return None
 
 
-def _maybe_backfill_position_metadata(pos: "OpenPosition") -> bool:
+def _load_ranker_shadow_snapshot_for_position(pos: "OpenPosition") -> Optional[dict]:
+    return _select_ranker_shadow_snapshot_for_position(pos, _read_ranker_shadow_tail())
+
+
+def _load_ranker_shadow_snapshots_for_positions(
+    positions: dict[str, "OpenPosition"],
+) -> dict[str, dict]:
+    """Resolve restored-position ranker snapshots from one bot-events scan."""
+    if not positions:
+        return {}
+    tail = _read_ranker_shadow_tail()
+    snapshots: dict[str, dict] = {}
+    for symbol, pos in positions.items():
+        snapshot = _select_ranker_shadow_snapshot_for_position(pos, tail)
+        if isinstance(snapshot, dict):
+            snapshots[symbol] = snapshot
+    return snapshots
+
+
+def _needs_ranker_metadata_backfill(pos: "OpenPosition") -> bool:
+    return (
+        abs(float(getattr(pos, "ranker_quality_proba", 0.0))) < 1e-12
+        and abs(float(getattr(pos, "ranker_final_score", 0.0))) < 1e-12
+        and abs(float(getattr(pos, "ranker_ev", 0.0))) < 1e-12
+        and abs(float(getattr(pos, "ranker_expected_return", 0.0))) < 1e-12
+        and abs(float(getattr(pos, "ranker_expected_drawdown", 0.0))) < 1e-12
+    )
+
+
+_BACKFILL_UNSET = object()
+
+
+def _maybe_backfill_position_metadata(
+    pos: "OpenPosition",
+    *,
+    critic_record: object = _BACKFILL_UNSET,
+    ranker_snapshot: object = _BACKFILL_UNSET,
+) -> bool:
     changed = False
     record_id = str(getattr(pos, "critic_record_id", "") or "")
     if record_id:
-        rec = critic_dataset.get_record(record_id)
+        rec = (
+            critic_dataset.get_record(record_id)
+            if critic_record is _BACKFILL_UNSET
+            else critic_record
+        )
         if isinstance(rec, dict):
             decision = rec.get("decision") if isinstance(rec.get("decision"), dict) else {}
             if abs(float(getattr(pos, "candidate_score_at_entry", 0.0))) < 1e-12:
@@ -3539,14 +3590,12 @@ def _maybe_backfill_position_metadata(pos: "OpenPosition") -> bool:
                     pos.today_change_pct = float(value)
                     changed = True
 
-    if (
-        abs(float(getattr(pos, "ranker_quality_proba", 0.0))) < 1e-12
-        and abs(float(getattr(pos, "ranker_final_score", 0.0))) < 1e-12
-        and abs(float(getattr(pos, "ranker_ev", 0.0))) < 1e-12
-        and abs(float(getattr(pos, "ranker_expected_return", 0.0))) < 1e-12
-        and abs(float(getattr(pos, "ranker_expected_drawdown", 0.0))) < 1e-12
-    ):
-        snap = _load_ranker_shadow_snapshot_for_position(pos)
+    if _needs_ranker_metadata_backfill(pos):
+        snap = (
+            _load_ranker_shadow_snapshot_for_position(pos)
+            if ranker_snapshot is _BACKFILL_UNSET
+            else ranker_snapshot
+        )
         if isinstance(snap, dict):
             for attr, key in (
                 ("ranker_quality_proba", "ranker_proba"),
@@ -3705,9 +3754,26 @@ def load_positions() -> dict:
         with open(path, "r", encoding="utf-8") as f:
             data = _json_pers.load(f)
         positions = {sym: _pos_from_dict(d) for sym, d in data.items()}
+        critic_record_ids = {
+            str(getattr(pos, "critic_record_id", "") or "")
+            for pos in positions.values()
+            if str(getattr(pos, "critic_record_id", "") or "")
+        }
+        critic_records = critic_dataset.get_records(critic_record_ids)
+        ranker_positions = {
+            symbol: pos
+            for symbol, pos in positions.items()
+            if _needs_ranker_metadata_backfill(pos)
+        }
+        ranker_snapshots = _load_ranker_shadow_snapshots_for_positions(ranker_positions)
         backfilled = False
-        for pos in positions.values():
-            if _maybe_backfill_position_metadata(pos):
+        for symbol, pos in positions.items():
+            record_id = str(getattr(pos, "critic_record_id", "") or "")
+            if _maybe_backfill_position_metadata(
+                pos,
+                critic_record=critic_records.get(record_id),
+                ranker_snapshot=ranker_snapshots.get(symbol),
+            ):
                 backfilled = True
         positions, removed = _trim_restored_positions(positions)
         if removed:

@@ -235,9 +235,12 @@ def _append(record: Dict[str, Any]) -> None:
             f.write(json.dumps(record, ensure_ascii=False, cls=_Enc) + "\n")
 
 
-def get_record(record_id: str) -> Optional[Dict[str, Any]]:
-    if not record_id or not CRITIC_FILE.exists():
-        return None
+def get_records(record_ids: set[str]) -> Dict[str, Dict[str, Any]]:
+    """Resolve multiple critic records with one ordered dataset scan."""
+    pending = {str(record_id) for record_id in record_ids if str(record_id)}
+    if not pending or not CRITIC_FILE.exists():
+        return {}
+    found: Dict[str, Dict[str, Any]] = {}
     try:
         with _dataset_io_lock():
             with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source:
@@ -248,11 +251,21 @@ def get_record(record_id: str) -> Optional[Dict[str, Any]]:
                         rec = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if isinstance(rec, dict) and rec.get("id") == record_id:
-                        return rec
+                    if not isinstance(rec, dict):
+                        continue
+                    record_id = str(rec.get("id") or "")
+                    if record_id in pending:
+                        found[record_id] = rec
+                        pending.remove(record_id)
+                        if not pending:
+                            break
     except Exception as e:
-        _pylog.warning("critic_dataset get_record error for %s: %s", record_id, e)
-    return None
+        _pylog.warning("critic_dataset get_records error for %d id(s): %s", len(record_ids), e)
+    return found
+
+
+def get_record(record_id: str) -> Optional[Dict[str, Any]]:
+    return get_records({record_id}).get(record_id) if record_id else None
 
 
 def _rewrite_records(mutator) -> None:
