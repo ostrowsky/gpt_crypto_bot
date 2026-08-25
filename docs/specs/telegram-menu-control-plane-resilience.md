@@ -69,6 +69,10 @@ critic/ML evidence, then send `/menu` or press `📋 Открыть меню`. T
 passes only when the menu response is delivered without a monitoring-sized
 polling gap and no `409`/`401` Telegram error appears.
 
+Result 2026-08-25: PASS. One new Python instance restored 10 positions, started
+polling, delivered the menu with `sendMessage 200`, and continued consecutive
+`getUpdates 200` calls without `401` or `409` errors.
+
 ## Rollback
 
 Rollback is a code revert followed by a single-instance bot restart. Trigger it
