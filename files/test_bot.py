@@ -5475,6 +5475,47 @@ class TestUiResponsivenessAndStalePositions(unittest.TestCase):
         self.assertIn(".get_updates_request(updates_request)", bot_src)
 
 
+class TestEvidenceIoResponsiveness(unittest.IsolatedAsyncioTestCase):
+    async def test_T236A_critic_persistence_does_not_block_telegram_event_loop(self):
+        import config
+        import monitor
+
+        def slow_log_candidate(**_kwargs):
+            time.sleep(0.08)
+            return "TESTUSDT_15m_20260825T000000Z"
+
+        with (
+            patch.object(config, "CRITIC_DATASET_ENABLED", True),
+            patch.object(monitor.critic_dataset, "log_candidate", side_effect=slow_log_candidate),
+        ):
+            persistence = asyncio.create_task(
+                monitor._log_critic_candidate(
+                    sym="TESTUSDT",
+                    tf="15m",
+                    bar_ts=1_777_070_400_000,
+                    signal_type="trend",
+                    feat={},
+                    data=np.zeros(1),
+                    i=0,
+                    action="candidate",
+                )
+            )
+            await asyncio.sleep(0.01)
+            self.assertFalse(
+                persistence.done(),
+                "blocking critic persistence starved the Telegram/event-loop timer",
+            )
+            self.assertEqual(await persistence, "TESTUSDT_15m_20260825T000000Z")
+
+    def test_T236B_menu_handlers_do_not_serialize_control_updates(self):
+        bot_src = Path("bot.py").read_text(encoding="utf-8")
+        self.assertIn('CommandHandler("menu",  cmd_start, block=False)', bot_src)
+        self.assertIn(
+            'MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler, block=False)',
+            bot_src,
+        )
+
+
 class TestNightSignalQualityGuards(unittest.TestCase):
     def test_restored_position_is_not_removed_at_day_boundary(self):
         import monitor
@@ -6125,11 +6166,13 @@ class TestNightSignalQualityGuards(unittest.TestCase):
              patch("critic_dataset.fill_trade_outcome") as critic_fill, \
              patch("critic_dataset.fill_learning_labels") as critic_learn, \
              patch("botlog.log_exit_learning") as log_learn:
-            monitor._fill_trade_outcome_labels(
-                pos,
-                exit_pnl=-0.2,
-                exit_reason="fast early exit",
-                bars_held=3,
+            asyncio.run(
+                monitor._fill_trade_outcome_labels(
+                    pos,
+                    exit_pnl=-0.2,
+                    exit_reason="fast early exit",
+                    bars_held=3,
+                )
             )
 
         ml_fill.assert_called_once()
@@ -6347,12 +6390,14 @@ class TestNightSignalQualityGuards(unittest.TestCase):
         with patch("ml_dataset.fill_learning_labels") as ml_learn, \
              patch("critic_dataset.fill_learning_labels") as critic_learn, \
              patch("botlog.log_observable_tail_shadow_label") as log_label:
-            monitor._update_observable_tail_shadow(
-                state=state,
-                sym="NEARUSDT",
-                tf="15m",
-                data=data,
-                idx=1,
+            asyncio.run(
+                monitor._update_observable_tail_shadow(
+                    state=state,
+                    sym="NEARUSDT",
+                    tf="15m",
+                    data=data,
+                    idx=1,
+                )
             )
 
         labels = ml_learn.call_args.args[1]

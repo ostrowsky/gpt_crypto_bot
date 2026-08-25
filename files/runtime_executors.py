@@ -30,6 +30,10 @@ IO_EXECUTOR = ThreadPoolExecutor(
     max_workers=_env_int("CRYPTO_BOT_ASYNCIO_IO_WORKERS", 48),
     thread_name_prefix="asyncio-io",
 )
+EVIDENCE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="evidence-io",
+)
 
 
 async def run_cpu(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
@@ -40,6 +44,12 @@ async def run_cpu(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
 async def run_telegram_io(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(TELEGRAM_EXECUTOR, partial(func, *args, **kwargs))
+
+
+async def run_evidence_io(func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run ordered dataset persistence without blocking Telegram's event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(EVIDENCE_EXECUTOR, partial(func, *args, **kwargs))
 
 
 def install_default_io_executor() -> None:
@@ -54,6 +64,7 @@ def install_default_io_executor() -> None:
 def _shutdown() -> None:
     for executor in (CPU_EXECUTOR, TELEGRAM_EXECUTOR, IO_EXECUTOR):
         executor.shutdown(wait=False, cancel_futures=True)
+    EVIDENCE_EXECUTOR.shutdown(wait=True, cancel_futures=False)
 
 
 atexit.register(_shutdown)

@@ -1,6 +1,7 @@
 ﻿# Telegram Menu Control-Plane Resilience
 
 Date: 2026-06-13
+Updated: 2026-08-25
 Status: implementation
 
 ## Problem
@@ -18,12 +19,18 @@ Make the menu/control plane observable and resilient:
   progress;
 - use a longer timeout for menu/control replies than for ultra-fast callbacks;
 - audit control delivery attempts/results in `bot_events.jsonl`.
+- keep Telegram update polling and menu handling responsive while monitoring
+  persists large evidence datasets.
 
 ## Guardrails
 
 - No trading logic changes.
 - No BUY/SELL gate changes.
 - Do not log raw chat ids.
+- Evidence writes remain ordered and complete; moving them off the event loop
+  must not silently drop records.
+- The change must not alter signal selection, entry, exit, scoring, or portfolio
+  policy.
 
 ## Acceptance Criteria
 
@@ -32,3 +39,33 @@ Make the menu/control plane observable and resilient:
 - `telegram_delivery` events exist for control/menu sends: attempt/ok/failed.
 - Text detection works for `📋 Открыть меню`, `/menu`-like text and hide-menu
   emoji text.
+- A blocking evidence write runs outside the asyncio event-loop thread: a
+  concurrent short timer/menu coroutine must make progress before that write
+  completes.
+- Heavy critic/ML evidence mutation uses a dedicated serialized executor so it
+  cannot starve Telegram polling or race concurrent JSONL rewrites.
+
+## Maximum-load verification
+
+This is an operational scheduling change, not a trading-policy hypothesis, so
+a market replay is not an applicable promotion gate. Verification uses the
+maximum currently available live evidence files (critic and ML JSONL) and a
+synthetic blocking-write regression test. Trading-policy backtests remain
+unchanged because selection, entry, exit, scoring, and portfolio policy are
+unchanged.
+
+## Canary
+
+After restart, keep the existing production policy and run an operator canary:
+observe consecutive Telegram `getUpdates` polling while the monitor persists
+critic/ML evidence, then send `/menu` or press `📋 Открыть меню`. The canary
+passes only when the menu response is delivered without a monitoring-sized
+polling gap and no `409`/`401` Telegram error appears.
+
+## Rollback
+
+Rollback is a code revert followed by a single-instance bot restart. Trigger it
+if evidence writes are lost/reordered, JSONL lock errors increase, the bot
+cannot shut down cleanly, or Telegram polling still stalls under evidence load.
+No BUY/SELL configuration rollback is needed because this change does not alter
+trading policy.

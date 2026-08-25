@@ -41,7 +41,7 @@ import critic_dataset
 import ml_dataset
 import signal_quality_feedback
 import regime_start
-from runtime_executors import run_cpu
+from runtime_executors import run_cpu, run_evidence_io
 from unified_portfolio import external_agent_symbol_count
 
 log = logging.getLogger(__name__)
@@ -1066,7 +1066,7 @@ def _early_top_mover_scout_shadow_snapshot(
     }
 
 
-def _maybe_log_early_top_mover_scout_shadow(
+async def _maybe_log_early_top_mover_scout_shadow(
     *,
     state: "MonitorState",
     sym: str,
@@ -1112,7 +1112,7 @@ def _maybe_log_early_top_mover_scout_shadow(
     reason = str(scout["reason"])
     mode = str(scout["mode"])
     signal_flags = {"early_top_mover_scout": True}
-    _log_critic_candidate(
+    await _log_critic_candidate(
         sym=sym,
         tf=tf,
         bar_ts=bar_ts,
@@ -1158,7 +1158,7 @@ def _maybe_log_early_top_mover_scout_shadow(
     return scout
 
 
-def _log_critic_candidate(
+async def _log_critic_candidate(
     *,
     sym: str,
     tf: str,
@@ -1187,7 +1187,8 @@ def _log_critic_candidate(
     if not getattr(config, "CRITIC_DATASET_ENABLED", False):
         return ""
     try:
-        return critic_dataset.log_candidate(
+        return await run_evidence_io(
+            critic_dataset.log_candidate,
             sym=sym,
             tf=tf,
             bar_ts=bar_ts,
@@ -3721,7 +3722,7 @@ def load_positions() -> dict:
         return {}
 
 
-def _fill_trade_outcome_labels(
+async def _fill_trade_outcome_labels(
     pos: "OpenPosition",
     *,
     exit_pnl: float,
@@ -3737,21 +3738,27 @@ def _fill_trade_outcome_labels(
         "entry_quality_negative_early_exit": bool(early_exit),
     }
     if pos.ml_record_id:
-        ml_dataset.fill_labels(
+        await run_evidence_io(
+            ml_dataset.fill_labels,
             pos.ml_record_id,
             exit_pnl=exit_pnl,
             exit_reason=exit_reason,
             bars_held=bars_held,
         )
-        ml_dataset.fill_learning_labels(pos.ml_record_id, learning_labels)
+        await run_evidence_io(ml_dataset.fill_learning_labels, pos.ml_record_id, learning_labels)
     if getattr(pos, "critic_record_id", ""):
-        critic_dataset.fill_trade_outcome(
+        await run_evidence_io(
+            critic_dataset.fill_trade_outcome,
             pos.critic_record_id,
             exit_pnl=exit_pnl,
             exit_reason=exit_reason,
             bars_held=bars_held,
         )
-        critic_dataset.fill_learning_labels(pos.critic_record_id, learning_labels)
+        await run_evidence_io(
+            critic_dataset.fill_learning_labels,
+            pos.critic_record_id,
+            learning_labels,
+        )
     if early_exit:
         botlog.log_exit_learning(
             sym=str(getattr(pos, "symbol", "")),
@@ -3766,11 +3773,16 @@ def _fill_trade_outcome_labels(
         )
 
 
-def _fill_forward_labels(pos: "OpenPosition", horizon: int, ret_pct: float) -> None:
+async def _fill_forward_labels(pos: "OpenPosition", horizon: int, ret_pct: float) -> None:
     if pos.ml_record_id:
-        ml_dataset.fill_forward_label(pos.ml_record_id, horizon, ret_pct)
+        await run_evidence_io(ml_dataset.fill_forward_label, pos.ml_record_id, horizon, ret_pct)
     if getattr(pos, "critic_record_id", ""):
-        critic_dataset.fill_forward_label(pos.critic_record_id, horizon, ret_pct)
+        await run_evidence_io(
+            critic_dataset.fill_forward_label,
+            pos.critic_record_id,
+            horizon,
+            ret_pct,
+        )
 
 
 def _portfolio_position_capacity(max_positions_override: Optional[int] = None) -> int:
@@ -4401,7 +4413,7 @@ def _observable_tail_shadow_selector_matches(
     return False
 
 
-def _update_observable_tail_shadow(
+async def _update_observable_tail_shadow(
     *,
     state: MonitorState,
     sym: str,
@@ -4443,9 +4455,9 @@ def _update_observable_tail_shadow(
         ml_record_id = str(watch.get("ml_record_id", "") or "")
         critic_record_id = str(watch.get("critic_record_id", "") or "")
         if ml_record_id:
-            ml_dataset.fill_learning_labels(ml_record_id, labels)
+            await run_evidence_io(ml_dataset.fill_learning_labels, ml_record_id, labels)
         if critic_record_id:
-            critic_dataset.fill_learning_labels(critic_record_id, labels)
+            await run_evidence_io(critic_dataset.fill_learning_labels, critic_record_id, labels)
         botlog.log_observable_tail_shadow_label(
             sym=sym,
             tf=tf,
@@ -4627,9 +4639,13 @@ async def _maybe_send_suspicious_reentry_shadow_alert(
     ml_record_id = str(watch.get("ml_record_id", "") or "")
     critic_record_id = str(watch.get("critic_record_id", "") or "")
     if ml_record_id:
-        ml_dataset.fill_learning_labels(ml_record_id, continuation_labels)
+        await run_evidence_io(ml_dataset.fill_learning_labels, ml_record_id, continuation_labels)
     if critic_record_id:
-        critic_dataset.fill_learning_labels(critic_record_id, continuation_labels)
+        await run_evidence_io(
+            critic_dataset.fill_learning_labels,
+            critic_record_id,
+            continuation_labels,
+        )
     botlog.log_exit_learning(
         sym=sym,
         tf=tf,
@@ -5068,7 +5084,7 @@ async def _poll_coin(
     if pos is None:
         # П3: cooldown — не входим повторно N баров после выхода
         # cooldown хранит unix-ms время до которого вход заблокирован
-        _update_observable_tail_shadow(state=state, sym=sym, tf=tf, data=data, idx=i)
+        await _update_observable_tail_shadow(state=state, sym=sym, tf=tf, data=data, idx=i)
         cooldown_until_ms = state.cooldowns.get(sym, 0)
         current_ts_ms = int(data["t"][i])
         if current_ts_ms < cooldown_until_ms:
@@ -5166,7 +5182,7 @@ async def _poll_coin(
                 today_change_pct=float(getattr(report, "today_change_pct", 0.0)),
             )
             if near_miss is not None:
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5209,7 +5225,7 @@ async def _poll_coin(
                         tf,
                         str(near_miss["reason"]),
                     )
-            _maybe_log_early_top_mover_scout_shadow(
+            await _maybe_log_early_top_mover_scout_shadow(
                 state=state,
                 sym=sym,
                 tf=tf,
@@ -5335,7 +5351,7 @@ async def _poll_coin(
                     f"late 1h continuation: RSI {preview_rsi:.1f}, "
                     f"price {_time_block_price_edge_pct(price=preview_price, ema20=preview_ema20):.2f}% > EMA20"
                 )
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5390,7 +5406,7 @@ async def _poll_coin(
                     confirmed_leader_continuation = True
                     log.info("CONFIRMED LEADER IMPULSE BYPASS %s [%s]: %s", sym, tf, impulse_speed_reason)
                 else:
-                    _log_critic_candidate(
+                    await _log_critic_candidate(
                         sym=sym,
                         tf=tf,
                         bar_ts=int(data["t"][i]),
@@ -5474,7 +5490,7 @@ async def _poll_coin(
                     _now_tb = int(data["t"][i]) if len(data["t"]) > i else 0
                     if _now_tb >= _until_tb:
                         reason = f"time block: UTC hour {_bar_hour_utc} filtered"
-                        _log_critic_candidate(
+                        await _log_critic_candidate(
                             sym=sym,
                             tf=tf,
                             bar_ts=int(data["t"][i]),
@@ -5527,7 +5543,7 @@ async def _poll_coin(
                     daily_range=preview_range,
                 )
                 if not mtf_ok:
-                    _log_critic_candidate(
+                    await _log_critic_candidate(
                         sym=sym,
                         tf=tf,
                         bar_ts=int(data["t"][i]),
@@ -5606,7 +5622,7 @@ async def _poll_coin(
                         )
                         if getattr(config, "ML_TREND_NONBULL_HARD_BLOCK", False):
                             reason = f"ML trend|nonbull quality {ml_proba:.2f} < {min_proba:.2f}"
-                            _log_critic_candidate(
+                            await _log_critic_candidate(
                                 sym=sym,
                                 tf=tf,
                                 bar_ts=int(data["t"][i]),
@@ -5652,7 +5668,7 @@ async def _poll_coin(
                 daily_range=preview_range,
             )
             if chase_guard_reason:
-                critic_record_id = _log_critic_candidate(
+                critic_record_id = await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5704,7 +5720,11 @@ async def _poll_coin(
                         "blocked_chase_guard_daily_range": round(float(preview_range), 4),
                     }
                     if critic_record_id:
-                        critic_dataset.fill_learning_labels(critic_record_id, chase_labels)
+                        await run_evidence_io(
+                            critic_dataset.fill_learning_labels,
+                            critic_record_id,
+                            chase_labels,
+                        )
                     botlog.log_blocked_learning(
                         sym=sym,
                         tf=tf,
@@ -5781,7 +5801,7 @@ async def _poll_coin(
                 today_confirmed=today_confirmed_now,
             )
             if objective_gate_reason:
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5844,7 +5864,7 @@ async def _poll_coin(
                 ranker_info=ranker_info,
             )
             if top_gainer_score_gate_reason:
-                critic_record_id = _log_critic_candidate(
+                critic_record_id = await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -5911,7 +5931,11 @@ async def _poll_coin(
                         "blocked_score_gate_daily_range": round(float(preview_range), 4),
                     }
                     if critic_record_id:
-                        critic_dataset.fill_learning_labels(critic_record_id, score_gate_labels)
+                        await run_evidence_io(
+                            critic_dataset.fill_learning_labels,
+                            critic_record_id,
+                            score_gate_labels,
+                        )
                     botlog.log_blocked_learning(
                         sym=sym,
                         tf=tf,
@@ -6077,7 +6101,7 @@ async def _poll_coin(
                         )
                     else:
                         reason = f"entry score {candidate_score:.2f} < floor {min_score:.2f}"
-                        _log_critic_candidate(
+                        await _log_critic_candidate(
                             sym=sym,
                             tf=tf,
                             bar_ts=int(data["t"][i]),
@@ -6172,7 +6196,7 @@ async def _poll_coin(
                         trend_guard_reason,
                     )
                 else:
-                    _log_critic_candidate(
+                    await _log_critic_candidate(
                         sym=sym,
                         tf=tf,
                         bar_ts=int(data["t"][i]),
@@ -6220,7 +6244,7 @@ async def _poll_coin(
                 forecast_return_pct=float(getattr(report, "forecast_return_pct", 0.0)),
             )
             if ranker_veto_reason:
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -6291,7 +6315,7 @@ async def _poll_coin(
                     confirmed_leader_continuation = True
                     log.info("CONFIRMED LEADER RANKER BYPASS %s [%s]: %s", sym, tf, ranker_hard_veto_reason)
                 else:
-                    _log_critic_candidate(
+                    await _log_critic_candidate(
                         sym=sym,
                         tf=tf,
                         bar_ts=int(data["t"][i]),
@@ -6360,7 +6384,7 @@ async def _poll_coin(
                 mode=preview_mode,
             )
             if not cap_ok:
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -6409,7 +6433,7 @@ async def _poll_coin(
                 ranker_info=ranker_info,
             )
             if clone_guard_reason:
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -6456,7 +6480,7 @@ async def _poll_coin(
                 max_positions_override=effective_max_pos,
             )
             if cluster_cap_reason:
-                _log_critic_candidate(
+                await _log_critic_candidate(
                     sym=sym,
                     tf=tf,
                     bar_ts=int(data["t"][i]),
@@ -6539,7 +6563,7 @@ async def _poll_coin(
                             confirmed_leader_continuation = True
                             log.info("CONFIRMED LEADER ROTATION BYPASS %s [%s]: %s", sym, tf, late_rotation_reason)
                         else:
-                            _log_critic_candidate(
+                            await _log_critic_candidate(
                                 sym=sym,
                                 tf=tf,
                                 bar_ts=int(data["t"][i]),
@@ -6614,7 +6638,7 @@ async def _poll_coin(
                             bars_held=replace_pos.bars_elapsed,
                             trail_k=getattr(replace_pos, "trail_k", 2.0),
                         )
-                        _fill_trade_outcome_labels(
+                        await _fill_trade_outcome_labels(
                             replace_pos,
                             exit_pnl=replace_pos.pnl_pct(float(replace_price)),
                             exit_reason=replace_reason,
@@ -6642,7 +6666,7 @@ async def _poll_coin(
                     _block_until = state.block_logged.get(sym, 0)
                     _now_ms = int(data["t"][i]) if len(data["t"]) > i else 0
                     if _now_ms >= _block_until:
-                        _log_critic_candidate(
+                        await _log_critic_candidate(
                             sym=sym,
                             tf=tf,
                             bar_ts=int(data["t"][i]),
@@ -6786,7 +6810,9 @@ async def _poll_coin(
             # ── КРИТИЧНО: позиция сохраняется ПЕРВОЙ, до любых внешних вызовов.
             # Если ml_dataset или botlog выбросят исключение — позиция уже в state
             # и не потеряется. Именно это было причиной "нет позиций при сигналах".
-            pos.critic_record_id = _log_critic_candidate(
+            state.positions[sym] = pos
+            save_positions(state.positions)
+            pos.critic_record_id = await _log_critic_candidate(
                 sym=sym,
                 tf=tf,
                 bar_ts=int(data["t"][i]),
@@ -6816,8 +6842,8 @@ async def _poll_coin(
                 continuation_profile=continuation_profile,
                 signal_flags=signal_flags,
             )
-            state.positions[sym] = pos
-            save_positions(state.positions)  # персистируем при входе
+            if pos.critic_record_id:
+                save_positions(state.positions)
             state.block_logged.pop(sym, None)  # сбросить dedup при входе
             state.time_block_recent.pop(sym, None)
             state.recent_discoveries.pop(sym, None)
@@ -6829,17 +6855,26 @@ async def _poll_coin(
             # ML Dataset (некритично — ошибка не должна блокировать вход)
             _btc_vs_ema50 = getattr(config, "_btc_vs_ema50", 0.0)
             try:
-                ml_id = ml_dataset.log_signal_candidate(
-                    sym=sym, tf=tf,
+                ml_id = await run_evidence_io(
+                    ml_dataset.log_signal_candidate,
+                    sym=sym,
+                    tf=tf,
                     bar_ts=int(data["t"][i]),
                     signal_type=sig_mode,
                     is_bull_day=getattr(config, "_bull_day_active", False),
-                    feat=feat, i=i, data=data,
+                    feat=feat,
+                    i=i,
+                    data=data,
                     btc_vs_ema50=_btc_vs_ema50,
                 )
                 pos.ml_record_id = ml_id
                 if pos.critic_record_id:
-                    critic_dataset.mark_trade_taken(pos.critic_record_id, linked_ml_record_id=ml_id)
+                    await run_evidence_io(
+                        critic_dataset.mark_trade_taken,
+                        pos.critic_record_id,
+                        linked_ml_record_id=ml_id,
+                    )
+                save_positions(state.positions)
             except Exception as _ml_err:
                 log.warning("ml_dataset.log_signal_candidate failed for %s: %s", sym, _ml_err)
 
@@ -7008,7 +7043,7 @@ async def _poll_coin(
                         bars_held=pos.bars_elapsed,
                         trail_k=getattr(pos, "trail_k", 2.0),
                     )
-                    _fill_trade_outcome_labels(
+                    await _fill_trade_outcome_labels(
                         pos,
                         exit_pnl=pos.pnl_pct(micro_close),
                         exit_reason=micro_reason,
@@ -7059,7 +7094,7 @@ async def _poll_coin(
                         entry_price=pos.entry_price, exit_price=close_now,
                         reason=_exit_reason_atr,
                         bars_held=pos.bars_elapsed, trail_k=getattr(pos,"trail_k",2.0))
-        _fill_trade_outcome_labels(
+        await _fill_trade_outcome_labels(
             pos,
             exit_pnl=pos.pnl_pct(close_now),
             exit_reason=_exit_reason_atr,
@@ -7136,7 +7171,7 @@ async def _poll_coin(
                            horizon=h, entry_price=pos.entry_price,
                            forward_price=future_price, correct=correct)
         # ML: заполняем метку горизонта
-        _fill_forward_labels(pos, h, _ret_pct)
+        await _fill_forward_labels(pos, h, _ret_pct)
         pnl = pos.pnl_pct(future_price)
         icon = "✅" if correct else "⚠️"
         if _aux_notifications_enabled():
@@ -7168,7 +7203,7 @@ async def _poll_coin(
                         entry_price=pos.entry_price, exit_price=price,
                         reason=_exit_reason_time,
                         bars_held=pos.bars_elapsed, trail_k=getattr(pos,"trail_k",2.0))
-        _fill_trade_outcome_labels(
+        await _fill_trade_outcome_labels(
             pos,
             exit_pnl=pos.pnl_pct(price),
             exit_reason=_exit_reason_time,
@@ -7227,7 +7262,7 @@ async def _poll_coin(
             bars_held=pos.bars_elapsed,
             trail_k=getattr(pos, "trail_k", 2.0),
         )
-        _fill_trade_outcome_labels(
+        await _fill_trade_outcome_labels(
             pos,
             exit_pnl=pos.pnl_pct(close_now),
             exit_reason=fast_loss_reason,
@@ -7277,7 +7312,7 @@ async def _poll_coin(
             bars_held=pos.bars_elapsed,
             trail_k=getattr(pos, "trail_k", 2.0),
         )
-        _fill_trade_outcome_labels(
+        await _fill_trade_outcome_labels(
             pos,
             exit_pnl=pos.pnl_pct(close_now),
             exit_reason=cleanup_reason,
@@ -7327,7 +7362,7 @@ async def _poll_coin(
             bars_held=pos.bars_elapsed,
             trail_k=getattr(pos, "trail_k", 2.0),
         )
-        _fill_trade_outcome_labels(
+        await _fill_trade_outcome_labels(
             pos,
             exit_pnl=pos.pnl_pct(close_now),
             exit_reason=quality_recheck_reason,
@@ -7414,7 +7449,7 @@ async def _poll_coin(
                         entry_price=pos.entry_price, exit_price=price,
                         reason=reason, bars_held=pos.bars_elapsed,
                         trail_k=getattr(pos,"trail_k",2.0))
-        _fill_trade_outcome_labels(
+        await _fill_trade_outcome_labels(
             pos,
             exit_pnl=pos.pnl_pct(price),
             exit_reason=reason,
