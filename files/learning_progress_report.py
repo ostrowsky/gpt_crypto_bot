@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean, median
 from typing import Any, Iterable
@@ -35,6 +35,8 @@ PORTFOLIO_REPLACEMENT_RESEARCH_CONFIG = report_portfolio_replacement_shadow_rewa
 class DayMetrics:
     day: str
     critic_present: bool = True
+    goal_present: bool = True
+    goal_denominator_consistent: bool = True
     signal_quality_present: bool = True
     watchlist_top_count: int = 0
     bought: int = 0
@@ -51,6 +53,12 @@ class DayMetrics:
     median_capture_ratio: float | None = None
     median_exit_efficiency: float | None = None
     median_giveback_pct: float | None = None
+    top_median_capture_ratio: float | None = None
+    top_capture_sample_count: int = 0
+    top_median_exit_efficiency: float | None = None
+    top_exit_sample_count: int = 0
+    top_median_giveback_pct: float | None = None
+    top_giveback_sample_count: int = 0
     coverage_status: str = "unknown"
     coverage_reasons: tuple[str, ...] = ()
     coverage_assessment: str = "unknown"
@@ -69,8 +77,6 @@ def build_report(
     days = _load_day_metrics(reports_dir)
     days = _apply_latest_coverage_triage(days, reports_dir)
     latest = days[-1] if days else DayMetrics(day="unknown")
-    previous = days[-8:-1]
-    older = days[-15:-8]
     status = _load_json(status_file)
     feedback = _load_json(feedback_file)
     shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
@@ -84,7 +90,7 @@ def build_report(
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "latest_day": latest.day,
         "days_loaded": len(days),
-        "verdict": _verdict(latest, previous, older, status),
+        "verdict": _verdict(latest, days[:-1], (), status),
         "latest": latest.__dict__,
         "rolling": _rolling_summary(days),
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
@@ -136,16 +142,39 @@ def render_text(report: dict[str, Any]) -> str:
     confidence_reason = verdict.get("confidence_reason", "")
     early_now = _fmt(rolling.get("early_last7_pct"), 1)
     early_prev = _fmt(rolling.get("early_prev7_pct"), 1)
+    early_now_counts = _ratio_counts(
+        rolling.get("early_last7_numerator"),
+        rolling.get("early_last7_denominator"),
+    )
+    early_prev_counts = _ratio_counts(
+        rolling.get("early_prev7_numerator"),
+        rolling.get("early_prev7_denominator"),
+    )
+    paired_days = int(rolling.get("comparison_days_per_window") or 0)
+    early_delta = _fmt_signed(rolling.get("early_delta_pp"), 1)
+    early_ci = _fmt_interval(
+        rolling.get("early_delta_ci95_low_pp"),
+        rolling.get("early_delta_ci95_high_pp"),
+        1,
+    )
     capture = _fmt(latest.get("capture_pct"), 1)
     early = _fmt(latest.get("early_pct"), 1)
-    median_capture = latest.get("median_capture_ratio")
-    capture_piece = "нет данных" if median_capture is None else f"оставалось медианно {float(median_capture) * 100:.0f}% дневного движения после входа"
+    median_capture = latest.get("top_median_capture_ratio")
+    capture_n = int(latest.get("top_capture_sample_count") or 0)
+    capture_piece = (
+        "top-mover entry timing: нет данных"
+        if median_capture is None
+        else f"у top movers оставалось медианно {float(median_capture) * 100:.0f}% движения после входа (n={capture_n})"
+    )
     blocked = latest.get("blocked_winner_count") or 0
     miss_rate = latest.get("miss_rate")
-    miss_piece = "miss-rate нет" if miss_rate is None else f"miss-rate {float(miss_rate) * 100:.0f}%"
-    if not bool(latest.get("critic_present", True)):
+    miss_piece = "broad trend miss-rate нет" if miss_rate is None else f"broad trend miss-rate {float(miss_rate) * 100:.0f}%"
+    top_exit = latest.get("top_median_exit_efficiency")
+    top_exit_n = int(latest.get("top_exit_sample_count") or 0)
+    top_exit_piece = "top-mover exit efficiency нет" if top_exit is None else f"top-mover exit efficiency median {_fmt(top_exit, 2)} (n={top_exit_n})"
+    if not bool(latest.get("critic_present", True)) or not bool(latest.get("goal_present", True)) or not bool(latest.get("goal_denominator_consistent", True)):
         yesterday_line = (
-            "Вчера: top-mover denominator недоступен — final critic не создан; "
+            "Вчера: top-mover denominator недоступен — final critic/goal отсутствует или не согласован; "
             f"{capture_piece}."
         )
     elif int(latest.get("watchlist_top_count") or 0) == 0:
@@ -160,9 +189,13 @@ def render_text(report: dict[str, Any]) -> str:
         "",
         f"{emoji} {title}   ·   confidence={confidence}   ·   👉 {ask}",
         "",
-        f"Главное: early-capture ~{early_now}% за 7д ({early_prev}% → {early_now}%). Цель — 25%+.",
+        (
+            f"Главное: paired early-capture {early_prev}% ({early_prev_counts}) → "
+            f"{early_now}% ({early_now_counts}), Δ={early_delta}pp, 95% CI {early_ci}, "
+            f"valid_days={paired_days}+{paired_days}. Цель — 25%+."
+        ),
         yesterday_line,
-        f"Где теряем: blocked winners {blocked}; {miss_piece}; exit efficiency median {_fmt(latest.get('median_exit_efficiency'), 2)}.",
+        f"Где теряем: top-mover blocked winners {blocked}; {miss_piece}; {top_exit_piece}.",
         "",
     ]
     if confidence_reason:
@@ -220,8 +253,13 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
         day = str(data.get("target_day_local") or "")
         if not day:
             continue
-        summary = data.get("summary") or {}
-        by_day.setdefault(day, {})["critic"] = summary
+        by_day.setdefault(day, {})["critic"] = data
+    for path in sorted(reports_dir.glob("watchlist_top_gainer_goal_*_22h.json")):
+        data = _load_json(path)
+        day = str(data.get("target_day_local") or "")
+        if not day:
+            continue
+        by_day.setdefault(day, {})["goal"] = data
     for path in sorted(reports_dir.glob("signal_quality_*_final.json")):
         data = _load_json(path)
         day = _day_from_signal_quality_path(path, data)
@@ -232,7 +270,12 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
     for day in sorted(by_day):
         critic_present = "critic" in by_day[day]
         signal_quality_present = "signal_quality" in by_day[day]
-        critic = by_day[day].get("critic") or {}
+        critic_payload = by_day[day].get("critic") or {}
+        critic = critic_payload.get("summary") or {}
+        goal_payload = by_day[day].get("goal") or {}
+        goal_present = "goal" in by_day[day]
+        goal_consistent = goal_present and _goal_matches_critic(goal_payload, critic_payload)
+        top_rows = list(critic_payload.get("watchlist_top_gainers") or [])
         sq = by_day[day].get("signal_quality") or {}
         sq_summary = sq.get("summary") or {}
         coverage = sq.get("coverage") or {}
@@ -240,6 +283,8 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
             DayMetrics(
                 day=day,
                 critic_present=critic_present,
+                goal_present=goal_present,
+                goal_denominator_consistent=goal_consistent,
                 signal_quality_present=signal_quality_present,
                 watchlist_top_count=int(critic.get("watchlist_top_count") or 0),
                 bought=int(critic.get("watchlist_top_bought") or 0),
@@ -256,6 +301,12 @@ def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:
                 median_capture_ratio=_metric_median(sq_summary, "capture_ratio_at_entry"),
                 median_exit_efficiency=_metric_median(sq_summary, "exit_efficiency"),
                 median_giveback_pct=_metric_median(sq_summary, "giveback_pct"),
+                top_median_capture_ratio=_row_median(top_rows, "capture_ratio_at_entry", "capture_ratio"),
+                top_capture_sample_count=_row_value_count(top_rows, "capture_ratio_at_entry", "capture_ratio"),
+                top_median_exit_efficiency=_row_median(top_rows, "exit_efficiency"),
+                top_exit_sample_count=_row_value_count(top_rows, "exit_efficiency"),
+                top_median_giveback_pct=_row_median(top_rows, "giveback_pct"),
+                top_giveback_sample_count=_row_value_count(top_rows, "giveback_pct"),
                 coverage_status=str(coverage.get("status") or "unknown"),
                 coverage_reasons=tuple(str(x) for x in (coverage.get("reasons") or ())),
             )
@@ -295,35 +346,121 @@ def _apply_latest_coverage_triage(days: list[DayMetrics], reports_dir: Path) -> 
 
 
 def _rolling_summary(days: list[DayMetrics]) -> dict[str, Any]:
-    last7 = days[-7:]
-    prev7 = days[-14:-7]
-    last7_top = _days_with_top_denominator(last7)
-    prev7_top = _days_with_top_denominator(prev7)
+    last7, prev7, last7_valid_unpaired, prev7_valid_unpaired = _paired_objective_windows(days)
+    current_metric_days = last7 if last7 else last7_valid_unpaired
+    early_last = _count_rate(current_metric_days, "early")
+    early_prev = _count_rate(prev7, "early")
+    capture_last = _count_rate(current_metric_days, "bought")
+    capture_prev = _count_rate(prev7, "bought")
+    early_difference = _difference_interval_pp(early_last, early_prev)
     return {
-        "early_last7_pct": _top_rate(last7_top, "early_pct"),
-        "early_prev7_pct": _top_rate(prev7_top, "early_pct"),
-        "capture_last7_pct": _top_rate(last7_top, "capture_pct"),
-        "capture_prev7_pct": _top_rate(prev7_top, "capture_pct"),
-        "miss_rate_last7_pct": _avg([d.miss_rate * 100 for d in last7 if d.miss_rate is not None]),
-        "blocked_winners_last7": sum(d.blocked_winner_count for d in last7),
-        "n_last7": len(last7),
+        "early_last7_pct": early_last["pct"],
+        "early_last7_numerator": early_last["numerator"],
+        "early_last7_denominator": early_last["denominator"],
+        "early_prev7_pct": early_prev["pct"],
+        "early_prev7_numerator": early_prev["numerator"],
+        "early_prev7_denominator": early_prev["denominator"],
+        "early_delta_pp": early_difference["delta_pp"],
+        "early_delta_ci95_low_pp": early_difference["low_pp"],
+        "early_delta_ci95_high_pp": early_difference["high_pp"],
+        "capture_last7_pct": capture_last["pct"],
+        "capture_last7_numerator": capture_last["numerator"],
+        "capture_last7_denominator": capture_last["denominator"],
+        "capture_prev7_pct": capture_prev["pct"],
+        "capture_prev7_numerator": capture_prev["numerator"],
+        "capture_prev7_denominator": capture_prev["denominator"],
+        "miss_rate_last7_pct": _avg([d.miss_rate * 100 for d in current_metric_days if d.miss_rate is not None]),
+        "blocked_winners_last7": sum(d.blocked_winner_count for d in current_metric_days),
+        "n_last7": len(current_metric_days),
         "n_prev7": len(prev7),
-        "n_last7_top_days": len(last7_top),
-        "n_prev7_top_days": len(prev7_top),
+        "n_last7_top_days": len(current_metric_days),
+        "n_prev7_top_days": len(prev7),
+        "n_last7_valid_unpaired": len(last7_valid_unpaired),
+        "n_prev7_valid_unpaired": len(prev7_valid_unpaired),
+        "comparison_days_per_window": len(last7),
     }
 
 
 def _days_with_top_denominator(days: Iterable[DayMetrics]) -> list[DayMetrics]:
-    return [d for d in days if int(d.watchlist_top_count or 0) > 0]
+    return [
+        d
+        for d in days
+        if d.critic_present
+        and d.goal_present
+        and d.goal_denominator_consistent
+        and int(d.watchlist_top_count or 0) > 0
+    ]
 
 
-def _top_rate(days: Iterable[DayMetrics], rate_field: str) -> float | None:
+def _count_rate(days: Iterable[DayMetrics], numerator_field: str) -> dict[str, int | float | None]:
     rows = list(days)
     denominator = sum(int(d.watchlist_top_count or 0) for d in rows)
-    if denominator <= 0:
+    numerator = sum(int(getattr(d, numerator_field, 0) or 0) for d in rows)
+    return {
+        "numerator": numerator,
+        "denominator": denominator,
+        "pct": round(numerator / denominator * 100.0, 2) if denominator > 0 else None,
+    }
+
+
+def _wilson_interval(numerator: int, denominator: int, z: float = 1.959963984540054) -> tuple[float, float] | None:
+    if denominator <= 0 or numerator < 0 or numerator > denominator:
         return None
-    weighted = sum(float(getattr(d, rate_field, 0.0) or 0.0) * int(d.watchlist_top_count or 0) for d in rows)
-    return round(weighted / denominator, 2)
+    proportion = numerator / denominator
+    z2 = z * z
+    scale = 1.0 + z2 / denominator
+    center = (proportion + z2 / (2.0 * denominator)) / scale
+    half = z * ((proportion * (1.0 - proportion) / denominator + z2 / (4.0 * denominator * denominator)) ** 0.5) / scale
+    return max(0.0, center - half), min(1.0, center + half)
+
+
+def _difference_interval_pp(
+    current: dict[str, int | float | None],
+    previous: dict[str, int | float | None],
+) -> dict[str, float | None]:
+    current_denominator = int(current.get("denominator") or 0)
+    previous_denominator = int(previous.get("denominator") or 0)
+    current_interval = _wilson_interval(int(current.get("numerator") or 0), current_denominator)
+    previous_interval = _wilson_interval(int(previous.get("numerator") or 0), previous_denominator)
+    current_pct = _maybe_float(current.get("pct"))
+    previous_pct = _maybe_float(previous.get("pct"))
+    if current_interval is None or previous_interval is None or current_pct is None or previous_pct is None:
+        return {"delta_pp": None, "low_pp": None, "high_pp": None}
+    return {
+        "delta_pp": round(current_pct - previous_pct, 2),
+        "low_pp": round((current_interval[0] - previous_interval[1]) * 100.0, 2),
+        "high_pp": round((current_interval[1] - previous_interval[0]) * 100.0, 2),
+    }
+
+
+def _paired_objective_windows(
+    days: list[DayMetrics],
+) -> tuple[list[DayMetrics], list[DayMetrics], list[DayMetrics], list[DayMetrics]]:
+    dated: list[tuple[date, DayMetrics]] = []
+    for item in days:
+        try:
+            dated.append((date.fromisoformat(item.day), item))
+        except (TypeError, ValueError):
+            continue
+    if not dated:
+        return [], [], [], []
+    anchor = max(day for day, _ in dated)
+    recent_start = anchor - timedelta(days=6)
+    previous_start = anchor - timedelta(days=13)
+    previous_end = anchor - timedelta(days=7)
+    recent_raw = [item for day, item in dated if recent_start <= day <= anchor]
+    previous_raw = [item for day, item in dated if previous_start <= day <= previous_end]
+    recent_valid = _days_with_top_denominator(recent_raw)
+    previous_valid = _days_with_top_denominator(previous_raw)
+    paired_days = min(len(recent_valid), len(previous_valid))
+    if paired_days <= 0:
+        return [], [], recent_valid, previous_valid
+    return (
+        recent_valid[-paired_days:],
+        previous_valid[-paired_days:],
+        recent_valid,
+        previous_valid,
+    )
 
 
 def _ranker_training_state(status: dict[str, Any], latest_day: str) -> dict[str, Any]:
@@ -378,32 +515,46 @@ def _ranker_training_state(status: dict[str, Any], latest_day: str) -> dict[str,
 
 
 def _verdict(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics], status: dict[str, Any]) -> dict[str, str]:
-    recent_top_days = _days_with_top_denominator([*previous[-7:], latest])
-    older_top_days = _days_with_top_denominator(older)
-    early_recent = _top_rate(recent_top_days, "early_pct")
-    early_old = _top_rate(older_top_days, "early_pct")
+    recent_top_days, older_top_days, _, _ = _paired_objective_windows([*older, *previous, latest])
+    recent_counts = _count_rate(recent_top_days, "early")
+    older_counts = _count_rate(older_top_days, "early")
+    early_recent = _maybe_float(recent_counts.get("pct"))
+    early_old = _maybe_float(older_counts.get("pct"))
+    early_difference = _difference_interval_pp(recent_counts, older_counts)
+    difference_low = _maybe_float(early_difference.get("low_pp"))
+    difference_high = _maybe_float(early_difference.get("high_pp"))
+    recent_denominator = sum(day.watchlist_top_count for day in recent_top_days)
+    minimum_evidence = len(recent_top_days) >= 3 and len(older_top_days) >= 3 and recent_denominator >= 10
     stale_training = _ranker_training_state(status, latest.day)["status"] in {"stale", "error"}
     confidence, confidence_reason = _verdict_confidence(latest, previous, older)
     extra = {"confidence": confidence, "confidence_reason": confidence_reason}
     if not latest.critic_present:
         return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "починить final top-gainer critic", **extra}
+    if not latest.goal_present or not latest.goal_denominator_consistent:
+        return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "починить immutable goal denominator", **extra}
     if latest.coverage_status not in {"ok", "complete"} and not _coverage_is_safe_partial(latest):
         return {"label": "СТАТУС НЕПОЛНЫЙ", "emoji": "🟡", "operator_hint": "сначала проверь покрытие данных", **extra}
     if latest.watchlist_top_count <= 0:
-        if early_recent is not None and early_old is not None and early_recent >= early_old + 2.0:
+        if minimum_evidence and difference_low is not None and difference_low >= 2.0:
             return {"label": 'ROLLING УЛУЧШАЕТСЯ, ДЕНЬ НЕИНФОРМАТИВЕН', "emoji": "🟡", "operator_hint": 'не принимать решений по пустому дню; фокус — exit', **extra}
         return {"label": 'ДЕНЬ НЕИНФОРМАТИВЕН', "emoji": "🟡", "operator_hint": 'ждать валидный denominator; проверять exit', **extra}
+    if not minimum_evidence:
+        return {
+            "label": "НЕДОСТАТОЧНО ДАННЫХ",
+            "emoji": "🟡",
+            "operator_hint": "накопить paired objective evidence; направление не доказано",
+            **extra,
+        }
     if early_recent is None or early_old is None:
         return {"label": 'СТАТУС НЕПОЛНЫЙ', "emoji": "🟡", "operator_hint": 'нужно больше валидных top-mover дней', **extra}
-    if stale_training and early_recent <= early_old + 1.0:
-        return {"label": "СТОИТ НА МЕСТЕ", "emoji": "🟠", "operator_hint": "нужно чинить обучение/гейты", **extra}
-    if early_recent >= early_old + 2.0:
+    if difference_low is not None and difference_low >= 2.0:
         return {"label": "РАЗВИВАЕТСЯ ПО ЦЕЛЕВОЙ МЕТРИКЕ", "emoji": "📈", "operator_hint": "фокус — монетизация выходов", **extra}
-    if early_recent + 2.0 < early_old:
+    if difference_high is not None and difference_high <= -2.0:
         if confidence == "high":
             return {"label": "ДЕГРАДИРУЕТ", "emoji": "📉", "operator_hint": "остановить авто-изменения и проверить replay", **extra}
         return {"label": "УХУДШИЛСЯ ПО EARLY-CAPTURE", "emoji": "🟠", "operator_hint": "нужны replay-проверки, не авто-изменения", **extra}
-    return {"label": "СТОИТ НА МЕСТЕ", "emoji": "➡️", "operator_hint": "ждать нельзя, нужны узкие проверки", **extra}
+    hint = "обновить learning evidence и продолжать pre-registered проверки" if stale_training else "продолжать pre-registered проверки"
+    return {"label": "НЕТ ДОКАЗАННОГО ИЗМЕНЕНИЯ", "emoji": "➖", "operator_hint": hint, **extra}
 
 
 def _verdict_confidence(latest: DayMetrics, previous: list[DayMetrics], older: list[DayMetrics]) -> tuple[str, str]:
@@ -412,12 +563,24 @@ def _verdict_confidence(latest: DayMetrics, previous: list[DayMetrics], older: l
         reasons.append("final top-gainer critic missing")
     if latest.watchlist_top_count < 5:
         reasons.append(f"малый denominator дня: watchlist_top={latest.watchlist_top_count}")
-    if len(previous) < 6 or len(older) < 6:
-        reasons.append(f"короткое rolling окно: prev={len(previous)}, older={len(older)}")
+    if not latest.goal_present:
+        reasons.append("immutable goal missing")
+    elif not latest.goal_denominator_consistent:
+        reasons.append("critic/goal denominator mismatch")
+    recent, prior, recent_unpaired, prior_unpaired = _paired_objective_windows([*older, *previous, latest])
+    recent_denominator = sum(day.watchlist_top_count for day in recent)
+    if len(recent) < 3 or len(prior) < 3 or recent_denominator < 10:
+        reasons.append(
+            "недостаточная paired evidence: "
+            f"days={len(prior)}+{len(recent)}, current_denominator={recent_denominator}, "
+            f"valid_unpaired={len(prior_unpaired)}+{len(recent_unpaired)}"
+        )
     report_days = [d.day for d in [*older, *previous, latest] if d.day and d.day != "unknown"]
     if len(report_days) >= 2:
         try:
-            parsed = [date.fromisoformat(day) for day in report_days]
+            parsed_all = [date.fromisoformat(day) for day in report_days]
+            anchor = max(parsed_all)
+            parsed = [day for day in parsed_all if day >= anchor - timedelta(days=13)]
             span = (max(parsed) - min(parsed)).days + 1
             if span > len(set(parsed)) + 3:
                 reasons.append(f"разреженные отчётные дни: reports={len(set(parsed))}/{span} calendar days")
@@ -451,6 +614,11 @@ def _learning_components(
             sq_day = latest_day
     critic_piece = critic_day or "missing"
     sq_piece = sq_day or "missing"
+    feedback_detail = str(feedback.get("reason") or fb_policy.get("reason") or "no active policy")
+    feedback_detail = feedback_detail.replace(
+        "top-mover miss pressure:",
+        "signal-quality episode pressure:",
+    )
     return {
         "measurement": {
             "label": "measurement",
@@ -460,7 +628,7 @@ def _learning_components(
         "feedback": {
             "label": "feedback",
             "status": "active" if fb_policy.get("apply_cooldown_relaxation") else "watch-only",
-            "detail": str(feedback.get("reason") or fb_policy.get("reason") or "no active policy"),
+            "detail": feedback_detail,
         },
         "ranker_training": {
             "label": "ML ranker training",
@@ -513,6 +681,9 @@ def _data_confidence(
     if not latest.critic_present:
         denominator_status = "unknown"
         denominator_detail = "final critic missing; watchlist_top_count нельзя трактовать как 0"
+    elif not latest.goal_present or not latest.goal_denominator_consistent:
+        denominator_status = "unknown"
+        denominator_detail = "immutable goal missing or inconsistent with final critic"
     elif latest.watchlist_top_count <= 0:
         denominator_status = "empty"
         denominator_detail = "critic fresh enough, но watchlist top movers отсутствуют"
@@ -552,7 +723,7 @@ def _data_confidence(
         },
     ]
     return {
-        "status": "decision_grade" if latest.critic_present and latest.signal_quality_present and denominator_status == "ok" and not research_stale else "diagnostic_only",
+        "status": "decision_grade" if latest.critic_present and latest.goal_present and latest.goal_denominator_consistent and latest.signal_quality_present and denominator_status == "ok" and not research_stale else "diagnostic_only",
         "items": items,
         "research_stale_components": research_stale,
     }
@@ -572,6 +743,10 @@ def _alerts(
     out = []
     if not latest.critic_present:
         out.append({"severity": "serious", "text": "top-gainer critic final missing; watchlist_top denominator unknown"})
+    elif not latest.goal_present:
+        out.append({"severity": "serious", "text": "immutable top-gainer goal missing; objective denominator unknown"})
+    elif not latest.goal_denominator_consistent:
+        out.append({"severity": "serious", "text": "final critic and immutable goal disagree; objective denominator unknown"})
     if latest.coverage_status not in {"ok", "complete"}:
         if _coverage_is_safe_partial(latest):
             counts = latest.missing_symbol_status_counts or {}
@@ -587,7 +762,7 @@ def _alerts(
     if latest.watchlist_top_count > 0 and latest.early_pct < 15.0:
         out.append({"severity": "serious", "text": f"early capture only {latest.early_pct:.1f}% vs 25%+ target"})
     if latest.miss_rate is not None and latest.miss_rate > 0.80:
-        out.append({"severity": "serious", "text": f"trend miss-rate {latest.miss_rate * 100:.1f}%"})
+        out.append({"severity": "serious", "text": f"broad signal-quality trend miss-rate {latest.miss_rate * 100:.1f}%"})
     if latest.blocked_winner_count >= 5:
         out.append({"severity": "warn", "text": f"blocked winners={latest.blocked_winner_count}: {', '.join(latest.blocked_symbols[:6])}"})
     ranker_state = _ranker_training_state(status, latest.day)
@@ -638,6 +813,8 @@ def _next_actions(
     ranker_state = _ranker_training_state(status, latest.day)
     if not latest.critic_present:
         actions.append("▶️ Починить/перезапустить final top-gainer critic: без него watchlist_top=0 недостоверен.")
+    elif not latest.goal_present or not latest.goal_denominator_consistent:
+        actions.append("▶️ Восстановить immutable 22h goal и согласовать его с final critic; до этого objective verdict запрещён.")
     if ranker_state["status"] in {"stale", "error"}:
         actions.append("▶️ Проверить ML/ranker worker: dataset продвинулся после последнего обучения либо training завершился ошибкой.")
     elif ranker_state["status"] == "waiting_for_new_labels":
@@ -652,13 +829,13 @@ def _next_actions(
         )
     if latest.blocked_winner_count:
         actions.append("▶️ Запустить blocked-winner audit по top_gainer_score_gate / agent_mode_disabled / cooldown, без production relax.")
-    if latest.median_exit_efficiency is not None and latest.median_exit_efficiency < 0:
+    if latest.top_median_exit_efficiency is not None and latest.top_median_exit_efficiency < 0:
         actions.append("▶️ Продолжить exit-quality auditor: входы монетизируются плохо, менять SELL только через replay.")
     if (
         latest.early_pct >= 25.0
-        and latest.median_exit_efficiency is not None
-        and latest.median_giveback_pct is not None
-        and (latest.median_exit_efficiency < 0.25 or latest.median_giveback_pct >= 3.0)
+        and latest.top_median_exit_efficiency is not None
+        and latest.top_median_giveback_pct is not None
+        and (latest.top_median_exit_efficiency < 0.25 or latest.top_median_giveback_pct >= 3.0)
     ):
         actions.append("▶️ Запустить exit monetization replay по вчерашним watchlist top movers: high-MFE/giveback, re-entry и partial-exit гипотезы без production SELL changes.")
     reentry_summary = shadow_reentry.get("summary") or {}
@@ -1105,6 +1282,42 @@ def _day_from_signal_quality_path(path: Path, data: dict[str, Any]) -> str:
     return end
 
 
+def _goal_matches_critic(goal: dict[str, Any], critic: dict[str, Any]) -> bool:
+    goal_summary = goal.get("summary") or {}
+    goal_day = str(goal.get("target_day_local") or "")
+    critic_day = str(critic.get("target_day_local") or "")
+    if not goal_day or goal_day != critic_day:
+        return False
+    if "watchlist_top_count" not in goal_summary:
+        return False
+    try:
+        return int(goal_summary["watchlist_top_count"]) >= 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _row_values(rows: Iterable[dict[str, Any]], *keys: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        value = None
+        for key in keys:
+            value = _maybe_float(row.get(key))
+            if value is not None:
+                break
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _row_median(rows: Iterable[dict[str, Any]], *keys: str) -> float | None:
+    values = _row_values(rows, *keys)
+    return round(float(median(values)), 6) if values else None
+
+
+def _row_value_count(rows: Iterable[dict[str, Any]], *keys: str) -> int:
+    return len(_row_values(rows, *keys))
+
+
 def _metric_median(summary: dict[str, Any], key: str) -> float | None:
     value = summary.get(key)
     if isinstance(value, dict) and value.get("median") is not None:
@@ -1130,6 +1343,29 @@ def _avg(values: list[float]) -> float:
 def _fmt(value: Any, digits: int = 1) -> str:
     try:
         return f"{float(value):.{digits}f}"
+    except Exception:
+        return "н/д"
+
+
+def _fmt_signed(value: Any, digits: int = 1) -> str:
+    try:
+        return f"{float(value):+.{digits}f}"
+    except Exception:
+        return "н/д"
+
+
+def _fmt_interval(low: Any, high: Any, digits: int = 1) -> str:
+    if _maybe_float(low) is None or _maybe_float(high) is None:
+        return "[н/д]"
+    return f"[{_fmt_signed(low, digits)}, {_fmt_signed(high, digits)}]"
+
+
+def _ratio_counts(numerator: Any, denominator: Any) -> str:
+    try:
+        denominator_int = int(denominator)
+        if denominator_int <= 0:
+            return "н/д"
+        return f"{int(numerator)}/{denominator_int}"
     except Exception:
         return "н/д"
 

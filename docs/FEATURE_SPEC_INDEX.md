@@ -1,6 +1,6 @@
 # Feature Spec Index
 
-Last updated: 2026-08-25 Europe/Budapest
+Last updated: 2026-08-27 Europe/Budapest
 
 ## Objective
 
@@ -30,7 +30,7 @@ earlier capture of same-day watchlist top movers with a single unified
 | Shadow suspicious re-entry | measurement repaired; threshold relaxation rejected | `docs/specs/shadow-suspicious-reentry-scorecard.md` | registered watches, T+2/T+5/T+10 returns, final alerts | keep thresholds; collect new independent cohort |
 | Research-universe shadow labels | repaired and maximum-period backfilled | `docs/specs/research-universe-shadow-collector.md` | mature label coverage, malformed-row quarantine, label freshness | held-out profile replay; no BUY expansion from broad rules |
 | Daily critic scheduler recovery | shipped measurement fix | `docs/specs/daily-critic-scheduler-recovery.md` | final critic availability, due-slot recovery, scheduler isolation | observe seven consecutive on-time final artifacts |
-| Daily learning progress report | shipped reporting | `docs/specs/daily-learning-progress-report.md` | early capture trend, capture quality, learning freshness, operator actions | send daily at 09:00 local via RL worker |
+| Daily learning progress report | shipped reporting; evidence-aware comparison correction pending release | `docs/specs/daily-learning-progress-report.md`, `docs/specs/learning-progress-coverage-calibration.md` | paired early-capture numerator/denominator, Wilson difference interval, top-mover capture/exit cohort, learning freshness | publish direction only after immutable-goal provenance, paired-evidence, and uncertainty gates pass |
 | Watchlist-filtered top-mover denominator | shipped measurement correction | `docs/specs/watchlist-filtered-top-mover-denominator.md` | `watchlist_top_capture_rate_pct`, `watchlist_top_early_capture_rate_pct`, `exchange_top_in_watchlist` | use filtered denominator for operator reports |
 | Main top-gainer intraday feature parity | shipped bugfix | `docs/specs/main-top-gainer-intraday-feature-parity.md` | `top_gainer_score`, `today_change_pct`, `forecast_return_pct`, false-positive pressure | monitor next daily report; thresholds unchanged |
 | Early trend detection parity audit | shipped bugfix | `docs/specs/early-trend-detection-parity-audit.md` | `today_confirmed`, `accuracy_gate`, early-mode admission parity | monitor next daily report; thresholds unchanged |

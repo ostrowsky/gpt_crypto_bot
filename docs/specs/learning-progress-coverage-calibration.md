@@ -51,7 +51,12 @@ Low/medium-confidence conditions include:
 - short or sparse rolling windows;
 - metric-affecting incomplete coverage.
 
-When early-capture drops versus the previous rolling window, the report may say `ДЕГРАДИРУЕТ` only when confidence is high. Otherwise it should say `УХУДШИЛСЯ ПО EARLY-CAPTURE` and explicitly ask for replay checks rather than implying automatic production rollback.
+When early-capture drops versus the previous rolling window, the report may say
+`ДЕГРАДИРУЕТ` only when confidence is high. If the minimum paired-evidence gate
+from `daily-learning-progress-report.md` passes but another confidence caveat
+remains, it may say `УХУДШИЛСЯ ПО EARLY-CAPTURE` and explicitly ask for replay
+checks. If the paired gate itself fails, the verdict is
+`НЕДОСТАТОЧНО ДАННЫХ`; no directional degradation claim is allowed.
 
 ## Bounded Daily Report Composition
 

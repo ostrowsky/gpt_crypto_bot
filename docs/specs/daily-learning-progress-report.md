@@ -1,7 +1,7 @@
 ﻿# Daily Learning Progress Report
 
 Status: shipped reporting/observability  
-Last updated: 2026-08-05
+Last updated: 2026-08-26
 
 ## Purpose
 
@@ -68,15 +68,36 @@ from final reports.
   Exit/false-positive guardrails use only complete signal-quality days. Partial
   quality coverage does not erase a valid capture denominator, but it blocks an
   `improving` verdict because the downside guardrails are unknown.
+- A capture day is objective-eligible only when both the final critic and the
+  immutable `watchlist_top_gainer_goal_*_22h.json` artifact exist and their
+  target day agrees and the goal publishes a non-negative watchlist-top
+  denominator. The goal is a provenance/presence gate; it must not overwrite
+  the final critic's end-of-day cohort. Its 22:00 membership may legitimately
+  differ from the final critic's later membership. A missing or malformed goal
+  makes the objective denominator `unknown`; the day must not consume a slot
+  in either comparison window.
 - Every rate exposes numerator and denominator. An absent/zero denominator is
   `null`/`unknown`, never a synthetic `0%`.
-- Compare equal-length chronological windows. Require at least three complete
-  days per window and at least ten current-window watchlist-top observations;
-  otherwise the verdict is `inconclusive`.
+- Compare equal-length chronological windows. Start from the current and prior
+  seven-calendar-day blocks, discard objective-ineligible days, and pair both
+  blocks to the smaller number of valid days. Publish the paired day count and
+  the exact early/capture numerators and denominators. Require at least three
+  paired days per window and at least ten current-window watchlist-top
+  observations; otherwise the verdict is `inconclusive`.
+- A directional verdict additionally requires the conservative 95% Wilson
+  difference interval for the two early-capture proportions to exclude zero
+  and the 2 percentage-point materiality boundary. If it does not, the report
+  says `НЕТ ДОКАЗАННОГО ИЗМЕНЕНИЯ` and publishes the observed delta plus the
+  interval; a raw percentage difference is not evidence of direction.
 - `improving` requires a material early-capture gain without material
   deterioration in capture recall, false-positive rate, or exit efficiency.
   ML/teacher metrics remain diagnostic-only and cannot override realized
   objective metrics.
+- Headline entry and exit values must use only the final critic's
+  `watchlist_top_gainers` cohort. Broad signal-quality `miss_rate`,
+  `false_positive_rate`, capture, exit-efficiency, and giveback remain a
+  separately named diagnostic cohort and cannot be presented as top-mover
+  outcomes.
 
 ## Required Output
 
@@ -84,6 +105,7 @@ A concise Telegram-friendly report with:
 
 - verdict: developing / flat / degrading;
 - one-line main metric summary;
+- exact paired-window numerators, denominators, and valid-day counts;
 - where winners are lost;
 - previous decisions and whether they helped;
 - alerts;
