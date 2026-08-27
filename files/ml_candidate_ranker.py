@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+import config
 import policy_provenance
 
 try:
@@ -412,6 +413,14 @@ def load_training_rows(
     return rows
 
 
+def _required_dataset_contract() -> str:
+    return str(getattr(config, "RANKER_DATASET_CONTRACT", "candidate-outcome-v2"))
+
+
+def _dataset_contract_valid(rec: dict) -> bool:
+    return str((rec.get("provenance") or {}).get("dataset_contract") or "") == _required_dataset_contract()
+
+
 def _target_label_keys(rec: dict) -> List[str]:
     labels = rec.get("labels") or {}
     keys = [key for key in ("ret_3", "ret_5", "ret_10", "trade_exit_pnl") if labels.get(key) is not None]
@@ -426,8 +435,13 @@ def _target_label_keys(rec: dict) -> List[str]:
 def training_row_provenance_valid(rec: dict) -> bool:
     if not policy_provenance.observation_provenance_valid(rec):
         return False
+    if not _dataset_contract_valid(rec):
+        return False
     feature_time = policy_provenance.parse_utc((rec.get("provenance") or {}).get("feature_time"))
     if feature_time is None:
+        return False
+    labels = rec.get("labels") or {}
+    if any(labels.get(key) is None for key in ("ret_3", "ret_5", "ret_10")):
         return False
     for key in _target_label_keys(rec):
         if not policy_provenance.label_provenance_valid(rec, key):
@@ -442,6 +456,8 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
     labeled_rows = 0
     verified_rows = 0
     legacy_unknown_rows = 0
+    excluded_contract_rows = 0
+    incomplete_current_contract_rows = 0
     epoch_counts: Dict[str, int] = defaultdict(int)
     first_feature_time: Optional[str] = None
     last_feature_time: Optional[str] = None
@@ -458,7 +474,11 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
         if min_ts and ts < min_ts:
             continue
         labeled_rows += 1
-        if training_row_provenance_valid(rec):
+        if not policy_provenance.observation_provenance_valid(rec):
+            legacy_unknown_rows += 1
+        elif not _dataset_contract_valid(rec):
+            excluded_contract_rows += 1
+        elif training_row_provenance_valid(rec):
             verified_rows += 1
             epoch = str((rec.get("decision_provenance") or {}).get("policy_epoch") or "unknown")
             epoch_counts[epoch] += 1
@@ -467,11 +487,14 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
                 first_feature_time = feature_time if first_feature_time is None else min(first_feature_time, feature_time)
                 last_feature_time = feature_time if last_feature_time is None else max(last_feature_time, feature_time)
         else:
-            legacy_unknown_rows += 1
+            incomplete_current_contract_rows += 1
     return {
         "labeled_rows": labeled_rows,
         "verified_rows": verified_rows,
         "legacy_unknown_rows": legacy_unknown_rows,
+        "excluded_contract_rows": excluded_contract_rows,
+        "incomplete_current_contract_rows": incomplete_current_contract_rows,
+        "required_dataset_contract": _required_dataset_contract(),
         "verified_rate_pct": round(verified_rows / labeled_rows * 100.0, 4) if labeled_rows else None,
         "policy_epoch_counts": dict(sorted(epoch_counts.items())),
         "feature_time_range": {"first": first_feature_time, "last": last_feature_time},
@@ -500,15 +523,22 @@ def build_training_readiness_report(
         raise ValueError("generated_at must be a timezone-aware ISO timestamp")
     coverage = training_provenance_coverage(dataset_path)
     verified_rows = int(coverage.get("verified_rows") or 0)
-    eligible = verified_rows >= min_verified_rows
-    stat = dataset_path.stat() if dataset_path.exists() else None
-    evaluation_scope = (
-        "not_evaluated_ready_for_training"
-        if eligible
-        else "not_evaluated_insufficient_provenance"
+    quality = candidate_dataset_quality_report(
+        dataset_path,
+        min_rows=min_verified_rows,
+        observed_at=observed,
     )
-    evidence_status = (
-        "ready_for_training" if eligible else "blocked_insufficient_provenance"
+    eligible = verified_rows >= min_verified_rows and bool(quality.get("quality_passed"))
+    stat = dataset_path.stat() if dataset_path.exists() else None
+    evaluation_scope = "not_evaluated_ready_for_training" if eligible else (
+        "not_evaluated_insufficient_provenance"
+        if verified_rows < min_verified_rows
+        else "not_evaluated_dataset_quality"
+    )
+    evidence_status = "ready_for_training" if eligible else (
+        "blocked_insufficient_provenance"
+        if verified_rows < min_verified_rows
+        else "blocked_dataset_quality"
     )
     evaluation_provenance = {
         "schema_version": 1,
@@ -528,11 +558,14 @@ def build_training_readiness_report(
         "training_eligible": eligible,
         "runtime_eligible": False,
         "achievement_claimed": False,
-        "blocked_reason": None
-        if eligible
-        else f"verified_rows={verified_rows} below minimum={min_verified_rows}",
+        "blocked_reason": None if eligible else (
+            f"verified_rows={verified_rows} below minimum={min_verified_rows}"
+            if verified_rows < min_verified_rows
+            else "dataset quality checks failed: " + ",".join(quality.get("blocking_checks") or [])
+        ),
         "minimum_verified_rows": min_verified_rows,
         "data_provenance": coverage,
+        "dataset_quality": quality,
         "evaluation_provenance": evaluation_provenance,
         "dataset_watermark": {
             "path": str(dataset_path.resolve()),
@@ -630,6 +663,116 @@ def _target_teacher_capture_ratio(rec: dict) -> float:
 
 def _decision_group_key(rec: dict) -> str:
     return str(rec.get("ts_signal") or rec.get("bar_ts") or "")
+
+
+def candidate_dataset_quality_report(
+    path: Path,
+    *,
+    min_rows: int,
+    observed_at: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Fail-closed preflight over observations and mature candidate outcomes."""
+    now = observed_at or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    observations: List[dict] = []
+    mature: List[dict] = []
+    aged_total = 0
+    aged_pending = 0
+    invalid_feature_rows = 0
+    feature_names = safe_feature_names()
+    for rec in _iter_jsonl(path):
+        if str(rec.get("signal_type", "none")) == "none":
+            continue
+        if not policy_provenance.observation_provenance_valid(rec) or not _dataset_contract_valid(rec):
+            continue
+        observations.append(rec)
+        try:
+            tf = str(rec.get("tf") or "")
+            due = policy_provenance.forward_label_time(
+                bar_ts=int(rec.get("bar_ts") or 0), tf=tf, horizon=10
+            ) + policy_provenance.timeframe_delta(tf) * 2
+        except (TypeError, ValueError):
+            due = None
+        if due is not None and now >= due:
+            aged_total += 1
+            labels = rec.get("labels") or {}
+            if any(labels.get(key) is None for key in ("ret_3", "ret_5", "ret_10")):
+                aged_pending += 1
+        if (rec.get("labels") or {}).get("ret_5") is None or not training_row_provenance_valid(rec):
+            continue
+        mature.append(rec)
+        if not np.all(np.isfinite(vectorize_record(rec, feature_names))):
+            invalid_feature_rows += 1
+
+    action_counts: Dict[str, int] = defaultdict(int)
+    epoch_counts: Dict[str, int] = defaultdict(int)
+    groups: Dict[str, int] = defaultdict(int)
+    for rec in mature:
+        action_counts[str((rec.get("decision") or {}).get("action") or "unknown")] += 1
+        epoch_counts[str((rec.get("provenance") or {}).get("policy_epoch") or "unknown")] += 1
+        groups[_decision_group_key(rec)] += 1
+    positive = sum(1 for rec in mature if _target_trade_quality(rec) > 0.5)
+    non_positive = len(mature) - positive
+    teacher_rows = [rec for rec in mature if _teacher_present(rec)]
+    teacher_positive = sum(1 for rec in teacher_rows if _target_teacher_top_gainer(rec) > 0.5)
+    dominant_action_rate = max(action_counts.values(), default=0) / max(1, len(mature))
+    pending_rate = aged_pending / aged_total if aged_total else 0.0
+    split_viable = False
+    split_error = None
+    if len(mature) >= 3:
+        try:
+            train_idx, val_idx, test_idx = _chronological_purged_indices(mature)
+            split_viable = bool(train_idx and val_idx and test_idx)
+        except RuntimeError as exc:
+            split_error = str(exc)
+
+    blocking: List[str] = []
+    if len(mature) < int(min_rows):
+        blocking.append("minimum_mature_rows")
+    if aged_total and pending_rate > 0.05:
+        blocking.append("aged_label_coverage")
+    if len(action_counts) < 2 or dominant_action_rate > 0.95:
+        blocking.append("action_diversity")
+    if positive < 10 or non_positive < 10:
+        blocking.append("target_class_balance")
+    if len(groups) < 30 or sum(size >= 2 for size in groups.values()) < 10:
+        blocking.append("decision_group_support")
+    if len(teacher_rows) < 20 or teacher_positive < 5:
+        blocking.append("teacher_support")
+    if len(epoch_counts) > 1:
+        blocking.append("unbridged_policy_epochs")
+    if invalid_feature_rows:
+        blocking.append("non_finite_features")
+    if not split_viable:
+        blocking.append("purged_split_viability")
+
+    return {
+        "quality_passed": not blocking,
+        "required_dataset_contract": _required_dataset_contract(),
+        "observations": len(observations),
+        "mature_rows": len(mature),
+        "aged_label_coverage": {
+            "eligible": aged_total,
+            "pending": aged_pending,
+            "pending_rate": round(pending_rate, 6) if aged_total else None,
+        },
+        "action_counts": dict(sorted(action_counts.items())),
+        "dominant_action_rate": round(dominant_action_rate, 6),
+        "target_balance": {"positive": positive, "non_positive": non_positive},
+        "teacher_support": {"rows": len(teacher_rows), "top_gainer_positive": teacher_positive},
+        "decision_groups": {
+            "total": len(groups),
+            "multi_candidate": sum(size >= 2 for size in groups.values()),
+            "top3_eligible": sum(size >= 3 for size in groups.values()),
+            "top5_eligible": sum(size >= 5 for size in groups.values()),
+        },
+        "policy_epoch_counts": dict(sorted(epoch_counts.items())),
+        "invalid_feature_rows": invalid_feature_rows,
+        "purged_split_viable": split_viable,
+        "purged_split_error": split_error,
+        "blocking_checks": blocking,
+    }
 
 
 def build_dataset(
@@ -1205,6 +1348,12 @@ def train_and_evaluate(
     rows = load_training_rows(dataset_path, min_ts=min_ts)
     if len(rows) < min_rows:
         raise RuntimeError("Not enough labeled candidate rows for ranker training")
+    quality = candidate_dataset_quality_report(dataset_path, min_rows=min_rows)
+    if not quality.get("quality_passed"):
+        raise RuntimeError(
+            "Candidate dataset quality preflight failed: "
+            + ",".join(quality.get("blocking_checks") or [])
+        )
 
     bundle = build_dataset(rows, positive_ret_threshold=positive_ret_threshold, ev_lambda=ev_lambda)
     scaler = StandardScaler().fit(bundle.X_train)
@@ -1338,8 +1487,9 @@ def train_and_evaluate(
     evaluation_provenance = _evaluation_provenance(bundle, provenance_coverage)
     model_payload = {
         "payload_version": 4,
-        "runtime_eligible": True,
-        "evidence_status": "decision_grade_temporal_holdout",
+        "runtime_eligible": False,
+        "evidence_status": "shadow_online_training",
+        "dataset_quality": quality,
         "evaluation_provenance": evaluation_provenance,
         "model_name": best_name,
         "available_model_families": {

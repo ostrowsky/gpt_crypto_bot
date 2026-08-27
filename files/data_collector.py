@@ -24,7 +24,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 import numpy as np
@@ -98,6 +98,7 @@ async def _process_coin(
     btc_vs_ema50:     float,
     btc_momentum_4h:  float = 0.0,
     market_vol_24h:   float = 0.0,
+    critic_label_batches: Optional[list[dict[str, Any]]] = None,
 ) -> bool:
     """
     Загружает бары монеты, логирует последний закрытый бар,
@@ -175,13 +176,22 @@ async def _process_coin(
             c_arr=c,
             bar_ms=bar_ms,
         )
-        await run_cpu(
-            critic_dataset.fill_pending_from_data,
-            sym=sym, tf=tf,
-            t_arr=data["t"].astype(int),
-            c_arr=c,
-            bar_ms=bar_ms,
-        )
+        if critic_label_batches is not None:
+            critic_label_batches.append({
+                "sym": sym,
+                "tf": tf,
+                "t_arr": data["t"].astype(int),
+                "c_arr": c,
+                "bar_ms": bar_ms,
+            })
+        else:
+            await run_cpu(
+                critic_dataset.fill_pending_from_data,
+                sym=sym, tf=tf,
+                t_arr=data["t"].astype(int),
+                c_arr=c,
+                bar_ms=bar_ms,
+            )
         return True
 
     except Exception as e:
@@ -207,6 +217,7 @@ async def _collect_once(btc_context: dict) -> dict:
 
     ok = 0
     fail = 0
+    critic_label_batches: list[dict[str, Any]] = []
 
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=30)
@@ -218,6 +229,7 @@ async def _collect_once(btc_context: dict) -> dict:
                     session, sym, tf,
                     is_bull_day, btc_vs_ema50,
                     btc_momentum_4h, market_vol_24h,
+                    critic_label_batches,
                 )
                 for sym, tf in batch
             ]
@@ -229,6 +241,8 @@ async def _collect_once(btc_context: dict) -> dict:
                     fail += 1
             if batch_start + BATCH_SIZE < len(pairs):
                 await asyncio.sleep(BATCH_DELAY)
+
+    await run_cpu(critic_dataset.fill_pending_batch, critic_label_batches)
 
     return {"ok": ok, "fail": fail, "total": len(pairs)}
 

@@ -57,10 +57,11 @@ def _verified_row(ts: str, epoch: str = "pe-test") -> dict:
         "f": {},
         "seq": [],
         "decision": {},
-        "labels": {"ret_5": 1.0},
+        "labels": {"ret_3": 0.8, "ret_5": 1.0, "ret_10": 1.2},
         "provenance": {
             "policy_epoch": epoch,
             "policy_hash": "hash",
+            "dataset_contract": "candidate-outcome-v2",
             "feature_time": policy_provenance.utc_iso(feature),
             "feature_contract": "closed-bar features only",
         },
@@ -70,12 +71,24 @@ def _verified_row(ts: str, epoch: str = "pe-test") -> dict:
             "decision_time": policy_provenance.utc_iso(feature),
         },
         "label_provenance": {
+            "ret_3": {
+                "definition": "T+3 return",
+                "label_time": policy_provenance.utc_iso(label),
+                "recorded_at": policy_provenance.utc_iso(label),
+                "source": "test",
+            },
             "ret_5": {
                 "definition": "T+5 return",
                 "label_time": policy_provenance.utc_iso(label),
                 "recorded_at": policy_provenance.utc_iso(label),
                 "source": "test",
-            }
+            },
+            "ret_10": {
+                "definition": "T+10 return",
+                "label_time": policy_provenance.utc_iso(label),
+                "recorded_at": policy_provenance.utc_iso(label),
+                "source": "test",
+            },
         },
     }
 
@@ -115,14 +128,15 @@ class PolicyProvenanceTests(unittest.TestCase):
                 data=data, action="take", stage="entry",
             )
             label_time = policy_provenance.forward_label_time(
-                bar_ts=int(data["t"][i]), tf="15m", horizon=5
+                bar_ts=int(data["t"][i]), tf="15m", horizon=10
             )
             with patch(
                 "policy_provenance.datetime"
             ) as mocked_datetime:
                 mocked_datetime.now.return_value = label_time + timedelta(minutes=1)
                 mocked_datetime.fromtimestamp.side_effect = datetime.fromtimestamp
-                critic_dataset.fill_forward_label(rec_id, 5, 1.2)
+                for horizon in (3, 5, 10):
+                    critic_dataset.fill_forward_label(rec_id, horizon, 1.2)
             coverage = ml_candidate_ranker.training_provenance_coverage(
                 critic_dataset.CRITIC_FILE
             )

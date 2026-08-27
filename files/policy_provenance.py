@@ -173,6 +173,9 @@ def build_observation_provenance(
     return {
         "schema_version": SCHEMA_VERSION,
         **manifest,
+        "dataset_contract": str(
+            getattr(config, "RANKER_DATASET_CONTRACT", "candidate-outcome-v2")
+        ),
         "source": str(source),
         "feature_time": utc_iso(feature_cutoff(bar_ts, tf)),
         "decision_time": utc_iso(recorded_at),

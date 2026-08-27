@@ -57,14 +57,15 @@ SIGNAL_QUALITY_SCRIPT = (
     / "evaluate_signals.py"
 )
 
-MODEL_FILE = ROOT / "ml_candidate_ranker.json"
-TRAIN_REPORT_FILE = ROOT / "ml_candidate_ranker_report.json"
-SHADOW_REPORT_FILE = ROOT / "ml_candidate_ranker_shadow_report.json"
+ONLINE_MODEL_DIR = RUNTIME_DIR / "models"
+MODEL_FILE = ONLINE_MODEL_DIR / "ml_candidate_ranker_online_shadow.json"
+TRAIN_REPORT_FILE = REPORT_DIR / "ml_candidate_ranker_online_report.json"
+SHADOW_REPORT_FILE = REPORT_DIR / "ml_candidate_ranker_online_shadow_report.json"
 
 DEFAULT_TRAIN_INTERVAL_SEC = 60 * 60
 DEFAULT_STATUS_INTERVAL_SEC = 5 * 60
-DEFAULT_MIN_ROWS = 500
-DEFAULT_MIN_NEW_ROWS = 50
+DEFAULT_MIN_ROWS = int(getattr(config, "RANKER_ONLINE_MIN_ROWS", 120))
+DEFAULT_MIN_NEW_ROWS = int(getattr(config, "RANKER_ONLINE_MIN_NEW_ROWS", 20))
 DEFAULT_TOP_GAINER_CHECK_SEC = 60
 DEFAULT_TRAIN_LOCK_STALE_SEC = 6 * 60 * 60
 
@@ -719,6 +720,8 @@ def _train_ranker_once(min_rows: int) -> Dict[str, Any]:
     )
     model_payload = ml_candidate_ranker.build_live_model_payload(report)
     report_without_payload = {k: v for k, v in report.items() if k != "model_payload"}
+    MODEL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TRAIN_REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
     save_json(MODEL_FILE, model_payload)
     save_json(TRAIN_REPORT_FILE, report_without_payload)
 
@@ -1416,18 +1419,22 @@ async def _training_loop(state: WorkerState) -> None:
             _restore_training_state(state)
             rows_total = await asyncio.to_thread(_count_ranker_rows, critic_dataset.CRITIC_FILE)
             dataset_mtime = _file_mtime(critic_dataset.CRITIC_FILE)
-            if rows_total < state.min_rows:
-                critic_rows_total = await asyncio.to_thread(
-                    _count_jsonl_rows, critic_dataset.CRITIC_FILE
-                )
-                ml_rows_total = await asyncio.to_thread(_count_jsonl_rows, ml_dataset.ML_FILE)
-                readiness_report = await asyncio.to_thread(
-                    _build_training_readiness_session_report,
-                    state=state,
-                    dataset_path=critic_dataset.CRITIC_FILE,
-                    critic_rows_total=critic_rows_total,
-                    ml_rows_total=ml_rows_total,
-                )
+            critic_rows_total = await asyncio.to_thread(
+                _count_jsonl_rows, critic_dataset.CRITIC_FILE
+            )
+            ml_rows_total = await asyncio.to_thread(_count_jsonl_rows, ml_dataset.ML_FILE)
+            readiness_report = await asyncio.to_thread(
+                _build_training_readiness_session_report,
+                state=state,
+                dataset_path=critic_dataset.CRITIC_FILE,
+                critic_rows_total=critic_rows_total,
+                ml_rows_total=ml_rows_total,
+            )
+            online_enabled = bool(getattr(config, "RANKER_ONLINE_LEARNING_ENABLED", True))
+            if not online_enabled or not readiness_report.get("training_eligible"):
+                if not online_enabled:
+                    readiness_report["evidence_status"] = "blocked_online_learning_disabled"
+                    readiness_report["blocked_reason"] = "RANKER_ONLINE_LEARNING_ENABLED=False"
                 state.train_last_started_at = readiness_report.get("generated_at_utc")
                 state.train_last_finished_at = readiness_report.get("generated_at_utc")
                 state.train_last_error = ""
@@ -1443,9 +1450,10 @@ async def _training_loop(state: WorkerState) -> None:
                     report_paths.get("latest_txt", "")
                 )
                 log.info(
-                    "Ranker readiness blocked: verified_rows=%s minimum=%s dataset_mtime=%s",
+                    "Ranker readiness blocked: verified_rows=%s minimum=%s quality=%s dataset_mtime=%s",
                     rows_total,
                     state.min_rows,
+                    (readiness_report.get("dataset_quality") or {}).get("blocking_checks"),
                     dataset_mtime,
                 )
                 await _write_status_now(state)

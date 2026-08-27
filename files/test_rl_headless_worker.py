@@ -29,6 +29,20 @@ from rl_headless_worker import (
 
 
 class TestDailyCriticSchedulerRecovery(unittest.TestCase):
+    def test_supervisor_rejects_accidental_collector_disable(self) -> None:
+        launcher = (Path(__file__).resolve().parents[1] / "headless_loop.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn('"--disable-collector"', launcher)
+        self.assertIn("GPT_BOT_ALLOW_UNLABELED_COLLECTION", launcher)
+        self.assertIn("collector_disable_rejected", launcher)
+
+    def test_online_ranker_artifacts_are_isolated_from_production_model(self) -> None:
+        self.assertIn(".runtime", str(rl_headless_worker.MODEL_FILE))
+        self.assertIn("online_shadow", rl_headless_worker.MODEL_FILE.name)
+        self.assertEqual(rl_headless_worker.DEFAULT_MIN_ROWS, 120)
+        self.assertEqual(rl_headless_worker.DEFAULT_MIN_NEW_ROWS, 20)
+
     def test_training_readiness_session_is_non_achievement_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             dataset = Path(td) / "critic.jsonl"

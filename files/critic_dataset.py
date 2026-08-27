@@ -603,6 +603,53 @@ def fill_forward_label(record_id: str, horizon: int, ret_pct: float) -> None:
     _rewrite_records(_mutate)
 
 
+def _fill_pending_record(
+    rec: Dict[str, Any],
+    *,
+    t_arr: Any,
+    c_arr: Any,
+    bar_ms: int,
+) -> bool:
+    lab = rec.get("labels", {})
+    rec_bar_ts = rec.get("bar_ts", 0)
+    idx_arr = np.where(t_arr == rec_bar_ts)[0]
+    if len(idx_arr) == 0:
+        return False
+    entry_close = float(c_arr[idx_arr[0]])
+    if entry_close <= 0:
+        return False
+    changed = False
+    for h in (3, 5, 10):
+        key_ret = f"ret_{h}"
+        key_label = f"label_{h}"
+        if lab.get(key_ret) is not None:
+            continue
+        target_idx = policy_provenance.closed_target_index(
+            t_arr,
+            bar_ts=int(rec_bar_ts),
+            bar_ms=bar_ms,
+            horizon=h,
+        )
+        if target_idx is None:
+            continue
+        future_close = float(c_arr[target_idx])
+        ret_pct = (future_close / entry_close - 1) * 100
+        rec["labels"][key_ret] = round(ret_pct, 4)
+        rec["labels"][key_label] = ret_pct > 0
+        policy_provenance.attach_label_provenance(
+            rec,
+            label_keys=(key_ret, key_label),
+            label_time=policy_provenance.forward_label_time(
+                bar_ts=int(rec_bar_ts),
+                tf=str(rec.get("tf") or ""),
+                horizon=h,
+            ),
+            source="collector_forward_label",
+        )
+        changed = True
+    return changed
+
+
 def fill_pending_from_data(sym: str, tf: str, t_arr: Any, c_arr: Any, bar_ms: int) -> None:
     if not CRITIC_FILE.exists():
         return
@@ -610,44 +657,39 @@ def fill_pending_from_data(sym: str, tf: str, t_arr: Any, c_arr: Any, bar_ms: in
     def _mutate(rec: Dict[str, Any]) -> bool:
         if rec.get("sym") != sym or rec.get("tf") != tf:
             return False
-        lab = rec.get("labels", {})
-        rec_bar_ts = rec.get("bar_ts", 0)
-        idx_arr = np.where(t_arr == rec_bar_ts)[0]
-        if len(idx_arr) == 0:
+        return _fill_pending_record(rec, t_arr=t_arr, c_arr=c_arr, bar_ms=bar_ms)
+
+    _rewrite_records(_mutate)
+
+
+def fill_pending_batch(series: Any) -> None:
+    """Mature all supplied symbol/timeframe series with one dataset rewrite."""
+    if not CRITIC_FILE.exists():
+        return
+    by_pair: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for item in series or ():
+        if not isinstance(item, dict):
+            continue
+        sym = str(item.get("sym") or "")
+        tf = str(item.get("tf") or "")
+        t_arr = item.get("t_arr")
+        c_arr = item.get("c_arr")
+        bar_ms = _safe_int(item.get("bar_ms"))
+        if not sym or not tf or t_arr is None or c_arr is None or not bar_ms:
+            continue
+        by_pair[(sym, tf)] = {
+            "t_arr": t_arr,
+            "c_arr": c_arr,
+            "bar_ms": bar_ms,
+        }
+    if not by_pair:
+        return
+
+    def _mutate(rec: Dict[str, Any]) -> bool:
+        payload = by_pair.get((str(rec.get("sym") or ""), str(rec.get("tf") or "")))
+        if payload is None:
             return False
-        entry_close = float(c_arr[idx_arr[0]])
-        if entry_close <= 0:
-            return False
-        changed = False
-        for h in (3, 5, 10):
-            key_ret = f"ret_{h}"
-            key_label = f"label_{h}"
-            if lab.get(key_ret) is not None:
-                continue
-            target_idx = policy_provenance.closed_target_index(
-                t_arr,
-                bar_ts=int(rec_bar_ts),
-                bar_ms=bar_ms,
-                horizon=h,
-            )
-            if target_idx is None:
-                continue
-            future_close = float(c_arr[target_idx])
-            ret_pct = (future_close / entry_close - 1) * 100
-            rec["labels"][key_ret] = round(ret_pct, 4)
-            rec["labels"][key_label] = ret_pct > 0
-            policy_provenance.attach_label_provenance(
-                rec,
-                label_keys=(key_ret, key_label),
-                label_time=policy_provenance.forward_label_time(
-                    bar_ts=int(rec_bar_ts),
-                    tf=str(rec.get("tf") or tf),
-                    horizon=h,
-                ),
-                source="collector_forward_label",
-            )
-            changed = True
-        return changed
+        return _fill_pending_record(rec, **payload)
 
     _rewrite_records(_mutate)
 

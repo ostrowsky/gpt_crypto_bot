@@ -13,6 +13,12 @@ $loopLog = Join-Path $runtimeDir "headless_loop.log"
 $pidFile = Join-Path $runtimeDir "rl_worker_bg.json"
 $heartbeatFile = Join-Path $runtimeDir "rl_worker_wrapper_heartbeat.json"
 $stopFile = Join-Path $runtimeDir "rl_worker.stop"
+$workerArgs = @($args)
+$collectorDisableRequested = $workerArgs -contains "--disable-collector"
+$collectorDisableAllowed = $env:GPT_BOT_ALLOW_UNLABELED_COLLECTION -eq "1"
+if ($collectorDisableRequested -and -not $collectorDisableAllowed) {
+    $workerArgs = @($workerArgs | Where-Object { $_ -ne "--disable-collector" })
+}
 
 if (-not (Test-Path $python)) {
     throw "Python runtime not found: $python"
@@ -45,7 +51,8 @@ function Write-LoopState {
         restart_delay_sec = $RestartDelaySec
         script = $script
         cwd = $workdir
-        args = @($args)
+        args = @($workerArgs)
+        collector_disable_rejected = $collectorDisableRequested -and -not $collectorDisableAllowed
     }
     if ($ExitCode -ne 0) {
         $payload.exit_code = $ExitCode
@@ -57,6 +64,10 @@ function Write-LoopState {
 
 Push-Location $workdir
 try {
+    if ($collectorDisableRequested -and -not $collectorDisableAllowed) {
+        $now = (Get-Date).ToString("o")
+        Add-Content -Path $loopLog -Encoding UTF8 -Value "$now headless_loop: rejected --disable-collector; candidate-wide maturation is mandatory"
+    }
     while ($true) {
         if (Test-Path $stopFile) {
             $now = (Get-Date).ToString("o")
@@ -67,7 +78,7 @@ try {
 
         $started = (Get-Date).ToString("o")
         Add-Content -Path $loopLog -Encoding UTF8 -Value "$started headless_loop: worker start"
-        $argList = @($script) + @($args)
+        $argList = @($script) + @($workerArgs)
         $proc = Start-Process -FilePath $python -ArgumentList $argList -WorkingDirectory $workdir -WindowStyle Hidden -PassThru
         Write-LoopState -State "running" -PythonPid $proc.Id -StartedAt $started
 

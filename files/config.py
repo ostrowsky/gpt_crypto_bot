@@ -143,6 +143,10 @@ POLICY_PROVENANCE_REQUIRED_FOR_RANKER: bool = True
 # Measurement-only candidate cohort used by critic/ranker evidence. Keep this
 # explicit: monitor's fail-closed fallback is False when the setting is absent.
 CRITIC_DATASET_ENABLED: bool = True
+RANKER_DATASET_CONTRACT: str = "candidate-outcome-v2"
+RANKER_ONLINE_LEARNING_ENABLED: bool = True
+RANKER_ONLINE_MIN_ROWS: int = 120
+RANKER_ONLINE_MIN_NEW_ROWS: int = 20
 
 # в”Ђв”Ђ РќРѕРІС‹Рµ С„РёР»СЊС‚СЂС‹ РІС…РѕРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # РњР°РєСЃ. СЂРѕСЃС‚ РѕС‚ РјРёРЅРёРјСѓРјР° РїРѕСЃР»РµРґРЅРёС… 96 Р±Р°СЂРѕРІ (24С‡ РЅР° 15m)
