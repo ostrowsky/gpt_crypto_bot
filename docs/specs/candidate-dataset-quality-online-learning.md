@@ -48,6 +48,16 @@ exit quality, or portfolio performance.
 8. Candidate-wide forward labels are committed in one batch mutation per
    collector cycle.  Per-symbol full-file rewrites are forbidden because they
    cause lock contention, partial coverage, and action-dependent write loss.
+9. Current-contract observations are written to the dedicated
+   `critic_dataset_v2.jsonl` evidence stream.  The historical
+   `critic_dataset.jsonl` remains immutable legacy evidence and is never mixed
+   into online-training denominators.  This bounds rewrite/lock duration and
+   makes a clean collection restart auditable without deleting history.
+10. Collector writes are strict and fail closed.  An append or maturation
+    transaction that cannot acquire the dataset lock raises a dataset-integrity
+    error; the row is not counted as written, the collector is marked disabled,
+    a stop marker is created, and the supervised headless worker exits instead
+    of retrying an apparently successful partial cycle.
 
 ## Initial guardrails
 

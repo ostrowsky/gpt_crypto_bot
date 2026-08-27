@@ -46,6 +46,7 @@ LOG_FILE = RUNTIME_DIR / "rl_worker_runtime.log"
 REPORT_DIR = RUNTIME_DIR / "reports"
 CHAT_IDS_FILE = ROOT / ".chat_ids"
 TRAIN_LOCK_FILE = RUNTIME_DIR / "rl_worker_train.lock"
+STOP_FILE = RUNTIME_DIR / "rl_worker.stop"
 LEARNING_PROGRESS_SENT_DIR = RUNTIME_DIR / "learning_progress_sent_slots"
 LATEST_TRAIN_JSON = REPORT_DIR / "rl_train_latest.json"
 LATEST_TRAIN_TXT = REPORT_DIR / "rl_train_latest.txt"
@@ -1298,8 +1299,17 @@ async def _collector_supervisor(state: WorkerState) -> None:
             raise
         except Exception as exc:
             state.collector_last_error = str(exc)
+            state.collector_enabled = False
             log.exception("Collector cycle failed: %s", exc)
             await _write_status_now(state)
+            STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STOP_FILE.write_text(
+                "collector_integrity_failure\n" + str(exc) + "\n",
+                encoding="utf-8",
+            )
+            raise RuntimeError(
+                "collector fail-closed guard tripped; supervised restart disabled"
+            ) from exc
         wait = data_collector._seconds_until_next_bar()
         await asyncio.sleep(wait)
 

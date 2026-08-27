@@ -123,7 +123,7 @@ async def _process_coin(
         rule_signal = await run_cpu(_detect_rule_signal, feat, i, data)
 
         if rule_signal != "none":
-            await run_cpu(
+            record_id = await run_cpu(
                 critic_dataset.log_candidate,
                 sym=sym,
                 tf=tf,
@@ -151,7 +151,12 @@ async def _process_coin(
                 btc_vs_ema50=btc_vs_ema50,
                 btc_momentum_4h=btc_momentum_4h,
                 market_vol_24h=market_vol_24h,
+                strict=True,
             )
+            if not record_id:
+                raise critic_dataset.DatasetIntegrityError(
+                    f"candidate append returned no record id for {sym} [{tf}]"
+                )
 
         # Логируем бар с полным рыночным контекстом
         await run_cpu(
@@ -194,6 +199,8 @@ async def _process_coin(
             )
         return True
 
+    except critic_dataset.DatasetIntegrityError:
+        raise
     except Exception as e:
         log.debug("_process_coin %s error: %s", sym, e)
         return False
@@ -235,6 +242,8 @@ async def _collect_once(btc_context: dict) -> dict:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for r in results:
+                if isinstance(r, critic_dataset.DatasetIntegrityError):
+                    raise r
                 if r is True:
                     ok += 1
                 else:
@@ -242,7 +251,11 @@ async def _collect_once(btc_context: dict) -> dict:
             if batch_start + BATCH_SIZE < len(pairs):
                 await asyncio.sleep(BATCH_DELAY)
 
-    await run_cpu(critic_dataset.fill_pending_batch, critic_label_batches)
+    await run_cpu(
+        critic_dataset.fill_pending_batch,
+        critic_label_batches,
+        strict=True,
+    )
 
     return {"ok": ok, "fail": fail, "total": len(pairs)}
 

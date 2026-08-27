@@ -91,7 +91,49 @@ def _row(index: int, *, action: str, teacher_top: bool = False) -> dict:
     return row
 
 
+def _minimal_market_fixture() -> tuple[np.ndarray, dict]:
+    data = np.zeros(
+        2,
+        dtype=[("t", "i8"), ("o", "f8"), ("h", "f8"), ("l", "f8"), ("c", "f8"), ("v", "f8")],
+    )
+    for name in ("o", "h", "l", "c"):
+        data[name] = 1.0
+    data["v"] = 100.0
+    feat = {
+        "ema_fast": np.ones(2), "ema_slow": np.ones(2), "ema200": np.ones(2),
+        "atr": np.ones(2) * 0.01, "slope": np.ones(2) * 0.1,
+        "rsi": np.ones(2) * 50.0, "adx": np.ones(2) * 25.0,
+        "vol_x": np.ones(2), "macd_hist": np.zeros(2),
+        "daily_range_pct": np.ones(2),
+    }
+    return data, feat
+
+
 class CandidateDatasetQualityTests(unittest.TestCase):
+    def test_current_contract_uses_dedicated_v2_stream(self) -> None:
+        self.assertEqual(critic_dataset.CRITIC_FILE.name, "critic_dataset_v2.jsonl")
+        self.assertEqual(critic_dataset.LEGACY_CRITIC_FILE.name, "critic_dataset.jsonl")
+
+    def test_strict_collector_append_raises_instead_of_counting_lost_row(self) -> None:
+        data, feat = _minimal_market_fixture()
+        with patch.object(critic_dataset, "_append", side_effect=TimeoutError("locked")):
+            with self.assertRaises(critic_dataset.DatasetIntegrityError):
+                critic_dataset.log_candidate(
+                    sym="FAILUSDT", tf="15m", bar_ts=1_786_000_000_000,
+                    signal_type="trend", is_bull_day=False, feat=feat, i=0,
+                    data=data, action="candidate", stage="collector", strict=True,
+                )
+
+    def test_best_effort_monitor_append_returns_empty_id_on_write_loss(self) -> None:
+        data, feat = _minimal_market_fixture()
+        with patch.object(critic_dataset, "_append", side_effect=TimeoutError("locked")):
+            record_id = critic_dataset.log_candidate(
+                sym="BESTUSDT", tf="15m", bar_ts=1_786_000_000_000,
+                signal_type="trend", is_bull_day=False, feat=feat, i=0,
+                data=data, action="candidate", stage="monitor",
+            )
+        self.assertEqual(record_id, "")
+
     def test_candidate_wide_maturation_labels_blocked_and_shadow_rows(self) -> None:
         size = 12
         bar_ms = 900_000

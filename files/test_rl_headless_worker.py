@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import unittest
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import config
@@ -29,6 +30,27 @@ from rl_headless_worker import (
 
 
 class TestDailyCriticSchedulerRecovery(unittest.TestCase):
+    def test_collector_integrity_failure_trips_stop_marker(self) -> None:
+        state = WorkerState(60, 60, 120, 20, True)
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            rl_headless_worker, "STOP_FILE", Path(td) / "worker.stop"
+        ), patch.object(
+            rl_headless_worker.data_collector,
+            "_get_btc_context",
+            return_value={"is_bull": False},
+        ), patch.object(
+            rl_headless_worker.data_collector,
+            "_collect_once",
+            side_effect=rl_headless_worker.critic_dataset.DatasetIntegrityError("locked"),
+        ), patch.object(
+            rl_headless_worker, "_write_status_now", new=AsyncMock()
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fail-closed"):
+                asyncio.run(rl_headless_worker._collector_supervisor(state))
+            self.assertTrue(rl_headless_worker.STOP_FILE.exists())
+            self.assertFalse(state.collector_enabled)
+            self.assertEqual(state.collector_last_error, "locked")
+
     def test_supervisor_rejects_accidental_collector_disable(self) -> None:
         launcher = (Path(__file__).resolve().parents[1] / "headless_loop.ps1").read_text(
             encoding="utf-8-sig"

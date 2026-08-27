@@ -24,7 +24,8 @@ import policy_provenance
 
 
 ROOT = Path(__file__).resolve().parent
-CRITIC_FILE = ROOT / "critic_dataset.jsonl"
+LEGACY_CRITIC_FILE = ROOT / "critic_dataset.jsonl"
+CRITIC_FILE = ROOT / "critic_dataset_v2.jsonl"
 SEQ_FEATURE_NAMES = [
     "close_norm",
     "high_norm",
@@ -45,6 +46,10 @@ _CROSS_PROCESS_LOCK_TIMEOUT_SEC = 10.0
 _CROSS_PROCESS_LOCK_POLL_SEC = 0.05
 _REPLACE_RETRIES = 12
 _REPLACE_RETRY_SEC = 0.10
+
+
+class DatasetIntegrityError(RuntimeError):
+    """A required evidence write did not complete and must not be counted."""
 
 
 class _Enc(json.JSONEncoder):
@@ -268,13 +273,13 @@ def get_record(record_id: str) -> Optional[Dict[str, Any]]:
     return get_records({record_id}).get(record_id) if record_id else None
 
 
-def _rewrite_records(mutator) -> None:
+def _rewrite_records(mutator, *, strict: bool = False) -> bool:
     if not CRITIC_FILE.exists():
-        return
+        return False
     try:
         maybe_changed, maybe_bad_rows = _scan_mutations(mutator)
         if not (maybe_changed or maybe_bad_rows):
-            return
+            return False
 
         with _dataset_io_lock():
             CRITIC_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -286,8 +291,12 @@ def _rewrite_records(mutator) -> None:
                 _atomic_replace_with_retry(tmp, CRITIC_FILE)
             else:
                 tmp.unlink(missing_ok=True)
+        return bool(changed or had_bad_rows)
     except Exception as e:
         _pylog.warning("critic_dataset rewrite error: %s", e)
+        if strict:
+            raise DatasetIntegrityError(str(e)) from e
+        return False
 
 
 def _decision_priority(action: str, stage: str) -> int:
@@ -322,6 +331,7 @@ def _update_existing_candidate(
     signal_flags: Optional[Dict[str, bool]],
     near_miss: bool,
     decision_provenance: Dict[str, Any],
+    strict: bool = False,
 ) -> bool:
     changed = False
 
@@ -360,7 +370,7 @@ def _update_existing_candidate(
         changed = True
         return True
 
-    _rewrite_records(_mutate)
+    _rewrite_records(_mutate, strict=strict)
     return changed
 
 
@@ -393,6 +403,7 @@ def log_candidate(
     btc_vs_ema50: float = 0.0,
     btc_momentum_4h: float = 0.0,
     market_vol_24h: float = 0.0,
+    strict: bool = False,
 ) -> str:
     record_id = _candidate_id(sym, tf, bar_ts)
     source = "data_collector" if stage == "collector" else "main_monitor"
@@ -421,6 +432,7 @@ def log_candidate(
             signal_flags=signal_flags,
             near_miss=near_miss,
             decision_provenance=decision_provenance,
+            strict=strict,
         )
         return record_id
 
@@ -480,6 +492,9 @@ def log_candidate(
         _mark_logged(record_id)
     except Exception as e:
         _pylog.warning("critic_dataset write error: %s", e)
+        if strict:
+            raise DatasetIntegrityError(str(e)) from e
+        return ""
     return rec_id
 
 
@@ -662,7 +677,7 @@ def fill_pending_from_data(sym: str, tf: str, t_arr: Any, c_arr: Any, bar_ms: in
     _rewrite_records(_mutate)
 
 
-def fill_pending_batch(series: Any) -> None:
+def fill_pending_batch(series: Any, *, strict: bool = False) -> None:
     """Mature all supplied symbol/timeframe series with one dataset rewrite."""
     if not CRITIC_FILE.exists():
         return
@@ -691,7 +706,7 @@ def fill_pending_batch(series: Any) -> None:
             return False
         return _fill_pending_record(rec, **payload)
 
-    _rewrite_records(_mutate)
+    _rewrite_records(_mutate, strict=strict)
 
 
 def _teacher_local_window(target_day: date, phase: str, tz: ZoneInfo) -> tuple[datetime, datetime]:
