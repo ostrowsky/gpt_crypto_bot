@@ -147,6 +147,10 @@ RANKER_DATASET_CONTRACT: str = "candidate-outcome-v2"
 RANKER_ONLINE_LEARNING_ENABLED: bool = True
 RANKER_ONLINE_MIN_ROWS: int = 120
 RANKER_ONLINE_MIN_NEW_ROWS: int = 20
+# Legacy bar snapshots lack the candidate-outcome-v2 contract and are not an
+# online-ranker input.  Keep disabled unless an explicit diagnostic needs the
+# old stream; enabling it must not make those rows training-eligible.
+LEGACY_ML_DATASET_COLLECTION_ENABLED: bool = False
 
 # в”Ђв”Ђ РќРѕРІС‹Рµ С„РёР»СЊС‚СЂС‹ РІС…РѕРґР° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # РњР°РєСЃ. СЂРѕСЃС‚ РѕС‚ РјРёРЅРёРјСѓРјР° РїРѕСЃР»РµРґРЅРёС… 96 Р±Р°СЂРѕРІ (24С‡ РЅР° 15m)

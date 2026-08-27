@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 
 import critic_dataset
+import config
+import data_collector
 import ml_candidate_ranker
 import policy_provenance
 
@@ -110,6 +113,44 @@ def _minimal_market_fixture() -> tuple[np.ndarray, dict]:
 
 
 class CandidateDatasetQualityTests(unittest.TestCase):
+    def test_legacy_ml_dataset_collection_is_disabled_by_default(self) -> None:
+        self.assertFalse(config.LEGACY_ML_DATASET_COLLECTION_ENABLED)
+
+    def test_collector_does_not_mutate_legacy_ml_stream_by_default(self) -> None:
+        size = 35
+        data = np.zeros(
+            size,
+            dtype=[("t", "i8"), ("o", "f8"), ("h", "f8"), ("l", "f8"), ("c", "f8"), ("v", "f8")],
+        )
+        data["t"] = np.arange(size, dtype=np.int64) * 900_000 + 1_786_000_000_000
+        for name in ("o", "h", "l", "c"):
+            data[name] = np.linspace(1.0, 1.1, size)
+        data["v"] = 100.0
+        _, feat = _minimal_market_fixture()
+        feat = {name: np.resize(values, size) for name, values in feat.items()}
+        batches: list[dict] = []
+        with patch.object(
+            data_collector, "fetch_klines", new=AsyncMock(return_value=data)
+        ), patch.object(
+            data_collector, "compute_features", return_value=feat
+        ), patch.object(
+            data_collector, "_detect_rule_signal", return_value="none"
+        ), patch.object(
+            data_collector.ml_dataset, "log_bar_snapshot"
+        ) as log_snapshot, patch.object(
+            data_collector.ml_dataset, "fill_pending_from_data"
+        ) as fill_legacy:
+            ok = asyncio.run(
+                data_collector._process_coin(
+                    None, "TESTUSDT", "15m", False, 0.0,
+                    critic_label_batches=batches,
+                )
+            )
+        self.assertTrue(ok)
+        log_snapshot.assert_not_called()
+        fill_legacy.assert_not_called()
+        self.assertEqual(len(batches), 1)
+
     def test_current_contract_uses_dedicated_v2_stream(self) -> None:
         self.assertEqual(critic_dataset.CRITIC_FILE.name, "critic_dataset_v2.jsonl")
         self.assertEqual(critic_dataset.LEGACY_CRITIC_FILE.name, "critic_dataset.jsonl")

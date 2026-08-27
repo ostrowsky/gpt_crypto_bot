@@ -158,29 +158,29 @@ async def _process_coin(
                     f"candidate append returned no record id for {sym} [{tf}]"
                 )
 
-        # Логируем бар с полным рыночным контекстом
-        await run_cpu(
-            ml_dataset.log_bar_snapshot,
-            sym=sym, tf=tf,
-            bar_ts=int(data["t"][i]),
-            rule_signal=rule_signal,
-            is_bull_day=is_bull_day,
-            feat=feat, i=i, data=data,
-            btc_vs_ema50=btc_vs_ema50,
-            btc_momentum_4h=btc_momentum_4h,
-            market_vol_24h=market_vol_24h,
-        )
-
-        # Заполняем forward labels для ранее записанных баров
         tf_seconds = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
         bar_ms = tf_seconds.get(tf, BAR_SECONDS) * 1000
-        await run_cpu(
-            ml_dataset.fill_pending_from_data,
-            sym=sym, tf=tf,
-            t_arr=data["t"].astype(int),
-            c_arr=c,
-            bar_ms=bar_ms,
-        )
+        if bool(getattr(config, "LEGACY_ML_DATASET_COLLECTION_ENABLED", False)):
+            # Diagnostic-only rollback path.  These rows do not satisfy the v2
+            # candidate contract and remain excluded from online training.
+            await run_cpu(
+                ml_dataset.log_bar_snapshot,
+                sym=sym, tf=tf,
+                bar_ts=int(data["t"][i]),
+                rule_signal=rule_signal,
+                is_bull_day=is_bull_day,
+                feat=feat, i=i, data=data,
+                btc_vs_ema50=btc_vs_ema50,
+                btc_momentum_4h=btc_momentum_4h,
+                market_vol_24h=market_vol_24h,
+            )
+            await run_cpu(
+                ml_dataset.fill_pending_from_data,
+                sym=sym, tf=tf,
+                t_arr=data["t"].astype(int),
+                c_arr=c,
+                bar_ms=bar_ms,
+            )
         if critic_label_batches is not None:
             critic_label_batches.append({
                 "sym": sym,

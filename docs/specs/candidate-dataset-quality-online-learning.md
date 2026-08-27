@@ -58,6 +58,12 @@ exit quality, or portfolio performance.
     error; the row is not counted as written, the collector is marked disabled,
     a stop marker is created, and the supervised headless worker exits instead
     of retrying an apparently successful partial cycle.
+11. The candidate collector does not append or mature the legacy
+    `ml_dataset.jsonl` by default.  That stream has no v2 provenance contract,
+    is not an input to the online candidate ranker, and its per-pair rewrites
+    make a bounded collector cycle impossible.  A diagnostic rollback switch
+    may re-enable it explicitly, but such rows remain ineligible for v2
+    training.
 
 ## Initial guardrails
 
