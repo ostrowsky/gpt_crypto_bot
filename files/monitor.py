@@ -2011,16 +2011,16 @@ async def _maybe_send_top_gainer_score_gate_strong_alert(
         return
     logged[key] = int(bar_ts)
     await send(
-        "STRONG SIGNAL - entry blocked by score gate\n\n"
+        "🟡 *РАННИЙ СИГНАЛ РОСТА* — STRONG SIGNAL\n\n"
         f"*{sym}*  `[{tf}]`  `{mode}`\n"
-        f"Price: `{price:.6g}`\n"
+        f"💰 Цена: `{price:.6g}`\n"
         f"Candidate score: `{float(candidate_score):.1f}`\n"
         f"Top-gainer score: `{float(live_score):.2f}` / `{float(min_score):.2f}` "
-        f"(deficit `{float(deficit):.2f}`)\n"
+        f"(deficit / не хватает `{float(deficit):.2f}`)\n"
         f"RSI: `{rsi:.1f}`  ADX: `{adx:.1f}`  Vol x: `{vol_x:.2f}`\n"
-        f"Daily range: `{daily_range:.2f}%`  Intraday: `{intraday_change_pct:+.2f}%`\n"
-        f"Blocked: `{reason}`\n"
-        "Signal delivered; no position opened automatically."
+        f"Дневной диапазон: `{daily_range:.2f}%`  Внутри дня: `{intraday_change_pct:+.2f}%`\n"
+        f"Блокировка BUY: `{reason}`\n"
+        "Бот увидел возможное начало движения; автоматическая позиция не открыта."
     )
 
 
@@ -3703,6 +3703,38 @@ def _local_day_key(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
 
 
+def _register_entry_alert_context(
+    state: MonitorState,
+    *,
+    sym: str,
+    entry_ts_ms: int,
+) -> Dict[str, Any]:
+    """Classify an accepted entry for truthful operator-facing labeling only."""
+    local_dt = datetime.fromtimestamp(entry_ts_ms / 1000, tz=timezone.utc).astimezone(LOCAL_TZ)
+    day = local_dt.strftime("%Y-%m-%d")
+    current = state.entry_alert_history.get(sym) or {}
+    if str(current.get("day") or "") == day:
+        ordinal = int(current.get("count") or 1) + 1
+        first_ts_ms = int(current.get("first_entry_ts_ms") or entry_ts_ms)
+        is_reentry = True
+    else:
+        ordinal = 1
+        first_ts_ms = int(entry_ts_ms)
+        is_reentry = False
+    state.entry_alert_history[sym] = {
+        "day": day,
+        "count": ordinal,
+        "first_entry_ts_ms": first_ts_ms,
+        "latest_entry_ts_ms": int(entry_ts_ms),
+    }
+    first_local = datetime.fromtimestamp(first_ts_ms / 1000, tz=timezone.utc).astimezone(LOCAL_TZ)
+    return {
+        "is_reentry": is_reentry,
+        "ordinal": ordinal,
+        "first_entry_local_time": first_local.strftime("%H:%M"),
+    }
+
+
 def _current_local_day_key() -> str:
     return datetime.now(timezone.utc).astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
 
@@ -4091,6 +4123,9 @@ class MonitorState:
     cluster_cap_alert_logged: Dict[str, str] = field(default_factory=dict)
     chase_guard_alert_logged: Dict[str, str] = field(default_factory=dict)
     score_gate_alert_logged: Dict[str, int] = field(default_factory=dict)
+    # Notification-only local-day history. It distinguishes the first accepted
+    # entry from later same-day re-entries and never participates in admission.
+    entry_alert_history: Dict[str, dict] = field(default_factory=dict)
     blocked_learning_logged: Dict[str, int] = field(default_factory=dict)
     scout_shadow_logged: Dict[str, int] = field(default_factory=dict)
     wakeup_shadow_logged: Dict[str, int] = field(default_factory=dict)
@@ -6995,8 +7030,22 @@ async def _poll_coin(
                     f"\n⚠️ catch-up after discovery: signal was {int(catchup_snapshot['lookback'])} bar(s) ago, "
                     f"price drift `{float(catchup_snapshot['slippage_pct']):+.2f}%`"
                 )
+            entry_alert = _register_entry_alert_context(
+                state,
+                sym=sym,
+                entry_ts_ms=int(data["t"][i]),
+            )
+            if entry_alert["is_reentry"]:
+                alert_heading = f"🔁 *ПОВТОРНЫЙ ВХОД #{int(entry_alert['ordinal'])}*"
+                reentry_note = (
+                    "\nℹ️ Это не первое обнаружение движения сегодня: "
+                    f"первый принятый вход был в `{entry_alert['first_entry_local_time']}`."
+                )
+            else:
+                alert_heading = "🟢 *СИГНАЛ ПОКУПКИ*"
+                reentry_note = ""
             await send(
-                f"🟢 *СИГНАЛ ПОКУПКИ* — {mode_label}\n\n"
+                f"{alert_heading} — {mode_label}\n\n"
                 f"*{sym}*  `[{tf}]`\n"
                 f"💰 Цена: `{price:.6g}`\n"
                 f"📐 EMA20: `{ef:.6g}`\n"
@@ -7005,7 +7054,7 @@ async def _poll_coin(
                 f"📊 RSI: `{rsi:.1f}`\n"
                 f"🔊 Объём ×: `{vx:.2f}`\n"
                 f"⚙️ Стоп: ATR×`{trail_k}`  |  Лимит: `{max_hold}` баров"
-                f"{catchup_note}\n\n"
+                f"{catchup_note}{reentry_note}\n\n"
                 f"🎯 Буду проверять прогноз: {pos.prediction_summary()}"
             )
         return
