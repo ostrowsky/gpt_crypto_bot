@@ -64,6 +64,54 @@ exit quality, or portfolio performance.
     make a bounded collector cycle impossible.  A diagnostic rollback switch
     may re-enable it explicitly, but such rows remain ineligible for v2
     training.
+12. Reprocessing an unchanged candidate decision is a no-op. It must finish
+    during the unlocked preview scan and must not acquire the cross-process
+    dataset lock or rewrite the JSONL stream.
+13. The cross-process lock wait budget is 120 seconds by default and can be
+    changed only with `GPT_BOT_CRITIC_LOCK_TIMEOUT_SEC`. This exceeds the
+    measured 23-second full serialization time of the current 125 MB stream;
+    timeout still fails closed and never counts a lost append as successful.
+14. Atomic snapshot replacement has a separate 120-second Windows reader
+    contention budget, configurable with
+    `GPT_BOT_CRITIC_REPLACE_TIMEOUT_SEC`. A transient reader handle is retried
+    while the writer lock remains held; exhaustion is an integrity failure and
+    cannot be counted as a completed label update.
+15. Recovery after collector downtime uses paginated Binance klines from the
+    earliest mature missing target through the proof bar after T+N. It updates
+    only exact closed-bar T+3/T+5/T+10 outcomes. Missing exchange history stays
+    `unknown` and is reported; it is never imputed as zero, success, or failure.
+16. Multi-process JSONL append order is not assumed to be chronological. The
+    preflight sorts verified rows by immutable `feature_time` before building
+    purged train/validation/test partitions, matching the training loader.
+    Cross-timeframe competition groups also use `feature_time` (closed-bar
+    availability), never the candle-open `ts_signal`. The training loader sorts
+    by the same key so every CatBoost ranking query remains contiguous.
+
+## Policy-epoch bridge and target availability
+
+`policy_epoch` is a manually versioned semantic decision identity. Exact
+config/source/watchlist hashes remain attached to every observation, but an
+operational collector repair or notification wording change does not create a
+new decision epoch. Any production eligibility, score, routing, BUY/SELL,
+re-entry, sizing, replacement, capacity, or cost change must bump the semantic
+epoch.
+
+The two raw epochs already present in `critic_dataset_v2.jsonl` are registered
+as decision-equivalent to `decision-policy-v1-20260827`:
+
+- `pe1-f7fdfbdbba47b9f3`;
+- `pe1-648646fcc3ebb415`.
+
+The only source-hash difference between them is `monitor.py` commit
+`548f2c98a62ca6bbbdd8153e9d427f082d265d8f`, which changed operator-facing
+Telegram wording and same-day entry labeling but not admission, ranking,
+portfolio, or exit decisions. Reports retain raw counts and expose the bridge;
+an unregistered epoch still fails `unbridged_policy_epochs`.
+
+Teacher target `label_time` means when the target outcome became objectively
+available: 12:00 local for `midday`, and the next local midnight for `final`.
+`recorded_at` remains the actual later annotation time. A delayed report may
+not move objective availability forward and collapse a chronological split.
 
 ## Initial guardrails
 
@@ -90,14 +138,27 @@ Any failed guard returns to `MATURE` with a named blocker.  It does not write a
 new model artifact.  A successful shadow training run writes evidence but does
 not alter BUY/SELL, score gates, portfolio replacement, or Telegram signals.
 
+Recovery follows the same strict order: restore dataset integrity and mature
+labels; verify the registered policy epoch and purged split; train/evaluate in
+shadow; run maximum-period candidate replay and the canonical 30-day ten-slot
+after-cost portfolio replay; only then consider a bounded production canary.
+
 ## Verification
 
 - focused fixtures cover candidate-wide maturation, aged-label failure,
   batch maturation, action-selection bias, empty split failure, and a passing
   multi-action cohort;
+- focused fixtures also cover idempotent candidate updates, paginated recovery,
+  registered versus unknown policy epochs, and objective teacher availability;
 - maximum locally available dataset audit reports old-contract rows separately
   and confirms they cannot enter the new training cohort;
 - Truth Harness `full` and `change --staged` remain mandatory.
+
+Applicable invariants: TH-01 through TH-07 and TH-09 through TH-12. In
+particular, shadow training is proxy evidence (TH-02), purged availability is
+chronological OOS evidence (TH-03/TH-04), and no production claim is permitted
+without candidate-population maximum-period replay and unified after-cost
+portfolio alpha (TH-06/TH-11).
 
 ## Canary and rollout
 

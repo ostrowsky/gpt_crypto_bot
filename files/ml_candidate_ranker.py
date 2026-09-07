@@ -8,9 +8,10 @@ import math
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import config
@@ -408,8 +409,25 @@ def load_training_rows(
         if min_ts and ts < min_ts:
             continue
         rec["_dt"] = ts
+        rec["_feature_dt"] = (
+            policy_provenance.parse_utc(
+                (rec.get("provenance") or {}).get("feature_time")
+            )
+            or ts
+        )
         rows.append(rec)
-    rows.sort(key=lambda r: r["_dt"])
+    # CatBoost ranking requires every query/group to be contiguous. Candle-open
+    # timestamps differ across timeframes even when the closed-bar features
+    # become available at the same decision instant, so feature_time is the
+    # chronological and grouping key for the training stream.
+    rows.sort(
+        key=lambda r: (
+            r["_feature_dt"],
+            str(r.get("sym") or ""),
+            str(r.get("tf") or ""),
+            str(r.get("id") or ""),
+        )
+    )
     return rows
 
 
@@ -459,6 +477,7 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
     excluded_contract_rows = 0
     incomplete_current_contract_rows = 0
     epoch_counts: Dict[str, int] = defaultdict(int)
+    raw_epoch_counts: Dict[str, int] = defaultdict(int)
     first_feature_time: Optional[str] = None
     last_feature_time: Optional[str] = None
     for rec in _iter_jsonl(path):
@@ -480,8 +499,9 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
             excluded_contract_rows += 1
         elif training_row_provenance_valid(rec):
             verified_rows += 1
-            epoch = str((rec.get("decision_provenance") or {}).get("policy_epoch") or "unknown")
-            epoch_counts[epoch] += 1
+            epoch = str((rec.get("provenance") or {}).get("policy_epoch") or "unknown")
+            raw_epoch_counts[epoch] += 1
+            epoch_counts[policy_provenance.canonical_policy_epoch(epoch)] += 1
             feature_time = str((rec.get("provenance") or {}).get("feature_time") or "")
             if feature_time:
                 first_feature_time = feature_time if first_feature_time is None else min(first_feature_time, feature_time)
@@ -497,6 +517,10 @@ def training_provenance_coverage(path: Path, min_ts: Optional[datetime] = None) 
         "required_dataset_contract": _required_dataset_contract(),
         "verified_rate_pct": round(verified_rows / labeled_rows * 100.0, 4) if labeled_rows else None,
         "policy_epoch_counts": dict(sorted(epoch_counts.items())),
+        "raw_policy_epoch_counts": dict(sorted(raw_epoch_counts.items())),
+        "policy_epoch_bridges": policy_provenance.policy_epoch_bridge_evidence(
+            raw_epoch_counts
+        ),
         "feature_time_range": {"first": first_feature_time, "last": last_feature_time},
     }
 
@@ -662,7 +686,14 @@ def _target_teacher_capture_ratio(rec: dict) -> float:
 
 
 def _decision_group_key(rec: dict) -> str:
-    return str(rec.get("ts_signal") or rec.get("bar_ts") or "")
+    # Cross-timeframe candidates compete when their closed-bar features become
+    # available, not when each differently-sized candle opened.
+    return str(
+        (rec.get("provenance") or {}).get("feature_time")
+        or rec.get("ts_signal")
+        or rec.get("bar_ts")
+        or ""
+    )
 
 
 def candidate_dataset_quality_report(
@@ -705,12 +736,25 @@ def candidate_dataset_quality_report(
         if not np.all(np.isfinite(vectorize_record(rec, feature_names))):
             invalid_feature_rows += 1
 
+    # Appends from independent producers are not guaranteed to be globally
+    # ordered.  The preflight must evaluate the same chronological cohort that
+    # training consumes instead of treating JSONL append order as event time.
+    mature.sort(
+        key=lambda rec: policy_provenance.parse_utc(
+            (rec.get("provenance") or {}).get("feature_time")
+        )
+        or datetime.min.replace(tzinfo=timezone.utc)
+    )
+
     action_counts: Dict[str, int] = defaultdict(int)
     epoch_counts: Dict[str, int] = defaultdict(int)
+    raw_epoch_counts: Dict[str, int] = defaultdict(int)
     groups: Dict[str, int] = defaultdict(int)
     for rec in mature:
         action_counts[str((rec.get("decision") or {}).get("action") or "unknown")] += 1
-        epoch_counts[str((rec.get("provenance") or {}).get("policy_epoch") or "unknown")] += 1
+        raw_epoch = str((rec.get("provenance") or {}).get("policy_epoch") or "unknown")
+        raw_epoch_counts[raw_epoch] += 1
+        epoch_counts[policy_provenance.canonical_policy_epoch(raw_epoch)] += 1
         groups[_decision_group_key(rec)] += 1
     positive = sum(1 for rec in mature if _target_trade_quality(rec) > 0.5)
     non_positive = len(mature) - positive
@@ -768,6 +812,10 @@ def candidate_dataset_quality_report(
             "top5_eligible": sum(size >= 5 for size in groups.values()),
         },
         "policy_epoch_counts": dict(sorted(epoch_counts.items())),
+        "raw_policy_epoch_counts": dict(sorted(raw_epoch_counts.items())),
+        "policy_epoch_bridges": policy_provenance.policy_epoch_bridge_evidence(
+            raw_epoch_counts
+        ),
         "invalid_feature_rows": invalid_feature_rows,
         "purged_split_viable": split_viable,
         "purged_split_error": split_error,
@@ -862,13 +910,38 @@ def _row_feature_time(rec: dict) -> datetime:
 
 def _row_max_label_time(rec: dict) -> datetime:
     values = [
-        policy_provenance.parse_utc(((rec.get("label_provenance") or {}).get(key) or {}).get("label_time"))
+        _row_label_available_at(rec, key)
         for key in _target_label_keys(rec)
     ]
     present = [value for value in values if value is not None]
     if not present:
         raise RuntimeError("Verified row is missing target label_time")
     return max(present)
+
+
+def _row_label_available_at(rec: dict, key: str) -> datetime | None:
+    """Return causal target availability, distinct from late recording time."""
+    if key.startswith("teacher."):
+        phase = key.split(".", 1)[1]
+        payload = ((rec.get("teacher") or {}).get(phase) or {})
+        day = str(payload.get("target_day_local") or "").strip()
+        timezone_name = str(payload.get("timezone") or "").strip()
+        if day and timezone_name and phase in {"midday", "final"}:
+            try:
+                local_midnight = datetime.fromisoformat(day).replace(
+                    tzinfo=ZoneInfo(timezone_name)
+                )
+                available_local = (
+                    local_midnight + timedelta(hours=12)
+                    if phase == "midday"
+                    else local_midnight + timedelta(days=1)
+                )
+                return available_local.astimezone(timezone.utc)
+            except (ValueError, TypeError):
+                pass
+    return policy_provenance.parse_utc(
+        ((rec.get("label_provenance") or {}).get(key) or {}).get("label_time")
+    )
 
 
 def _chronological_purged_indices(rows: Sequence[dict]) -> tuple[List[int], List[int], List[int]]:
@@ -1576,21 +1649,41 @@ def train_and_evaluate(
 
 def _split_scope(rows: Sequence[dict]) -> dict[str, Any]:
     if not rows:
-        return {"rows": 0, "groups": 0, "first_feature_time": None, "last_feature_time": None, "first_label_time": None, "last_label_time": None, "policy_epoch_counts": {}}
+        return {
+            "rows": 0,
+            "groups": 0,
+            "first_feature_time": None,
+            "last_feature_time": None,
+            "first_label_time": None,
+            "last_label_time": None,
+            "first_label_recorded_at": None,
+            "last_label_recorded_at": None,
+            "policy_epoch_counts": {},
+            "raw_policy_epoch_counts": {},
+        }
     feature_times: List[str] = []
     label_times: List[str] = []
+    label_recorded_times: List[str] = []
     epoch_counts: Dict[str, int] = defaultdict(int)
+    raw_epoch_counts: Dict[str, int] = defaultdict(int)
     for rec in rows:
         provenance = rec.get("provenance") or {}
-        decision = rec.get("decision_provenance") or {}
         feature_time = str(provenance.get("feature_time") or "")
         if feature_time:
             feature_times.append(feature_time)
-        epoch_counts[str(decision.get("policy_epoch") or "unknown")] += 1
+        raw_epoch = str(provenance.get("policy_epoch") or "unknown")
+        raw_epoch_counts[raw_epoch] += 1
+        epoch_counts[policy_provenance.canonical_policy_epoch(raw_epoch)] += 1
         for key in _target_label_keys(rec):
-            label_time = str(((rec.get("label_provenance") or {}).get(key) or {}).get("label_time") or "")
-            if label_time:
-                label_times.append(label_time)
+            available_at = _row_label_available_at(rec, key)
+            if available_at is not None:
+                label_times.append(policy_provenance.utc_iso(available_at))
+            recorded_at = str(
+                ((rec.get("label_provenance") or {}).get(key) or {}).get("recorded_at")
+                or ""
+            )
+            if recorded_at:
+                label_recorded_times.append(recorded_at)
     return {
         "rows": len(rows),
         "groups": len({_decision_group_key(rec) for rec in rows}),
@@ -1598,7 +1691,10 @@ def _split_scope(rows: Sequence[dict]) -> dict[str, Any]:
         "last_feature_time": max(feature_times) if feature_times else None,
         "first_label_time": min(label_times) if label_times else None,
         "last_label_time": max(label_times) if label_times else None,
+        "first_label_recorded_at": min(label_recorded_times) if label_recorded_times else None,
+        "last_label_recorded_at": max(label_recorded_times) if label_recorded_times else None,
         "policy_epoch_counts": dict(sorted(epoch_counts.items())),
+        "raw_policy_epoch_counts": dict(sorted(raw_epoch_counts.items())),
     }
 
 

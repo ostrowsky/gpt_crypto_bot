@@ -7,7 +7,7 @@ import threading
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from datetime import date, datetime, time as dt_time, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -42,10 +42,16 @@ _FILE_LOCK = threading.RLock()
 _pylog = logging.getLogger("critic_dataset")
 _logged_candidates: OrderedDict[str, bool] = OrderedDict()
 _MAX_LOGGED = 100_000
-_CROSS_PROCESS_LOCK_TIMEOUT_SEC = 10.0
+_CROSS_PROCESS_LOCK_TIMEOUT_SEC = max(
+    10.0,
+    float(os.getenv("GPT_BOT_CRITIC_LOCK_TIMEOUT_SEC", "120")),
+)
 _CROSS_PROCESS_LOCK_POLL_SEC = 0.05
-_REPLACE_RETRIES = 12
 _REPLACE_RETRY_SEC = 0.10
+_REPLACE_TIMEOUT_SEC = max(
+    10.0,
+    float(os.getenv("GPT_BOT_CRITIC_REPLACE_TIMEOUT_SEC", "120")),
+)
 
 
 class DatasetIntegrityError(RuntimeError):
@@ -174,18 +180,19 @@ def _dataset_io_lock():
 
 
 def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
-    last_error: Optional[Exception] = None
-    for attempt in range(1, _REPLACE_RETRIES + 1):
+    """Replace a dataset snapshot after transient Windows reader handles close."""
+    deadline = time.monotonic() + _REPLACE_TIMEOUT_SEC
+    while True:
         try:
             tmp.replace(target)
             return
-        except PermissionError as e:
-            last_error = e
-            if attempt >= _REPLACE_RETRIES:
+        except PermissionError:
+            if time.monotonic() >= deadline:
                 raise
-            time.sleep(_REPLACE_RETRY_SEC * attempt)
-    if last_error is not None:
-        raise last_error
+            # Python readers on Windows can temporarily deny rename/delete
+            # sharing. Retry through bounded evidence scans while the writer
+            # lock prevents another mutation from overtaking this commit.
+            time.sleep(_REPLACE_RETRY_SEC)
 
 
 def _scan_mutations(mutator) -> tuple[bool, bool]:
@@ -345,7 +352,7 @@ def _update_existing_candidate(
         if _decision_priority(action, stage) < _decision_priority(old_action, old_stage):
             return False
 
-        rec["decision"] = {
+        next_decision = {
             "action": action,
             "reason_code": reason_code,
             "reason": reason,
@@ -363,12 +370,18 @@ def _update_existing_candidate(
             "near_miss": bool(near_miss),
             "signal_flags": signal_flags or {},
         }
-        policy_provenance.update_decision_provenance(rec, decision_provenance)
+        decision_changed = rec.get("decision") != next_decision
+        if decision_changed:
+            rec["decision"] = next_decision
+        provenance_changed = policy_provenance.update_decision_provenance(
+            rec, decision_provenance
+        )
         rec.setdefault("labels", {})
-        if action == "take":
+        trade_taken_changed = action == "take" and rec["labels"].get("trade_taken") is not True
+        if trade_taken_changed:
             rec["labels"]["trade_taken"] = True
-        changed = True
-        return True
+        changed = decision_changed or provenance_changed or trade_taken_changed
+        return changed
 
     _rewrite_records(_mutate, strict=strict)
     return changed
@@ -718,6 +731,16 @@ def _teacher_local_window(target_day: date, phase: str, tz: ZoneInfo) -> tuple[d
     return start_local, end_local
 
 
+def _teacher_label_available_at(target_day: date, phase: str, tz: ZoneInfo) -> datetime:
+    local_midnight = datetime.combine(target_day, dt_time.min, tzinfo=tz)
+    available_local = (
+        local_midnight + timedelta(hours=12)
+        if phase == "midday"
+        else local_midnight + timedelta(days=1)
+    )
+    return available_local.astimezone(timezone.utc)
+
+
 def _record_local_dt(rec: Dict[str, Any], tz: ZoneInfo) -> Optional[datetime]:
     ts = _parse_utc_iso(rec.get("ts_signal"))
     if ts is None:
@@ -837,7 +860,7 @@ def annotate_top_gainer_teacher(report: Dict[str, Any]) -> Dict[str, Any]:
     }
     tagged_symbols = set(exchange_map) | set(watchlist_map) | false_positive_symbols
     rows_scanned = 0
-    label_time = datetime.now(timezone.utc)
+    label_time = _teacher_label_available_at(target_day, phase, tz)
 
     def _annotate(rec: Dict[str, Any], *, count_scan: bool) -> bool:
         nonlocal rows_scanned

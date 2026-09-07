@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import numpy as np
 
 import critic_dataset
+import backfill_candidate_outcomes_v2
 import config
 import data_collector
 import ml_candidate_ranker
@@ -113,6 +114,17 @@ def _minimal_market_fixture() -> tuple[np.ndarray, dict]:
 
 
 class CandidateDatasetQualityTests(unittest.TestCase):
+    def test_cross_process_lock_budget_exceeds_full_stream_rewrite_budget(self) -> None:
+        self.assertGreaterEqual(critic_dataset._CROSS_PROCESS_LOCK_TIMEOUT_SEC, 120.0)
+
+    def test_atomic_replace_outlives_short_windows_reader_contention(self) -> None:
+        tmp = unittest.mock.Mock()
+        tmp.replace.side_effect = [PermissionError("reader busy")] * 20 + [None]
+        with patch.object(critic_dataset.time, "sleep") as sleep_mock:
+            critic_dataset._atomic_replace_with_retry(tmp, Path("dataset.jsonl"))
+        self.assertEqual(tmp.replace.call_count, 21)
+        self.assertEqual(sleep_mock.call_count, 20)
+
     def test_legacy_ml_dataset_collection_is_disabled_by_default(self) -> None:
         self.assertFalse(config.LEGACY_ML_DATASET_COLLECTION_ENABLED)
 
@@ -154,6 +166,37 @@ class CandidateDatasetQualityTests(unittest.TestCase):
     def test_current_contract_uses_dedicated_v2_stream(self) -> None:
         self.assertEqual(critic_dataset.CRITIC_FILE.name, "critic_dataset_v2.jsonl")
         self.assertEqual(critic_dataset.LEGACY_CRITIC_FILE.name, "critic_dataset.jsonl")
+
+    def test_repeated_identical_candidate_update_is_lock_free(self) -> None:
+        data, feat = _minimal_market_fixture()
+        bar_ts = 1_786_000_000_000
+        kwargs = {
+            "sym": "IDEMPOTENTUSDT",
+            "tf": "15m",
+            "bar_ts": bar_ts,
+            "signal_type": "trend",
+            "is_bull_day": False,
+            "feat": feat,
+            "i": 0,
+            "data": data,
+            "action": "candidate",
+            "reason_code": "rule_signal",
+            "reason": "collector detected candidate",
+            "stage": "collector",
+            "signal_flags": {"entry_ok": True},
+        }
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            critic_dataset, "CRITIC_FILE", Path(td) / "critic.jsonl"
+        ):
+            critic_dataset._logged_candidates.clear()
+            first = critic_dataset.log_candidate(**kwargs)
+            with patch.object(
+                critic_dataset,
+                "_dataset_io_lock",
+                side_effect=AssertionError("no-op update must not acquire the dataset lock"),
+            ):
+                second = critic_dataset.log_candidate(**kwargs)
+        self.assertEqual(first, second)
 
     def test_strict_collector_append_raises_instead_of_counting_lost_row(self) -> None:
         data, feat = _minimal_market_fixture()
@@ -235,6 +278,168 @@ class CandidateDatasetQualityTests(unittest.TestCase):
         self.assertEqual(coverage["legacy_unknown_rows"], 0)
         self.assertEqual(coverage["excluded_contract_rows"], 0)
         self.assertEqual(coverage["incomplete_current_contract_rows"], 1)
+
+    def test_registered_notification_only_epochs_share_one_semantic_epoch(self) -> None:
+        rows = [
+            _row(i, action=("take" if i % 3 == 0 else "blocked"), teacher_top=i < 5)
+            for i in range(120)
+        ]
+        legacy_epochs = ("pe1-f7fdfbdbba47b9f3", "pe1-648646fcc3ebb415")
+        for i, row in enumerate(rows):
+            epoch = legacy_epochs[i % 2]
+            row["provenance"]["policy_epoch"] = epoch
+            row["decision_provenance"]["policy_epoch"] = epoch
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "critic.jsonl"
+            path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+            )
+            report = ml_candidate_ranker.candidate_dataset_quality_report(
+                path, min_rows=120
+            )
+        self.assertNotIn("unbridged_policy_epochs", report["blocking_checks"])
+        self.assertEqual(len(report["raw_policy_epoch_counts"]), 2)
+        self.assertEqual(
+            report["policy_epoch_counts"],
+            {policy_provenance.POLICY_SEMANTIC_EPOCH: 120},
+        )
+
+    def test_unregistered_epoch_still_fails_closed(self) -> None:
+        rows = [
+            _row(i, action=("take" if i % 3 == 0 else "blocked"), teacher_top=i < 5)
+            for i in range(120)
+        ]
+        rows[-1]["provenance"]["policy_epoch"] = "unregistered-change"
+        rows[-1]["decision_provenance"]["policy_epoch"] = "unregistered-change"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "critic.jsonl"
+            path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+            )
+            report = ml_candidate_ranker.candidate_dataset_quality_report(
+                path, min_rows=120
+            )
+        self.assertIn("unbridged_policy_epochs", report["blocking_checks"])
+
+    def test_teacher_target_uses_objective_availability_not_late_recording(self) -> None:
+        rows = [_row(i, action=("take" if i % 2 else "blocked")) for i in range(120)]
+        for row in rows:
+            feature = policy_provenance.parse_utc(row["provenance"]["feature_time"])
+            assert feature is not None
+            row["teacher"] = {
+                "final": {
+                    "phase": "final",
+                    "target_day_local": feature.date().isoformat(),
+                    "timezone": "UTC",
+                    "watchlist_top_gainer": False,
+                    "capture_ratio": 0.0,
+                }
+            }
+            row["label_provenance"]["teacher.final"] = {
+                "definition": "final teacher",
+                "label_time": "2026-09-01T00:00:00Z",
+                "recorded_at": "2026-09-01T00:00:00Z",
+                "source": "late-catchup-test",
+            }
+        train, validation, test = ml_candidate_ranker._chronological_purged_indices(rows)
+        self.assertTrue(train)
+        self.assertTrue(validation)
+        self.assertTrue(test)
+
+    def test_preflight_sorts_multi_writer_append_order_before_purging(self) -> None:
+        rows = [
+            _row(i, action=("take" if i % 3 == 0 else "blocked"), teacher_top=i < 5)
+            for i in range(120)
+        ]
+        rows.reverse()
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "critic.jsonl"
+            path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+            )
+            report = ml_candidate_ranker.candidate_dataset_quality_report(
+                path, min_rows=120
+            )
+        self.assertTrue(report["purged_split_viable"])
+        self.assertNotIn("purged_split_viability", report["blocking_checks"])
+
+    def test_cross_timeframe_group_uses_closed_feature_availability(self) -> None:
+        first = _row(1, action="blocked")
+        second = _row(2, action="take")
+        first["tf"] = "15m"
+        second["tf"] = "1h"
+        first["ts_signal"] = "2026-08-01T09:45:00Z"
+        second["ts_signal"] = "2026-08-01T09:00:00Z"
+        first["provenance"]["feature_time"] = "2026-08-01T10:00:00Z"
+        second["provenance"]["feature_time"] = "2026-08-01T10:00:00Z"
+        self.assertEqual(
+            ml_candidate_ranker._decision_group_key(first),
+            ml_candidate_ranker._decision_group_key(second),
+        )
+
+    def test_training_loader_keeps_cross_timeframe_queries_contiguous(self) -> None:
+        rows = [_row(i, action=("take" if i % 2 else "blocked")) for i in range(3)]
+        rows[0]["provenance"]["feature_time"] = "2026-08-01T10:00:00Z"
+        rows[0]["ts_signal"] = "2026-08-01T09:45:00Z"
+        rows[1]["provenance"]["feature_time"] = "2026-08-01T10:15:00Z"
+        rows[1]["ts_signal"] = "2026-08-01T10:00:00Z"
+        rows[2]["provenance"]["feature_time"] = "2026-08-01T10:00:00Z"
+        rows[2]["ts_signal"] = "2026-08-01T09:00:00Z"
+        rows[2]["tf"] = "1h"
+        for row in rows:
+            row["decision_provenance"]["decision_time"] = row["provenance"][
+                "feature_time"
+            ]
+            for label in row["label_provenance"].values():
+                label["label_time"] = "2026-08-01T12:00:00Z"
+                label["recorded_at"] = "2026-08-01T12:00:00Z"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "critic.jsonl"
+            path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+            )
+            loaded = ml_candidate_ranker.load_training_rows(path)
+        self.assertEqual(
+            [ml_candidate_ranker._decision_group_key(row) for row in loaded],
+            [
+                "2026-08-01T10:00:00Z",
+                "2026-08-01T10:00:00Z",
+                "2026-08-01T10:15:00Z",
+            ],
+        )
+
+    def test_backfill_labels_mature_rows_from_paginated_market_range(self) -> None:
+        first = 1_786_000_000_000
+        bar_ms = 900_000
+        row = _row(1, action="blocked")
+        row.update({"sym": "BACKFILLUSDT", "tf": "15m", "bar_ts": first})
+        row["labels"].update(
+            {"ret_3": None, "ret_5": None, "ret_10": None,
+             "label_3": None, "label_5": None, "label_10": None}
+        )
+        row["label_provenance"] = {}
+        data = np.zeros(
+            12,
+            dtype=[("t", "i8"), ("o", "f8"), ("h", "f8"), ("l", "f8"), ("c", "f8"), ("v", "f8")],
+        )
+        data["t"] = np.arange(12, dtype=np.int64) * bar_ms + first
+        for name in ("o", "h", "l", "c"):
+            data[name] = np.linspace(1.0, 1.11, 12)
+        data["v"] = 100.0
+
+        async def _fetcher(*_args, **_kwargs):
+            return data
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "critic.jsonl"
+            path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            report = asyncio.run(
+                backfill_candidate_outcomes_v2.backfill(path, fetcher=_fetcher)
+            )
+            updated = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(report["remaining_rows"], 0)
+        self.assertIsNotNone(updated["labels"]["ret_10"])
+        self.assertIn("ret_10", updated["label_provenance"])
 
     def test_quality_preflight_rejects_take_only_selection_bias(self) -> None:
         rows = [_row(i, action="take", teacher_top=i < 5) for i in range(120)]

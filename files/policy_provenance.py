@@ -13,6 +13,23 @@ import config
 ROOT = Path(__file__).resolve().parent
 SCHEMA_VERSION = 1
 POLICY_EPOCH_VERSION = "decision-policy-v1"
+# Semantic identity is deliberately independent from source/build hashes.  It
+# must be bumped only when production decisions can change; operational,
+# evidence-pipeline, documentation, and notification-only repairs retain the
+# same epoch while their exact hashes remain recorded in every manifest.
+POLICY_SEMANTIC_EPOCH = "decision-policy-v1-20260827"
+POLICY_EPOCH_BRIDGES = {
+    "pe1-f7fdfbdbba47b9f3": {
+        "canonical_epoch": POLICY_SEMANTIC_EPOCH,
+        "reason": "pre/post 548f2c9 differ only in operator-facing notification labels",
+        "evidence_commit": "548f2c98a62ca6bbbdd8153e9d427f082d265d8f",
+    },
+    "pe1-648646fcc3ebb415": {
+        "canonical_epoch": POLICY_SEMANTIC_EPOCH,
+        "reason": "current decision-equivalent epoch before semantic-epoch stabilization",
+        "evidence_commit": "548f2c98a62ca6bbbdd8153e9d427f082d265d8f",
+    },
+}
 SENSITIVE_PARTS = ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "CHAT_ID")
 POLICY_SOURCE_FILES = (
     "config.py",
@@ -119,7 +136,7 @@ def current_policy_manifest() -> dict[str, Any]:
     policy_hash = stable_hash(policy_payload)
     return {
         "epoch_version": POLICY_EPOCH_VERSION,
-        "policy_epoch": f"pe1-{policy_hash[:16]}",
+        "policy_epoch": POLICY_SEMANTIC_EPOCH,
         "policy_hash": policy_hash,
         "config_hash": stable_hash(config_snapshot),
         "watchlist_hash": stable_hash(watchlist),
@@ -127,6 +144,24 @@ def current_policy_manifest() -> dict[str, Any]:
         "source_hashes": source_hashes,
         "config_count": len(config_snapshot),
     }
+
+
+def canonical_policy_epoch(raw_epoch: object) -> str:
+    """Return a registered decision-equivalent epoch without rewriting history."""
+    raw = str(raw_epoch or "unknown")
+    bridge = POLICY_EPOCH_BRIDGES.get(raw)
+    return str((bridge or {}).get("canonical_epoch") or raw)
+
+
+def policy_epoch_bridge_evidence(raw_epochs: Iterable[object]) -> list[dict[str, str]]:
+    """Expose only bridges actually used by an evidence cohort."""
+    used: list[dict[str, str]] = []
+    for raw in sorted({str(value or "unknown") for value in raw_epochs}):
+        bridge = POLICY_EPOCH_BRIDGES.get(raw)
+        if not bridge:
+            continue
+        used.append({"raw_epoch": raw, **bridge})
+    return used
 
 
 def utc_iso(value: datetime | None = None) -> str:
