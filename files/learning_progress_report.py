@@ -25,6 +25,7 @@ FEEDBACK_FILE = WORKSPACE_ROOT / ".runtime" / "signal_quality_feedback.json"
 DEFAULT_OUTPUT_JSON = REPORT_DIR / "learning_progress_latest.json"
 DEFAULT_OUTPUT_TXT = REPORT_DIR / "learning_progress_latest.txt"
 SHADOW_REENTRY_SCORECARD_LATEST = REPORT_DIR / "suspicious_reentry_scorecard_latest.json"
+LATEST_TRAIN_REPORT_NAME = "rl_train_latest.json"
 TAIL_SELECTOR_RESEARCH_CONFIG = replay_observable_tail_selector.ObservableSelectorConfig()
 ENTRY_ADMISSION_RESEARCH_CONFIG = report_entry_admission_shadow_reward.RewardConfig()
 BLOCKER_REWARD_RESEARCH_CONFIG = report_blocked_winner_causal_reward.BlockerRewardConfig()
@@ -80,6 +81,9 @@ def build_report(
     status = _load_json(status_file)
     feedback = _load_json(feedback_file)
     shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
+    training_results = _training_results_summary(
+        _load_json(reports_dir / LATEST_TRAIN_REPORT_NAME)
+    )
     shadow_tail_selector = _build_shadow_tail_selector_summary(reports_dir)
     shadow_entry_admission = _build_shadow_entry_admission_summary(reports_dir)
     blocker_reward = _build_blocker_reward_summary(reports_dir)
@@ -94,6 +98,7 @@ def build_report(
         "latest": latest.__dict__,
         "rolling": _rolling_summary(days),
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
+        "training_results": training_results,
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "shadow_tail_selector": shadow_tail_selector,
         "shadow_entry_admission": shadow_entry_admission,
@@ -128,6 +133,7 @@ def render_text(report: dict[str, Any]) -> str:
     decisions = report.get("previous_decisions") or []
     actions = report.get("next_actions") or []
     components = report.get("learning_components") or {}
+    training_results = report.get("training_results") or {}
     shadow_reentry = report.get("shadow_reentry") or {}
     shadow_tail_selector = report.get("shadow_tail_selector") or {}
     shadow_entry_admission = report.get("shadow_entry_admission") or {}
@@ -209,6 +215,32 @@ def render_text(report: dict[str, Any]) -> str:
         lines.append(f"  • {item['name']} — {item['status']} · {item['impact']}")
     if not decisions:
         lines.append("  • нет зафиксированных решений с измеримым эффектом")
+    lines.extend(["", "🤖 Результаты обучения (OOS proxy, не доходность портфеля):"])
+    lines.append(
+        f"  • итог: {training_results.get('label', 'НЕИЗВЕСТНО')} — "
+        f"{training_results.get('detail', 'нет пригодного отчёта обучения')}"
+    )
+    if training_results.get("evidence_valid"):
+        lines.append(
+            "  • выборка: "
+            f"verified={training_results.get('verified_rows')}; "
+            f"train={training_results.get('train_rows')}, "
+            f"validation={training_results.get('val_rows')}, "
+            f"test={training_results.get('test_rows')}; "
+            f"run={training_results.get('generated_at_utc') or 'unknown'}"
+        )
+        for item in training_results.get("top_n", []):
+            lines.append(
+                f"  • Top-{item['top_n']} (groups={item['eligible_groups']}, n={item['ranker_count']}): "
+                f"baseline {_fmt_signed(item['baseline_avg_target_return'], 2)}% → "
+                f"ranker {_fmt_signed(item['ranker_avg_target_return'], 2)}%, "
+                f"Δ={_fmt_signed(item['delta_avg_target_return'], 2)}pp"
+            )
+        lines.append(
+            "  • production: "
+            + ("eligible" if training_results.get("runtime_eligible") else "OFF (shadow-only)")
+            + f"; evidence={training_results.get('evidence_status', 'unknown')}"
+        )
     lines.extend(["", f"🚨 {len(alerts)} сигнал(ов) тревоги" + (_serious_suffix(alerts))])
     for alert in alerts[:4]:
         lines.append(f"  • {alert['severity']}: {alert['text']}")
@@ -244,6 +276,89 @@ def render_text(report: dict[str, Any]) -> str:
     for action in actions[:6]:
         lines.append(f"{action}")
     return "\n".join(lines).strip()
+
+
+def _training_results_summary(session: dict[str, Any]) -> dict[str, Any]:
+    """Summarize like-for-like ranker-vs-baseline OOS evidence.
+
+    Run-to-run comparisons are intentionally excluded: the rolling chronological
+    test window changes between training runs, so that delta is not comparable.
+    """
+    if not isinstance(session, dict) or not session:
+        return {
+            "label": "НЕИЗВЕСТНО",
+            "detail": "rl_train_latest.json отсутствует",
+            "evidence_valid": False,
+        }
+    train = session.get("train_report") or {}
+    provenance = train.get("evaluation_provenance") or session.get("evaluation_provenance") or {}
+    scope = str(provenance.get("evaluation_scope") or "")
+    overlap = int(provenance.get("cross_split_group_overlap_count") or 0)
+    raw_top_n = ((train.get("test_group_ranking") or {}).get("top_n") or [])
+    metrics: list[dict[str, Any]] = []
+    for raw in raw_top_n:
+        baseline = raw.get("baseline") or {}
+        ranker = raw.get("ranker") or {}
+        delta = raw.get("delta") or {}
+        values = (
+            _maybe_float(baseline.get("avg_target_return")),
+            _maybe_float(ranker.get("avg_target_return")),
+            _maybe_float(delta.get("avg_target_return")),
+        )
+        eligible_groups = int(raw.get("eligible_groups") or 0)
+        ranker_count = int(ranker.get("count") or 0)
+        if any(value is None for value in values) or eligible_groups <= 0 or ranker_count <= 0:
+            continue
+        metrics.append({
+            "top_n": int(raw.get("top_n") or 0),
+            "eligible_groups": eligible_groups,
+            "ranker_count": ranker_count,
+            "baseline_avg_target_return": values[0],
+            "ranker_avg_target_return": values[1],
+            "delta_avg_target_return": values[2],
+        })
+    published_top_ns = {int(item["top_n"]) for item in metrics}
+    evidence_valid = (
+        scope == "out_of_sample_time_holdout"
+        and overlap == 0
+        and published_top_ns == {1, 3, 5}
+        and int(train.get("test_rows") or 0) > 0
+    )
+    shadow = session.get("shadow_report") or {}
+    provenance_rows = train.get("data_provenance") or session.get("data_provenance") or {}
+    if not evidence_valid:
+        label = "НЕИЗВЕСТНО"
+        detail = (
+            f"невалидная OOS-оценка: scope={scope or 'missing'}, "
+            f"split_overlap={overlap}, Top-N={sorted(published_top_ns)}"
+        )
+    else:
+        positive = [m for m in metrics if m["delta_avg_target_return"] > 0 and m["ranker_avg_target_return"] > 0]
+        negative = [m for m in metrics if m["delta_avg_target_return"] < 0 and m["ranker_avg_target_return"] < 0]
+        if len(positive) == len(metrics):
+            label = "УЛУЧШАЕТСЯ НА OOS PROXY"
+            detail = "ranker выше baseline и положителен на всех опубликованных Top-N; бизнес-эффект ещё не доказан"
+        elif len(negative) == len(metrics):
+            label = "ДЕГРАДИРУЕТ НА OOS PROXY"
+            detail = "ranker ниже baseline и отрицателен на всех опубликованных Top-N; promotion запрещён"
+        else:
+            label = "СМЕШАННЫЙ OOS РЕЗУЛЬТАТ"
+            detail = "Top-N направления расходятся; считать развитием или деградацией нельзя"
+    return {
+        "label": label,
+        "detail": detail,
+        "evidence_valid": evidence_valid,
+        "generated_at_utc": str(session.get("generated_at_utc") or ""),
+        "evaluation_scope": scope or "unknown",
+        "cross_split_group_overlap_count": overlap,
+        "verified_rows": int(provenance_rows.get("verified_rows") or 0),
+        "train_rows": int(train.get("train_rows") or 0),
+        "val_rows": int(train.get("val_rows") or 0),
+        "test_rows": int(train.get("test_rows") or 0),
+        "top_n": metrics,
+        "runtime_eligible": bool(shadow.get("runtime_eligible", False)),
+        "evidence_status": str(shadow.get("evidence_status") or "unknown"),
+    }
 
 
 def _load_day_metrics(reports_dir: Path) -> list[DayMetrics]:

@@ -18,6 +18,7 @@ The report must not claim learning merely because scripts ran. It separates:
 - entry timing and exit monetization;
 - blocked / missed winner pressure;
 - whether feedback or model-training components actually changed anything;
+- current chronological out-of-sample ranker results against the same-test-window baseline;
 - decisions awaiting operator approval.
 
 ## Schedule
@@ -93,6 +94,21 @@ from final reports.
   deterioration in capture recall, false-positive rate, or exit efficiency.
   ML/teacher metrics remain diagnostic-only and cannot override realized
   objective metrics.
+- Training freshness is not training progress. The report publishes a separate
+  `Результаты обучения` block sourced from `rl_train_latest.json`. It contains
+  verified/train/validation/test row counts and Top-1/3/5 average target return
+  for baseline and ranker with eligible-group/sample counts.
+- The training block may say `УЛУЧШАЕТСЯ НА OOS PROXY` only when the purged
+  chronological holdout has zero cross-split group overlap, the complete
+  Top-1/3/5 set is present, and every published Top-N has both positive ranker
+  average target return and positive delta to
+  its baseline on that same test window. It may say `ДЕГРАДИРУЕТ НА OOS PROXY`
+  only when all published Top-N are negative and below baseline. Otherwise it
+  says `СМЕШАННЫЙ OOS РЕЗУЛЬТАТ` or `НЕИЗВЕСТНО`.
+- OOS proxy direction remains distinct from portfolio progress. The block shows
+  runtime eligibility/evidence status and cannot enable production or change
+  the realized-objective headline. Consecutive training runs are not compared
+  as a trend while their rolling holdout windows differ.
 - Headline entry and exit values must use only the final critic's
   `watchlist_top_gainers` cohort. Broad signal-quality `miss_rate`,
   `false_positive_rate`, capture, exit-efficiency, and giveback remain a
@@ -109,6 +125,7 @@ A concise Telegram-friendly report with:
 - where winners are lost;
 - previous decisions and whether they helped;
 - alerts;
+- OOS training result, denominators, and production eligibility;
 - next operator actions.
 
 ## Delivery Idempotency

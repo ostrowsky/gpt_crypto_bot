@@ -326,6 +326,138 @@ class LearningProgressReportTest(unittest.TestCase):
         self.assertTrue(any(item["status"] == "копит доказательную когорту" for item in decisions))
         self.assertTrue(any("not decision-grade" in item["text"] for item in alerts))
 
+    def test_training_results_publish_oos_top_n_denominators_and_shadow_status(self) -> None:
+        session = {
+            "generated_at_utc": "2026-09-08T06:14:00Z",
+            "train_report": {
+                "train_rows": 700,
+                "val_rows": 150,
+                "test_rows": 150,
+                "data_provenance": {"verified_rows": 1000},
+                "evaluation_provenance": {
+                    "evaluation_scope": "out_of_sample_time_holdout",
+                    "cross_split_group_overlap_count": 0,
+                },
+                "test_group_ranking": {
+                    "top_n": [
+                        {
+                            "top_n": n,
+                            "eligible_groups": 20,
+                            "baseline": {"avg_target_return": -0.10},
+                            "ranker": {"count": 20 * n, "avg_target_return": 0.05},
+                            "delta": {"avg_target_return": 0.15},
+                        }
+                        for n in (1, 3, 5)
+                    ]
+                },
+            },
+            "shadow_report": {
+                "runtime_eligible": False,
+                "evidence_status": "diagnostic_only",
+            },
+        }
+
+        result = lpr._training_results_summary(session)
+        text = lpr.render_text({
+            "latest_day": "2026-09-07",
+            "latest": {},
+            "rolling": {},
+            "verdict": {},
+            "training_results": result,
+        })
+
+        self.assertEqual(result["label"], "УЛУЧШАЕТСЯ НА OOS PROXY")
+        self.assertTrue(result["evidence_valid"])
+        self.assertIn("verified=1000; train=700, validation=150, test=150", text)
+        self.assertIn("Top-3 (groups=20, n=60)", text)
+        self.assertIn("baseline -0.10% → ranker +0.05%, Δ=+0.15pp", text)
+        self.assertIn("production: OFF (shadow-only); evidence=diagnostic_only", text)
+
+    def test_training_results_are_mixed_or_unknown_instead_of_false_progress(self) -> None:
+        session = {
+            "train_report": {
+                "test_rows": 50,
+                "evaluation_provenance": {
+                    "evaluation_scope": "out_of_sample_time_holdout",
+                    "cross_split_group_overlap_count": 0,
+                },
+                "test_group_ranking": {
+                    "top_n": [
+                        {
+                            "top_n": 1,
+                            "eligible_groups": 10,
+                            "baseline": {"avg_target_return": -0.2},
+                            "ranker": {"count": 10, "avg_target_return": 0.1},
+                            "delta": {"avg_target_return": 0.3},
+                        },
+                        {
+                            "top_n": 3,
+                            "eligible_groups": 10,
+                            "baseline": {"avg_target_return": 0.1},
+                            "ranker": {"count": 30, "avg_target_return": -0.1},
+                            "delta": {"avg_target_return": -0.2},
+                        },
+                        {
+                            "top_n": 5,
+                            "eligible_groups": 10,
+                            "baseline": {"avg_target_return": -0.1},
+                            "ranker": {"count": 50, "avg_target_return": 0.05},
+                            "delta": {"avg_target_return": 0.15},
+                        },
+                    ]
+                },
+            }
+        }
+        mixed = lpr._training_results_summary(session)
+        session["train_report"]["evaluation_provenance"]["cross_split_group_overlap_count"] = 1
+        unknown = lpr._training_results_summary(session)
+
+        self.assertEqual(mixed["label"], "СМЕШАННЫЙ OOS РЕЗУЛЬТАТ")
+        self.assertEqual(unknown["label"], "НЕИЗВЕСТНО")
+        self.assertFalse(unknown["evidence_valid"])
+        self.assertIn("split_overlap=1", unknown["detail"])
+
+    def test_build_report_loads_latest_training_result_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / "reports"
+            reports.mkdir()
+            (reports / "rl_train_latest.json").write_text(json.dumps({
+                "generated_at_utc": "2026-09-08T06:14:00Z",
+                "train_report": {
+                    "train_rows": 70,
+                    "val_rows": 15,
+                    "test_rows": 15,
+                    "data_provenance": {"verified_rows": 100},
+                    "evaluation_provenance": {
+                        "evaluation_scope": "out_of_sample_time_holdout",
+                        "cross_split_group_overlap_count": 0,
+                    },
+                    "test_group_ranking": {"top_n": [
+                        {
+                            "top_n": n,
+                            "eligible_groups": 5,
+                            "baseline": {"avg_target_return": -0.1},
+                            "ranker": {"count": 5 * n, "avg_target_return": 0.1},
+                            "delta": {"avg_target_return": 0.2},
+                        }
+                        for n in (1, 3, 5)
+                    ]},
+                },
+                "shadow_report": {"runtime_eligible": False},
+            }), encoding="utf-8")
+
+            report = lpr.build_report(
+                reports,
+                root / "missing-status.json",
+                root / "missing-feedback.json",
+                output_json=root / "out.json",
+                output_txt=root / "out.txt",
+            )
+
+        self.assertEqual(report["training_results"]["label"], "УЛУЧШАЕТСЯ НА OOS PROXY")
+        self.assertEqual(report["training_results"]["test_rows"], 15)
+
     def test_shadow_reentry_summary_is_rendered_and_actionable(self) -> None:
         scorecard = {
             "status": "complete",
