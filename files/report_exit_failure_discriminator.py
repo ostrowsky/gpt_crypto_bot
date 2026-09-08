@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -13,8 +13,22 @@ import report_exit_quality as exit_quality
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORTS = ROOT / ".runtime" / "reports"
+MODELS = ROOT / ".runtime" / "models"
+LATEST_REPORT = REPORTS / "exit_failure_discriminator_latest.json"
+LATEST_MODEL = MODELS / "exit_failure_discriminator_online_shadow.json"
 DEFAULT_CONTINUATION_MARGIN_PCT = 0.75
 DEFAULT_MIN_TRAIN_DAYS = 3
+MODEL_SCHEMA_VERSION = 1
+CAUSAL_FEATURE_NAMES = (
+    "reason",
+    "source",
+    "mode",
+    "tf",
+    "pnl_bucket",
+    "mfe_bucket",
+    "giveback_bucket",
+    "eff_bucket",
+)
 
 
 def _num(value: Any) -> float | None:
@@ -31,34 +45,21 @@ def _bucket(value: Any, cuts: list[float], labels: list[str]) -> str:
     return labels[-1]
 
 
-def _rank_bucket(value: Any) -> str:
-    rank = _num(value)
-    if rank is None or rank <= 0:
-        return "not_top"
-    if rank <= 3:
-        return "top1_3"
-    if rank <= 7:
-        return "top4_7"
-    if rank <= 15:
-        return "top8_15"
-    return "below_top15"
-
-
 def _case_features(case: dict[str, Any]) -> dict[str, str]:
-    return {
+    # Only values observable when SELL is emitted belong here.  In particular,
+    # final-day entry/exit timing, capture ratio and top-mover rank are labels or
+    # retrospective context and would leak the future into online scoring.
+    features = {
         "reason": str(case.get("exit_reason_bucket") or "unknown"),
         "source": str(case.get("source") or "unknown"),
         "mode": str(case.get("mode") or "unknown"),
         "tf": str(case.get("tf") or "unknown"),
-        "entry_timing": str(case.get("entry_timing") or "unknown"),
-        "exit_timing": str(case.get("exit_timing") or "unknown"),
         "pnl_bucket": _bucket(case.get("pnl_pct"), [-2.0, -0.25, 0.0, 0.75, 2.0], ["loss_gt2", "loss", "flat", "small_win", "win", "big_win"]),
         "mfe_bucket": _bucket(case.get("max_favorable_pct"), [0.0, 0.5, 1.5, 3.0, 6.0], ["none", "tiny", "small", "medium", "large", "huge"]),
         "giveback_bucket": _bucket(case.get("giveback_pct"), [0.0, 0.5, 1.5, 3.0, 6.0], ["none", "low", "medium", "high", "very_high", "extreme"]),
         "eff_bucket": _bucket(case.get("exit_efficiency"), [-1.0, 0.0, 0.25, 0.5, 0.8], ["very_bad", "bad", "weak", "ok", "good", "excellent"]),
-        "capture_bucket": _bucket(case.get("capture_ratio_at_entry"), [0.2, 0.4, 0.6, 0.8], ["early", "good", "mid", "late", "very_late"]),
-        "top_rank_bucket": _rank_bucket(case.get("top_mover_rank")),
     }
+    return {name: features[name] for name in CAUSAL_FEATURE_NAMES}
 
 
 def _wrong_exit_label(case: dict[str, Any], *, continuation_margin_pct: float) -> tuple[int | None, float | None]:
@@ -152,9 +153,17 @@ def _precision_at_fraction(scored: list[dict[str, Any]], fraction: float) -> dic
     top = sorted(scored, key=lambda row: row.get("risk_score") or 0.0, reverse=True)[:n]
     labels = [int(row.get("label_wrong_exit_continuation") or 0) for row in top]
     extras = [_num(row.get("post_exit_continuation_extra_pct")) or 0.0 for row in top]
+    wrong = sum(labels)
+    baseline = _rate(scored)
+    precision = wrong / len(labels)
     return {
         "n": n,
-        "precision": round(sum(labels) / len(labels), 4),
+        "wrong": wrong,
+        "precision": round(precision, 4),
+        "baseline_wrong": sum(int(row.get("label_wrong_exit_continuation") or 0) for row in scored),
+        "baseline_n": len(scored),
+        "baseline_rate": baseline,
+        "lift": round(precision / baseline, 4) if baseline else None,
         "avg_extra_pct": round(sum(extras) / len(extras), 4),
         "symbols": [row.get("sym") for row in top[:10]],
     }
@@ -199,7 +208,7 @@ def build(days: int = 0, *, reports_dir: Path = REPORTS, continuation_margin_pct
             decision = "promising_shadow_segments_only"
         else:
             decision = "inconclusive_or_weak"
-    return {
+    report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "status": status,
         "decision": decision,
@@ -213,7 +222,12 @@ def build(days: int = 0, *, reports_dir: Path = REPORTS, continuation_margin_pct
             "cases_labeled": len(rows),
             "train_cases": len(train),
             "test_cases": len(test),
+            "train_days": len({str(row.get("day")) for row in train}),
+            "test_days": len({str(row.get("day")) for row in test}),
+            "data_through_day": max((str(row.get("day")) for row in rows), default=None),
             "split_status": split_status,
+            "train_wrong_exits": sum(int(row.get("label_wrong_exit_continuation") or 0) for row in train),
+            "test_wrong_exits": sum(int(row.get("label_wrong_exit_continuation") or 0) for row in test),
             "train_wrong_exit_rate": train_baseline,
             "test_wrong_exit_rate": test_baseline,
             "test_precision_top_20pct": precision_top_20,
@@ -223,6 +237,57 @@ def build(days: int = 0, *, reports_dir: Path = REPORTS, continuation_margin_pct
         "scored_test_cases": sorted(scored_test, key=lambda row: row.get("risk_score") or 0.0, reverse=True)[:50],
         "recommendation": "Use high-risk segments only to form replay hypotheses. Do not change live SELL logic from this report alone.",
     }
+    report["model_payload"] = _build_model_payload(report, feature_rates, train_baseline)
+    return report
+
+
+def _build_model_payload(
+    report: dict[str, Any],
+    feature_rates: dict[tuple[str, str], dict[str, Any]],
+    baseline: float,
+) -> dict[str, Any]:
+    summary = report.get("summary") or {}
+    return {
+        "schema_version": MODEL_SCHEMA_VERSION,
+        "trained_at_utc": report.get("generated_at_utc"),
+        "data_through_day": summary.get("data_through_day"),
+        "label": {
+            "name": "wrong_exit_continuation",
+            "continuation_margin_pct": (report.get("config") or {}).get("continuation_margin_pct"),
+            "matures_after_exit": True,
+        },
+        "feature_contract": "causal_at_exit_only",
+        "feature_names": list(CAUSAL_FEATURE_NAMES),
+        "train_cases": summary.get("train_cases"),
+        "train_days": summary.get("train_days"),
+        "baseline_wrong_exit_rate": baseline,
+        "feature_rates": [
+            {"feature": name, "value": value, **stats}
+            for (name, value), stats in sorted(feature_rates.items())
+        ],
+        "runtime_eligible": False,
+        "production_effect": "none_shadow_only",
+        "promotion_gate": "causal candle replay must improve PnL and exit efficiency without worsening giveback/downside",
+    }
+
+
+def train_online_shadow(
+    *,
+    reports_dir: Path = REPORTS,
+    report_path: Path = LATEST_REPORT,
+    model_path: Path = LATEST_MODEL,
+) -> dict[str, Any]:
+    """Refresh the post-exit learner from every mature final report.
+
+    The model remains shadow-only.  Persisting it independently makes learning
+    progress auditable without allowing it to alter live SELL decisions.
+    """
+    report = build(days=0, reports_dir=reports_dir)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    model_path.write_text(json.dumps(report["model_payload"], ensure_ascii=False, indent=2), encoding="utf-8")
+    return report
 
 
 def format_text(report: dict[str, Any]) -> str:

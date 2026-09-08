@@ -25,6 +25,7 @@ FEEDBACK_FILE = WORKSPACE_ROOT / ".runtime" / "signal_quality_feedback.json"
 DEFAULT_OUTPUT_JSON = REPORT_DIR / "learning_progress_latest.json"
 DEFAULT_OUTPUT_TXT = REPORT_DIR / "learning_progress_latest.txt"
 SHADOW_REENTRY_SCORECARD_LATEST = REPORT_DIR / "suspicious_reentry_scorecard_latest.json"
+EXIT_FAILURE_LEARNER_LATEST = REPORT_DIR / "exit_failure_discriminator_latest.json"
 LATEST_TRAIN_REPORT_NAME = "rl_train_latest.json"
 TAIL_SELECTOR_RESEARCH_CONFIG = replay_observable_tail_selector.ObservableSelectorConfig()
 ENTRY_ADMISSION_RESEARCH_CONFIG = report_entry_admission_shadow_reward.RewardConfig()
@@ -81,6 +82,9 @@ def build_report(
     status = _load_json(status_file)
     feedback = _load_json(feedback_file)
     shadow_reentry = _load_json(reports_dir / SHADOW_REENTRY_SCORECARD_LATEST.name)
+    exit_failure_learning = _exit_failure_learning_summary(
+        _load_json(reports_dir / EXIT_FAILURE_LEARNER_LATEST.name), latest.day
+    )
     training_results = _training_results_summary(
         _load_json(reports_dir / LATEST_TRAIN_REPORT_NAME)
     )
@@ -100,6 +104,7 @@ def build_report(
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
         "training_results": training_results,
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
+        "exit_failure_learning": exit_failure_learning,
         "shadow_tail_selector": shadow_tail_selector,
         "shadow_entry_admission": shadow_entry_admission,
         "blocker_reward": blocker_reward,
@@ -135,6 +140,7 @@ def render_text(report: dict[str, Any]) -> str:
     components = report.get("learning_components") or {}
     training_results = report.get("training_results") or {}
     shadow_reentry = report.get("shadow_reentry") or {}
+    exit_failure_learning = report.get("exit_failure_learning") or {}
     shadow_tail_selector = report.get("shadow_tail_selector") or {}
     shadow_entry_admission = report.get("shadow_entry_admission") or {}
     blocker_reward = report.get("blocker_reward") or {}
@@ -241,6 +247,11 @@ def render_text(report: dict[str, Any]) -> str:
             + ("eligible" if training_results.get("runtime_eligible") else "OFF (shadow-only)")
             + f"; evidence={training_results.get('evidence_status', 'unknown')}"
         )
+    lines.append(
+        "  • post-exit learner: "
+        f"{exit_failure_learning.get('status', 'unknown')} — "
+        f"{exit_failure_learning.get('detail', 'нет пригодного отчёта')}"
+    )
     lines.extend(["", f"🚨 {len(alerts)} сигнал(ов) тревоги" + (_serious_suffix(alerts))])
     for alert in alerts[:4]:
         lines.append(f"  • {alert['severity']}: {alert['text']}")
@@ -276,6 +287,50 @@ def render_text(report: dict[str, Any]) -> str:
     for action in actions[:6]:
         lines.append(f"{action}")
     return "\n".join(lines).strip()
+
+
+def _exit_failure_learning_summary(report: dict[str, Any], latest_day: str) -> dict[str, Any]:
+    if not isinstance(report, dict) or not report:
+        return {"status": "unknown", "detail": "exit_failure_discriminator_latest.json отсутствует"}
+    summary = report.get("summary") or {}
+    model = report.get("model_payload") or {}
+    selected = summary.get("test_precision_top_20pct") or {}
+    data_day = str(summary.get("data_through_day") or "")
+    causal = (
+        model.get("feature_contract") == "causal_at_exit_only"
+        and model.get("production_effect") == "none_shadow_only"
+        and not bool(model.get("runtime_eligible"))
+    )
+    evidence_ok = (
+        report.get("status") == "ok"
+        and causal
+        and int(summary.get("test_cases") or 0) > 0
+        and selected.get("precision") is not None
+        and selected.get("baseline_rate") is not None
+    )
+    if not evidence_ok:
+        return {
+            "status": "invalid/insufficient",
+            "detail": (
+                f"status={report.get('status') or 'missing'}, causal_at_exit={causal}, "
+                f"test={int(summary.get('test_cases') or 0)}; production OFF"
+            ),
+        }
+    freshness = "fresh" if data_day and data_day >= latest_day else "stale"
+    return {
+        "status": f"{freshness}/shadow-only",
+        "evidence_valid": True,
+        "data_through_day": data_day,
+        "decision": report.get("decision"),
+        "detail": (
+            f"OOS high-risk wrong exits {int(selected.get('wrong') or 0)}/{int(selected.get('n') or 0)} "
+            f"({_fmt(float(selected['precision']) * 100, 1)}%) vs baseline "
+            f"{int(selected.get('baseline_wrong') or 0)}/{int(selected.get('baseline_n') or 0)} "
+            f"({_fmt(float(selected['baseline_rate']) * 100, 1)}%), "
+            f"lift={_fmt(selected.get('lift'), 2)}x; train={int(summary.get('train_cases') or 0)}, "
+            f"test={int(summary.get('test_cases') or 0)}, data={data_day or 'unknown'}; production OFF"
+        ),
+    }
 
 
 def _training_results_summary(session: dict[str, Any]) -> dict[str, Any]:

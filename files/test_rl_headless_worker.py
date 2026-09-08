@@ -64,6 +64,8 @@ class TestDailyCriticSchedulerRecovery(unittest.TestCase):
         self.assertIn("online_shadow", rl_headless_worker.MODEL_FILE.name)
         self.assertEqual(rl_headless_worker.DEFAULT_MIN_ROWS, 120)
         self.assertEqual(rl_headless_worker.DEFAULT_MIN_NEW_ROWS, 20)
+        self.assertTrue(config.EXIT_FAILURE_ONLINE_LEARNING_ENABLED)
+        self.assertIn("online_shadow", rl_headless_worker.report_exit_failure_discriminator.LATEST_MODEL.name)
 
     def test_training_readiness_session_is_non_achievement_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -54,6 +54,66 @@ class ExitFailureDiscriminatorTest(unittest.TestCase):
             self.assertIsNotNone(report["summary"]["test_wrong_exit_rate"])
             self.assertTrue(report["top_train_segments"])
             self.assertIn(report["decision"], {"promising_shadow_segments_only", "inconclusive_or_weak", "research_only"})
+            self.assertEqual(report["model_payload"]["feature_contract"], "causal_at_exit_only")
+            self.assertFalse(report["model_payload"]["runtime_eligible"])
+            self.assertEqual(report["model_payload"]["production_effect"], "none_shadow_only")
+
+    def test_features_exclude_retrospective_day_labels(self) -> None:
+        features = discriminator._case_features({
+            "exit_reason_bucket": "weak",
+            "source": "bot",
+            "mode": "trend",
+            "tf": "15m",
+            "pnl_pct": 0.5,
+            "max_favorable_pct": 1.0,
+            "giveback_pct": 0.5,
+            "exit_efficiency": 0.5,
+            "entry_timing": "early",
+            "exit_timing": "early",
+            "capture_ratio_at_entry": 0.9,
+            "top_mover_rank": 1,
+        })
+
+        self.assertEqual(set(features), set(discriminator.CAUSAL_FEATURE_NAMES))
+        self.assertNotIn("entry_timing", features)
+        self.assertNotIn("exit_timing", features)
+        self.assertNotIn("capture_bucket", features)
+        self.assertNotIn("top_rank_bucket", features)
+
+    def test_online_training_persists_separate_shadow_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            reports = root / "reports"
+            reports.mkdir()
+            template = {
+                "sym": "ETCUSDT",
+                "tf": "15m",
+                "source": "bot",
+                "mode": "trend",
+                "entry_ts": "2026-05-20T10:00:00Z",
+                "exit_ts": "2026-05-20T11:00:00Z",
+                "exit_reason": "WEAK",
+                "pnl_pct": 0.5,
+                "max_favorable_pct": 1.0,
+                "future_favorable_pct": 3.0,
+                "exit_efficiency": 0.5,
+                "giveback_pct": 0.5,
+            }
+            for i, day in enumerate(("2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23")):
+                self._write_report(reports, day, [dict(template, sym=f"ETC{i}USDT")])
+            report_path = root / "exit_report.json"
+            model_path = root / "exit_model.json"
+
+            report = discriminator.train_online_shadow(
+                reports_dir=reports, report_path=report_path, model_path=model_path
+            )
+
+            self.assertTrue(report_path.exists())
+            self.assertTrue(model_path.exists())
+            saved_model = json.loads(model_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved_model["feature_contract"], "causal_at_exit_only")
+            self.assertEqual(saved_model["production_effect"], "none_shadow_only")
+            self.assertEqual(report["summary"]["data_through_day"], "2026-05-23")
 
     def test_empty_reports_are_marked_empty(self) -> None:
         with tempfile.TemporaryDirectory() as td:

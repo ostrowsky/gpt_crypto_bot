@@ -9,6 +9,39 @@ import learning_progress_report as lpr
 
 
 class LearningProgressReportTest(unittest.TestCase):
+    def test_exit_failure_learning_summary_exposes_oos_counts_and_shadow_gate(self) -> None:
+        report = {
+            "status": "ok",
+            "decision": "promising_shadow_segments_only",
+            "summary": {
+                "data_through_day": "2026-09-07",
+                "train_cases": 100,
+                "test_cases": 50,
+                "test_precision_top_20pct": {
+                    "wrong": 8,
+                    "n": 10,
+                    "precision": 0.8,
+                    "baseline_wrong": 15,
+                    "baseline_n": 50,
+                    "baseline_rate": 0.3,
+                    "lift": 2.6667,
+                },
+            },
+            "model_payload": {
+                "feature_contract": "causal_at_exit_only",
+                "runtime_eligible": False,
+                "production_effect": "none_shadow_only",
+            },
+        }
+
+        summary = lpr._exit_failure_learning_summary(report, "2026-09-07")
+
+        self.assertEqual(summary["status"], "fresh/shadow-only")
+        self.assertTrue(summary["evidence_valid"])
+        self.assertIn("8/10", summary["detail"])
+        self.assertIn("15/50", summary["detail"])
+        self.assertIn("production OFF", summary["detail"])
+
     def test_rolling_top_rates_are_weighted_by_denominator(self) -> None:
         days = [
             lpr.DayMetrics(day="2026-06-01", watchlist_top_count=1, bought=1, early=1, early_pct=100.0, capture_pct=100.0),

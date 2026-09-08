@@ -1,7 +1,7 @@
 ﻿# Daily Learning Progress Report
 
 Status: shipped reporting/observability  
-Last updated: 2026-08-26
+Last updated: 2026-09-08
 
 ## Purpose
 
@@ -19,6 +19,7 @@ The report must not claim learning merely because scripts ran. It separates:
 - blocked / missed winner pressure;
 - whether feedback or model-training components actually changed anything;
 - current chronological out-of-sample ranker results against the same-test-window baseline;
+- current chronological out-of-sample post-exit continuation learner results;
 - decisions awaiting operator approval.
 
 ## Schedule
@@ -33,6 +34,7 @@ from final reports.
 - `watchlist_top_gainer_goal_*_22h.json`;
 - `.runtime/signal_quality_feedback.json`;
 - `.runtime/rl_worker_status.json`.
+- `.runtime/reports/exit_failure_discriminator_latest.json`.
 
 ## Guardrails
 
@@ -108,6 +110,12 @@ from final reports.
 - OOS proxy direction remains distinct from portfolio progress. The block shows
   runtime eligibility/evidence status and cannot enable production or change
   the realized-objective headline. Consecutive training runs are not compared
+  unless their immutable evaluation cohort is identical.
+- The post-exit learner line must expose selected wrong/n, baseline wrong/n,
+  precision, base rate and lift. It is valid only for a chronological holdout
+  and a `causal_at_exit_only` model artifact with production explicitly OFF.
+  Its result is a shadow classification proxy and cannot alter the headline,
+  SELL rules, cooldown or re-entry behavior.
   as a trend while their rolling holdout windows differ.
 - Headline entry and exit values must use only the final critic's
   `watchlist_top_gainers` cohort. Broad signal-quality `miss_rate`,

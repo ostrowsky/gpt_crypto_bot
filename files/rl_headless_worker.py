@@ -23,6 +23,7 @@ import data_collector
 import ml_candidate_ranker
 import ml_dataset
 import report_candidate_ranker_shadow
+import report_exit_failure_discriminator
 import report_critic_dataset
 import report_suspicious_reentry_scorecard
 import report_trend_lifecycle_attribution
@@ -1403,6 +1404,22 @@ async def _training_loop(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.training")
     while True:
         await asyncio.sleep(5.0)
+        if bool(getattr(config, "EXIT_FAILURE_ONLINE_LEARNING_ENABLED", True)):
+            try:
+                exit_report = await asyncio.to_thread(
+                    report_exit_failure_discriminator.train_online_shadow
+                )
+                exit_summary = exit_report.get("summary") or {}
+                log.info(
+                    "Exit-failure shadow learner refreshed: cases=%s test=%s decision=%s",
+                    exit_summary.get("cases_labeled"),
+                    exit_summary.get("test_cases"),
+                    exit_report.get("decision"),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.exception("Exit-failure shadow learner failed: %s", exc)
         _restore_training_state(state)
         rows_total = await asyncio.to_thread(_count_ranker_rows, critic_dataset.CRITIC_FILE)
         dataset_mtime = _file_mtime(critic_dataset.CRITIC_FILE)

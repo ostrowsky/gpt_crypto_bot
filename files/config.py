@@ -147,6 +147,9 @@ RANKER_DATASET_CONTRACT: str = "candidate-outcome-v2"
 RANKER_ONLINE_LEARNING_ENABLED: bool = True
 RANKER_ONLINE_MIN_ROWS: int = 120
 RANKER_ONLINE_MIN_NEW_ROWS: int = 20
+# Learns which completed exits were followed by material continuation.  This
+# only refreshes a shadow artifact; it cannot change SELL/cooldown behavior.
+EXIT_FAILURE_ONLINE_LEARNING_ENABLED: bool = True
 # Legacy bar snapshots lack the candidate-outcome-v2 contract and are not an
 # online-ranker input.  Keep disabled unless an explicit diagnostic needs the
 # old stream; enabling it must not make those rows training-eligible.
