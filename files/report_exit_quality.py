@@ -200,6 +200,8 @@ def _compact_case(day: str, row: dict[str, Any], cfg: ExitAuditConfig) -> dict[s
         "mode": row.get("mode"),
         "entry_ts": row.get("entry_ts"),
         "exit_ts": row.get("exit_ts"),
+        "entry_price": _num(row.get("entry_price")),
+        "exit_price": _num(row.get("exit_price")),
         "exit_timing": row.get("exit_timing"),
         "entry_timing": row.get("entry_timing"),
         "pnl_pct": _num(row.get("pnl_pct")),
