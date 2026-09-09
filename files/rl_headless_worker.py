@@ -673,6 +673,33 @@ def _load_known_chat_ids() -> list[int]:
     return sorted(set(out))
 
 
+TELEGRAM_TEXT_CHUNK_CHARS = 3900
+
+
+def _split_telegram_text(text: str, limit: int = TELEGRAM_TEXT_CHUNK_CHARS) -> list[str]:
+    if limit < 1:
+        raise ValueError("Telegram chunk limit must be positive")
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n\n", 0, limit + 1)
+        if cut >= max(1, limit // 2):
+            cut = min(cut + 2, limit)
+        else:
+            cut = remaining.rfind("\n", 0, limit + 1)
+            if cut >= max(1, limit // 2):
+                cut = min(cut + 1, limit)
+            else:
+                cut = limit
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:]
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
 async def _send_telegram_text(text: str) -> Dict[str, Any]:
     log = logging.getLogger("rl_headless_worker.notify")
     result: Dict[str, Any] = {"attempted": 0, "sent": 0, "errors": [], "skipped": ""}
@@ -693,24 +720,38 @@ async def _send_telegram_text(text: str) -> Dict[str, Any]:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     timeout = aiohttp.ClientTimeout(total=20)
     connector = aiohttp.TCPConnector(family=socket.AF_INET)
+    chunks = _split_telegram_text(text)
+    result["chunks"] = len(chunks)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         for chat_id in chat_ids:
             result["attempted"] += 1
-            payload = {
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": True,
-            }
+            delivered = True
             try:
-                async with session.post(url, json=payload) as resp:
-                    resp.raise_for_status()
-                    await resp.read()
-                result["sent"] += 1
-                log.info("Telegram report sent: chat_id=%s chars=%s", chat_id, len(text))
+                for chunk_number, chunk in enumerate(chunks, start=1):
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": chunk,
+                        "disable_web_page_preview": True,
+                    }
+                    async with session.post(url, json=payload) as resp:
+                        body = await resp.text()
+                        if resp.status >= 400:
+                            raise RuntimeError(
+                                f"HTTP {resp.status} chunk={chunk_number}/{len(chunks)}: {body[:500]}"
+                            )
             except Exception as exc:
+                delivered = False
                 err = f"{chat_id}: {exc}"
                 result["errors"].append(err)
                 log.warning("Telegram report send failed for %s: %s", chat_id, exc)
+            if delivered:
+                result["sent"] += 1
+                log.info(
+                    "Telegram report sent: chat_id=%s chars=%s chunks=%s",
+                    chat_id,
+                    len(text),
+                    len(chunks),
+                )
     return result
 
 

@@ -43,6 +43,10 @@ from final reports.
 - No automatic approval of hypotheses.
 - If data is partial/stale, the report must say so clearly.
 - Telegram delivery must be idempotent per daily slot, even if the worker restarts inside the delivery window.
+- Telegram payloads longer than the platform limit must be split at paragraph
+  or line boundaries into chunks no longer than 3,900 characters. A recipient
+  counts as delivered only after every chunk succeeds; an HTTP failure must
+  preserve Telegram's response body in worker diagnostics.
 - The 09:00 report is a fast aggregation layer. It must not run heavy research
   replays inline. If an optional research component cache is stale, use the
   cached artifact and mark that component as stale instead of blocking the daily
@@ -145,3 +149,5 @@ Expected behavior:
 - If the same slot was already marked sent, skip Telegram delivery.
 - Use an atomic lock/marker so two workers cannot send the same daily report concurrently.
 - Keep report generation allowed for diagnostics, but prevent duplicate Telegram messages for the same slot.
+- Release the daily slot claim if any Telegram chunk fails so the report can be
+  retried after the delivery fault is fixed.

@@ -22,6 +22,7 @@ from rl_headless_worker import (
     _run_trend_lifecycle_attribution_report,
     _restore_daily_report_state,
     _restore_latest_top_gainer_artifact,
+    _split_telegram_text,
     _scheduled_top_gainer_slot,
     _scheduled_watchlist_goal_slot,
     _should_send_top_gainer_telegram,
@@ -251,6 +252,21 @@ class TestDailyCriticSchedulerRecovery(unittest.TestCase):
 
 
 class TestLearningProgressTelegramSlot(unittest.TestCase):
+    def test_long_report_is_split_without_loss_below_telegram_limit(self) -> None:
+        text = ("section line\n" * 350) + "\nfinal paragraph"
+
+        chunks = _split_telegram_text(text, limit=1000)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(0 < len(chunk) <= 1000 for chunk in chunks))
+        self.assertEqual("".join(chunks), text)
+
+    def test_single_overlong_line_is_hard_split(self) -> None:
+        text = "x" * 2501
+        chunks = _split_telegram_text(text, limit=1000)
+        self.assertEqual([1000, 1000, 501], [len(chunk) for chunk in chunks])
+        self.assertEqual("".join(chunks), text)
+
     def test_failed_delivery_can_release_claim_for_retry(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             marker_dir = Path(td)
