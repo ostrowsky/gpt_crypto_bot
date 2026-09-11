@@ -4,7 +4,7 @@ import json
 import asyncio
 import unittest
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
@@ -17,6 +17,7 @@ from rl_headless_worker import (
     _claim_learning_progress_telegram_slot,
     _build_training_readiness_session_report,
     _release_learning_progress_telegram_slot,
+    _scheduled_learning_progress_slot,
     build_status_snapshot,
     _render_top_gainer_telegram,
     _run_trend_lifecycle_attribution_report,
@@ -31,10 +32,25 @@ from rl_headless_worker import (
 
 
 class TestDailyCriticSchedulerRecovery(unittest.TestCase):
-    def test_collector_integrity_failure_trips_stop_marker(self) -> None:
+    def test_learning_progress_slot_retries_after_primary_window(self) -> None:
+        tz = ZoneInfo("Europe/Budapest")
+        day = datetime(2026, 9, 11, 10, 30, tzinfo=tz)
+        with patch.object(
+            rl_headless_worker.config,
+            "LEARNING_PROGRESS_DAILY_REPORT_CATCHUP_ENABLED",
+            True,
+        ):
+            self.assertEqual(
+                _scheduled_learning_progress_slot(day),
+                (date(2026, 9, 10), "2026-09-10::learning_progress"),
+            )
+
+    def test_collector_integrity_failure_stops_collection_not_report_scheduler(self) -> None:
         state = WorkerState(60, 60, 120, 20, True)
         with tempfile.TemporaryDirectory() as td, patch.object(
             rl_headless_worker, "STOP_FILE", Path(td) / "worker.stop"
+        ), patch.object(
+            rl_headless_worker, "COLLECTOR_STOP_FILE", Path(td) / "collector.stop"
         ), patch.object(
             rl_headless_worker.data_collector,
             "_get_btc_context",
@@ -46,9 +62,9 @@ class TestDailyCriticSchedulerRecovery(unittest.TestCase):
         ), patch.object(
             rl_headless_worker, "_write_status_now", new=AsyncMock()
         ):
-            with self.assertRaisesRegex(RuntimeError, "fail-closed"):
-                asyncio.run(rl_headless_worker._collector_supervisor(state))
-            self.assertTrue(rl_headless_worker.STOP_FILE.exists())
+            asyncio.run(rl_headless_worker._collector_supervisor(state))
+            self.assertTrue(rl_headless_worker.COLLECTOR_STOP_FILE.exists())
+            self.assertFalse(rl_headless_worker.STOP_FILE.exists())
             self.assertFalse(state.collector_enabled)
             self.assertEqual(state.collector_last_error, "locked")
 

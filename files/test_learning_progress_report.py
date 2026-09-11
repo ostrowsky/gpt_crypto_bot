@@ -1031,10 +1031,12 @@ class LearningProgressWorkerIntegrationTest(unittest.TestCase):
         src = Path("rl_headless_worker.py").read_text(encoding="utf-8")
         self.assertIn("def _scheduled_learning_progress_slot", src)
         self.assertIn("LEARNING_PROGRESS_DAILY_REPORT_HOUR_LOCAL", src)
+        self.assertIn("learning progress target day is not ready", src)
         self.assertIn("asyncio.create_task(_learning_progress_loop(state)", src)
         cfg = Path("config.py").read_text(encoding="utf-8")
         self.assertIn("LEARNING_PROGRESS_DAILY_REPORT_HOUR_LOCAL: int = 9", cfg)
         self.assertIn("LEARNING_PROGRESS_DAILY_REPORT_TELEGRAM_ENABLED: bool = True", cfg)
+        self.assertIn("LEARNING_PROGRESS_DAILY_REPORT_CATCHUP_ENABLED: bool = True", cfg)
 
     def test_worker_state_has_learning_progress_fields(self) -> None:
         import rl_headless_worker as worker

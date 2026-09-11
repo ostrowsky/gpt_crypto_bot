@@ -677,6 +677,8 @@ LEARNING_PROGRESS_DAILY_REPORT_TIMEZONE: str = "Europe/Budapest"
 LEARNING_PROGRESS_DAILY_REPORT_HOUR_LOCAL: int = 9
 LEARNING_PROGRESS_DAILY_REPORT_MINUTE_LOCAL: int = 0
 LEARNING_PROGRESS_DAILY_REPORT_WINDOW_MINUTES: int = 60
+# Retry later the same local day after downtime or delayed upstream finals.
+LEARNING_PROGRESS_DAILY_REPORT_CATCHUP_ENABLED: bool = True
 LEARNING_PROGRESS_FOCUS_SYMBOLS: tuple[str, ...] = ()
 
 # Automatic post-factum feedback from the signal-quality evaluator. The feedback

@@ -16,6 +16,13 @@ class TestRLLauncherConfig(unittest.TestCase):
         self.assertIn('$wrapperArgs += "--disable-collector"', launcher)
         self.assertNotIn('$loopScript, "--enable-collector"', launcher)
 
+    def test_full_stack_restart_explicitly_enables_required_collector(self) -> None:
+        restart = (Path(__file__).resolve().parent.parent / "restart_full_stack.bat").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("start_rl_worker_bg.ps1\" -ForceRestart -EnableCollector", restart)
+
 
 if __name__ == "__main__":
     unittest.main()

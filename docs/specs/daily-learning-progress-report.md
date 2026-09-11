@@ -25,7 +25,10 @@ The report must not claim learning merely because scripts ran. It separates:
 ## Schedule
 
 Default schedule: `09:00 Europe/Budapest`, summarizing the latest completed day
-from final reports.
+from final reports. If the worker or an upstream final is unavailable during
+the primary 60-minute window, the scheduler retries later that local day until
+the target-day report is delivered. A report built from an older `latest_day`
+does not claim the target-day delivery slot.
 
 ## Inputs
 
@@ -151,3 +154,7 @@ Expected behavior:
 - Keep report generation allowed for diagnostics, but prevent duplicate Telegram messages for the same slot.
 - Release the daily slot claim if any Telegram chunk fails so the report can be
   retried after the delivery fault is fixed.
+- A dataset-integrity failure must stop candidate collection fail-closed but
+  must not terminate the learning-progress scheduler. The next report remains
+  deliverable and describes stale or partial evidence truthfully; a collector
+  fault cannot silently remove the report itself.

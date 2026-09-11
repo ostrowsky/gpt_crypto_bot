@@ -48,6 +48,7 @@ REPORT_DIR = RUNTIME_DIR / "reports"
 CHAT_IDS_FILE = ROOT / ".chat_ids"
 TRAIN_LOCK_FILE = RUNTIME_DIR / "rl_worker_train.lock"
 STOP_FILE = RUNTIME_DIR / "rl_worker.stop"
+COLLECTOR_STOP_FILE = RUNTIME_DIR / "collector_integrity.stop"
 LEARNING_PROGRESS_SENT_DIR = RUNTIME_DIR / "learning_progress_sent_slots"
 LATEST_TRAIN_JSON = REPORT_DIR / "rl_train_latest.json"
 LATEST_TRAIN_TXT = REPORT_DIR / "rl_train_latest.txt"
@@ -1330,6 +1331,7 @@ async def _collector_supervisor(state: WorkerState) -> None:
             state.collector_last_cycle_stats = stats
             state.collector_last_cycle_finished_at = _utc_now_iso()
             state.collector_last_error = ""
+            COLLECTOR_STOP_FILE.unlink(missing_ok=True)
             log.info(
                 "Collector cycle: %s/%s ok, bull=%s",
                 stats.get("ok"),
@@ -1344,14 +1346,16 @@ async def _collector_supervisor(state: WorkerState) -> None:
             state.collector_enabled = False
             log.exception("Collector cycle failed: %s", exc)
             await _write_status_now(state)
-            STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
-            STOP_FILE.write_text(
+            COLLECTOR_STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+            COLLECTOR_STOP_FILE.write_text(
                 "collector_integrity_failure\n" + str(exc) + "\n",
                 encoding="utf-8",
             )
-            raise RuntimeError(
-                "collector fail-closed guard tripped; supervised restart disabled"
-            ) from exc
+            log.critical(
+                "Collector fail-closed guard tripped; collection is disabled, "
+                "while reporting and training schedulers remain alive"
+            )
+            return
         wait = data_collector._seconds_until_next_bar()
         await asyncio.sleep(wait)
 
@@ -1925,7 +1929,11 @@ def _scheduled_learning_progress_slot(now_local: datetime) -> tuple[date, str] |
     window_minutes = max(1, int(getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_WINDOW_MINUTES", 60)))
     current_minute = now_local.hour * 60 + now_local.minute
     start_minute = run_hour * 60 + run_minute
-    if start_minute <= current_minute < start_minute + window_minutes:
+    in_primary_window = start_minute <= current_minute < start_minute + window_minutes
+    in_recovery_window = bool(
+        getattr(config, "LEARNING_PROGRESS_DAILY_REPORT_CATCHUP_ENABLED", True)
+    ) and current_minute >= start_minute + window_minutes
+    if in_primary_window or in_recovery_window:
         target_day = now_local.date() - timedelta(days=1)
         return target_day, f"{target_day.isoformat()}::learning_progress"
     return None
@@ -1953,6 +1961,12 @@ async def _learning_progress_loop(state: WorkerState) -> None:
             state.learning_progress_last_error = ""
             focus_symbols = tuple(getattr(config, "LEARNING_PROGRESS_FOCUS_SYMBOLS", ()))
             report = await asyncio.to_thread(learning_progress_report.build_report, REPORT_DIR, STATUS_FILE, signal_quality_feedback.feedback_path(), focus_symbols)
+            report_day = str(report.get("latest_day") or "")
+            if report_day != target_day.isoformat():
+                raise RuntimeError(
+                    "learning progress target day is not ready: "
+                    f"target={target_day.isoformat()} latest={report_day or 'missing'}"
+                )
             files = report.get("files") or {}
             verdict = report.get("verdict") or {}
             state.learning_progress_runs_ok += 1

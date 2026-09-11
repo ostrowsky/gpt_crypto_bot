@@ -53,11 +53,15 @@ exit quality, or portfolio performance.
    `critic_dataset.jsonl` remains immutable legacy evidence and is never mixed
    into online-training denominators.  This bounds rewrite/lock duration and
    makes a clean collection restart auditable without deleting history.
-10. Collector writes are strict and fail closed.  An append or maturation
+10. Collector writes are strict and fail closed. An append or maturation
     transaction that cannot acquire the dataset lock raises a dataset-integrity
     error; the row is not counted as written, the collector is marked disabled,
-    a stop marker is created, and the supervised headless worker exits instead
-    of retrying an apparently successful partial cycle.
+    and a durable `collector_integrity.stop` incident marker is created. The
+    collector task terminates without terminating the reporting and training
+    control plane: no further rows are collected in that process, training sees
+    no new cohort, and daily reports remain available to expose stale or partial
+    evidence. A supervised restart with the collector explicitly enabled is
+    required to retry collection.
 11. The candidate collector does not append or mature the legacy
     `ml_dataset.jsonl` by default.  That stream has no v2 provenance contract,
     is not an input to the online candidate ranker, and its per-pair rewrites
@@ -142,6 +146,10 @@ Recovery follows the same strict order: restore dataset integrity and mature
 labels; verify the registered policy epoch and purged split; train/evaluate in
 shadow; run maximum-period candidate replay and the canonical 30-day ten-slot
 after-cost portfolio replay; only then consider a bounded production canary.
+
+The full-stack launcher must pass `-EnableCollector` explicitly. Relying on the
+launcher's rejected `--disable-collector` fallback is configuration drift, even
+though the headless wrapper protects against silent unlabeled collection.
 
 ## Verification
 
