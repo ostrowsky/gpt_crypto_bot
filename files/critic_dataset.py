@@ -637,14 +637,19 @@ def _fill_pending_record(
     t_arr: Any,
     c_arr: Any,
     bar_ms: int,
+    source: str = "collector_forward_label",
+    market_evidence: Optional[dict] = None,
 ) -> bool:
+    if (source == "historical_candidate_label_recovery"
+            and not policy_provenance.observation_provenance_valid(rec)):
+        return False
     lab = rec.get("labels", {})
     rec_bar_ts = rec.get("bar_ts", 0)
     idx_arr = np.where(t_arr == rec_bar_ts)[0]
     if len(idx_arr) == 0:
         return False
     entry_close = float(c_arr[idx_arr[0]])
-    if entry_close <= 0:
+    if not np.isfinite(entry_close) or entry_close <= 0:
         return False
     changed = False
     for h in (3, 5, 10):
@@ -660,7 +665,14 @@ def _fill_pending_record(
         )
         if target_idx is None:
             continue
+        # Exact endpoints alone do not prove a complete closed-bar horizon.
+        start_idx = int(idx_arr[0])
+        window = np.asarray(t_arr[start_idx:target_idx + 2], dtype=np.int64)
+        if len(window) != h + 2 or not np.all(np.diff(window) == bar_ms):
+            continue
         future_close = float(c_arr[target_idx])
+        if not np.isfinite(future_close) or future_close <= 0:
+            continue
         ret_pct = (future_close / entry_close - 1) * 100
         rec["labels"][key_ret] = round(ret_pct, 4)
         rec["labels"][key_label] = ret_pct > 0
@@ -672,8 +684,11 @@ def _fill_pending_record(
                 tf=str(rec.get("tf") or ""),
                 horizon=h,
             ),
-            source="collector_forward_label",
+            source=source,
         )
+        if market_evidence:
+            for key in (key_ret, key_label):
+                rec["label_provenance"][key].setdefault("market_evidence", market_evidence)
         changed = True
     return changed
 
@@ -709,6 +724,8 @@ def fill_pending_batch(series: Any, *, strict: bool = False) -> None:
             "t_arr": t_arr,
             "c_arr": c_arr,
             "bar_ms": bar_ms,
+            "source": str(item.get("source") or "collector_forward_label"),
+            "market_evidence": item.get("market_evidence"),
         }
     if not by_pair:
         return

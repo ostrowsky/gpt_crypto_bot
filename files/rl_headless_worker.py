@@ -274,6 +274,7 @@ def build_status_snapshot(
         "datasets": {
             "ml_dataset_rows": ml_rows_total,
             "critic_dataset": critic_report,
+            "label_recovery": state.label_recovery,
         },
         "research_universe_shadow": research_shadow_section,
         "static_target_top50_shadow": {
@@ -1216,6 +1217,7 @@ class WorkerState:
     collector_last_cycle_finished_at: Optional[str] = None
     collector_last_cycle_stats: Dict[str, Any] = field(default_factory=dict)
     collector_last_error: str = ""
+    label_recovery: Dict[str, Any] = field(default_factory=dict)
     research_universe_shadow_enabled: bool = bool(getattr(config, "RESEARCH_UNIVERSE_SHADOW_ENABLED", True))
     research_universe_shadow_runs_total: int = 0
     research_universe_shadow_runs_ok: int = 0
@@ -1355,6 +1357,13 @@ async def _collector_supervisor(state: WorkerState) -> None:
                 "Collector fail-closed guard tripped; collection is disabled, "
                 "while reporting and training schedulers remain alive"
             )
+            cause = exc.__cause__ or exc
+            if isinstance(cause, PermissionError):
+                # Retry only a known transient Windows IO failure. Malformed
+                # evidence and unknown integrity failures still require repair.
+                await asyncio.sleep(300)
+                state.collector_enabled = True
+                continue
             return
         wait = data_collector._seconds_until_next_bar()
         await asyncio.sleep(wait)
@@ -1445,10 +1454,55 @@ async def _static_target_top50_shadow_loop(state: WorkerState) -> None:
         await asyncio.sleep(DEFAULT_TOP_GAINER_CHECK_SEC)
 
 
+async def _recover_candidate_labels(state: WorkerState) -> None:
+    """Repair beyond the collector window without changing shared dataset paths."""
+    log = logging.getLogger("rl_headless_worker.label_recovery")
+    if not bool(getattr(config, "CANDIDATE_LABEL_RECOVERY_ENABLED", True)):
+        state.label_recovery = {"evidence_status": "disabled", "achievement_claimed": False}
+        return
+    report_path = REPORT_DIR / "candidate_label_recovery_latest.json"
+    process = None
+    started = _utc_now_iso()
+    state.label_recovery = {"evidence_status": "running", "last_started_at": started,
+                            "achievement_claimed": False}
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, str(ROOT / "backfill_candidate_outcomes_v2.py"),
+            "--dataset", str(critic_dataset.CRITIC_FILE), "--concurrency", "4",
+            "--report", str(report_path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=900)
+        report = json.loads(stdout.decode("utf-8"))
+        report["last_started_at"] = started
+        report["last_finished_at"] = _utc_now_iso()
+        state.label_recovery = report
+        if process.returncode or report.get("remaining_rows"):
+            log.error("Candidate label recovery BLOCKED: remaining=%s failures=%s",
+                      report.get("remaining_rows"), report.get("pairs_failed"))
+    except asyncio.CancelledError:
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.wait()
+        raise
+    except Exception as exc:
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.wait()
+        state.label_recovery = {
+            "evidence_status": "blocked_recovery_error", "last_started_at": started,
+            "last_finished_at": _utc_now_iso(), "error": f"{type(exc).__name__}: {exc}",
+            "achievement_claimed": False,
+        }
+        log.exception("Candidate label recovery failed")
+    await asyncio.to_thread(save_json, report_path, state.label_recovery)
+
+
 async def _training_loop(state: WorkerState) -> None:
     log = logging.getLogger("rl_headless_worker.training")
     while True:
         await asyncio.sleep(5.0)
+        await _recover_candidate_labels(state)
         if bool(getattr(config, "EXIT_FAILURE_ONLINE_LEARNING_ENABLED", True)):
             try:
                 exit_report = await asyncio.to_thread(

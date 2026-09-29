@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import hashlib
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -13,6 +15,7 @@ import numpy as np
 import config
 import critic_dataset
 import policy_provenance
+from ml_signal_model import save_json
 
 
 BINANCE_KLINES_URL = f"{config.BINANCE_REST}/api/v3/klines"
@@ -47,6 +50,8 @@ def pending_requirements(
                 str(provenance.get("dataset_contract") or "")
                 != str(config.RANKER_DATASET_CONTRACT)
             ):
+                continue
+            if not policy_provenance.observation_provenance_valid(rec):
                 continue
             sym = str(rec.get("sym") or "").strip().upper()
             tf = str(rec.get("tf") or "").strip()
@@ -104,6 +109,7 @@ async def fetch_kline_range(
     bar_ms = BAR_MS[tf]
     cursor = int(start_ms)
     rows: dict[int, list[Any]] = {}
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     while cursor <= int(end_ms):
         params = {
             "symbol": sym,
@@ -124,10 +130,26 @@ async def fetch_kline_range(
             return None
         if not isinstance(payload, list) or not payload:
             break
-        for raw in payload:
-            if isinstance(raw, list) and len(raw) >= 6:
-                rows[int(raw[0])] = raw
-        last_open = int(payload[-1][0])
+        try:
+            for raw in payload:
+                if not isinstance(raw, list) or len(raw) < 7:
+                    return None
+                ts = int(raw[0])
+                o, h, l, c, v = [float(x) for x in raw[1:6]]
+                if (ts % bar_ms or not cursor <= ts <= end_ms
+                        or int(raw[6]) != ts + bar_ms - 1
+                        or not all(math.isfinite(x) for x in (o, h, l, c, v))
+                        or min(o, h, l, c) <= 0 or v < 0
+                        or h < max(o, l, c) or l > min(o, h, c)):
+                    return None
+                if ts + bar_ms > now_ms:
+                    continue
+                if ts in rows and rows[ts] != raw:
+                    return None
+                rows[ts] = raw
+            last_open = int(payload[-1][0])
+        except (TypeError, ValueError, OverflowError):
+            return None
         next_cursor = last_open + bar_ms
         if len(payload) < PAGE_LIMIT or next_cursor <= cursor:
             break
@@ -187,6 +209,15 @@ async def backfill(
                     "t_arr": data["t"].astype(int),
                     "c_arr": data["c"].astype(float),
                     "bar_ms": int(item["bar_ms"]),
+                    "source": "historical_candidate_label_recovery",
+                    "market_evidence": {
+                        "endpoint": BINANCE_KLINES_URL,
+                        "sym": item["sym"], "tf": item["tf"],
+                        "start_ms": int(item["earliest_bar_ts"]),
+                        "end_ms": int(item["latest_target_ts"]),
+                        "retrieved_at_utc": policy_provenance.utc_iso(),
+                        "closed_series_sha256": hashlib.sha256(data.tobytes()).hexdigest(),
+                    },
                 }
             )
 
@@ -213,6 +244,9 @@ async def backfill(
         "remaining_rows": sum(int(item["rows"]) for item in remaining.values()),
         "remaining_targets": sum(int(item["targets"]) for item in remaining.values()),
         "missing_market_data_remains_unknown": True,
+        "evidence_status": "complete" if not remaining else "blocked_missing_market_data",
+        "training_eligible": False,
+        "achievement_claimed": False,
     }
 
 
@@ -222,10 +256,13 @@ def main() -> int:
     )
     parser.add_argument("--dataset", type=Path, default=critic_dataset.CRITIC_FILE)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     report = asyncio.run(backfill(args.dataset, concurrency=args.concurrency))
+    if args.report:
+        save_json(args.report, report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if not report["pairs_failed"] else 1
+    return 0 if not report["remaining_rows"] else 1
 
 
 if __name__ == "__main__":

@@ -147,6 +147,7 @@ RANKER_DATASET_CONTRACT: str = "candidate-outcome-v2"
 RANKER_ONLINE_LEARNING_ENABLED: bool = True
 RANKER_ONLINE_MIN_ROWS: int = 120
 RANKER_ONLINE_MIN_NEW_ROWS: int = 20
+CANDIDATE_LABEL_RECOVERY_ENABLED: bool = True  # repair only; never enables BUY/SELL
 # Learns which completed exits were followed by material continuation.  This
 # only refreshes a shadow artifact; it cannot change SELL/cooldown behavior.
 EXIT_FAILURE_ONLINE_LEARNING_ENABLED: bool = True
