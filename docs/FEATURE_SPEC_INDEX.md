@@ -145,6 +145,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Rocket capture and rule ablation: `docs/specs/rocket-capture-ablation.md` — research-only, maximum-period matched-trade measurement and isolated rule-only replay; no automatic production promotion.
+
 1. Follow `docs/specs/spec-first-workflow.md` for every non-trivial change.
 2. Any new live decision path needs a feature spec, a rollback switch, and a replay acceptance rule.
 3. Shadow-only instrumentation may ship before replay when it does not alter BUY/SELL behavior.

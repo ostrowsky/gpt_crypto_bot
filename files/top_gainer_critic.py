@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 import critic_dataset
+from signal_capture_measurement import measure as measure_signal_capture
 from blocking import normalize_blocked_reason
 
 
@@ -359,7 +360,7 @@ def _load_day_events(start_local: datetime, end_local: datetime, tz: ZoneInfo) -
             if not ts:
                 continue
             ts_local = ts.astimezone(tz)
-            if not (start_local <= ts_local <= end_local):
+            if not (start_local <= ts_local < end_local):
                 continue
             bucket = rows.setdefault(
                 sym,
@@ -414,19 +415,9 @@ def _exit_quality_metrics(
     day_high: float,
     last_exit: dict[str, Any] | None,
 ) -> tuple[float | None, float | None]:
-    if not entry_price or entry_price <= 0 or not last_exit:
-        return None, None
-    try:
-        exit_pnl = float(last_exit.get("pnl_pct"))
-    except (TypeError, ValueError):
-        exit_price = _event_price(last_exit, "exit_price")
-        exit_pnl = ((exit_price / entry_price) - 1.0) * 100.0 if exit_price else 0.0
-    max_favorable = (day_high / entry_price - 1.0) * 100.0
-    if max_favorable <= 0:
-        return None, None
-    exit_efficiency = exit_pnl / max_favorable
-    giveback_pct = max(0.0, max_favorable - exit_pnl)
-    return exit_efficiency, giveback_pct
+    # Legacy signature cannot establish a matched position or in-position MFE.
+    # Retain it for callers, but never publish fabricated exit efficiency.
+    return None, None
 
 
 def _status_for_symbol(in_watchlist: bool, events: dict[str, list[dict[str, Any]]]) -> tuple[str, str | None]:
@@ -479,11 +470,8 @@ def summarize_top_gainer(
         if end_local is not None and first_entry_dt is not None
         else None
     )
-    exit_efficiency, giveback_pct = _exit_quality_metrics(
-        entry_price=first_entry_price,
-        day_high=perf.day_high,
-        last_exit=last_exit,
-    )
+    measurement = measure_signal_capture(events, perf.day_open, perf.day_close)
+    exit_efficiency, giveback_pct = measurement['exit_efficiency'], measurement['giveback_pct']
     opportunity_from_entry = (
         (perf.day_close / first_entry_price - 1.0) * 100.0
         if first_entry_price and first_entry_price > 0
@@ -543,6 +531,10 @@ def summarize_top_gainer(
         "latest_exit_pnl_pct": last_exit.get("pnl_pct") if last_exit else None,
         "latest_exit_reason": last_exit.get("reason") if last_exit else None,
         "exit_efficiency": None if exit_efficiency is None else round(exit_efficiency, 4),
+        "signal_capture_measurement": measurement,
+        "realized_capture_ratio": measurement['realized_capture_ratio'],
+        "exit_quality_status": measurement['exit_quality_status'],
+        "exit_quality_denominator": measurement['exit_quality_denominator'],
         "giveback_pct": None if giveback_pct is None else round(giveback_pct, 4),
         "first_cooldown_block_time": first_cooldown_block.get("_ts_local") if first_cooldown_block else None,
         "first_cooldown_block_price": first_cooldown_block_price,
