@@ -12,6 +12,8 @@ backfill existed, but was not called by the recurrent headless training loop.
 The live worker also stopped its collector after Windows permission failure on
 2026-09-18. Known PermissionError (including wrapped causes) pauses collection
 fail-closed for 300 seconds and retries; unknown integrity failures still stop it.
+The exact dataset-lock acquisition TimeoutError is also retryable with the same
+pause; unrelated timeouts must not be treated as known integrity-safe IO failures.
 Repair must operate independently of collector enablement and training readiness.
 This is not permission to weaken aged_label_coverage or promote a model.
 

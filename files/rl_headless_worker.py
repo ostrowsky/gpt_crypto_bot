@@ -275,6 +275,7 @@ def build_status_snapshot(
             "ml_dataset_rows": ml_rows_total,
             "critic_dataset": critic_report,
             "label_recovery": state.label_recovery,
+            "independent_evaluation": state.independent_evaluation,
         },
         "research_universe_shadow": research_shadow_section,
         "static_target_top50_shadow": {
@@ -1218,6 +1219,7 @@ class WorkerState:
     collector_last_cycle_stats: Dict[str, Any] = field(default_factory=dict)
     collector_last_error: str = ""
     label_recovery: Dict[str, Any] = field(default_factory=dict)
+    independent_evaluation: Dict[str, Any] = field(default_factory=dict)
     research_universe_shadow_enabled: bool = bool(getattr(config, "RESEARCH_UNIVERSE_SHADOW_ENABLED", True))
     research_universe_shadow_runs_total: int = 0
     research_universe_shadow_runs_ok: int = 0
@@ -1358,7 +1360,9 @@ async def _collector_supervisor(state: WorkerState) -> None:
                 "while reporting and training schedulers remain alive"
             )
             cause = exc.__cause__ or exc
-            if isinstance(cause, PermissionError):
+            if (isinstance(cause, PermissionError)
+                    or (isinstance(cause, TimeoutError)
+                        and str(cause).startswith("timeout acquiring critic_dataset lock:"))):
                 # Retry only a known transient Windows IO failure. Malformed
                 # evidence and unknown integrity failures still require repair.
                 await asyncio.sleep(300)
@@ -1496,6 +1500,41 @@ async def _recover_candidate_labels(state: WorkerState) -> None:
         }
         log.exception("Candidate label recovery failed")
     await asyncio.to_thread(save_json, report_path, state.label_recovery)
+
+
+async def _independent_evaluation_loop(state: WorkerState) -> None:
+    """Separate process/schedule; trainer cannot turn its own score into approval."""
+    while True:
+        if not bool(getattr(config, 'INDEPENDENT_SIGNAL_EVALUATION_ENABLED', True)):
+            state.independent_evaluation = {'verdict': 'UNKNOWN', 'reason': 'disabled',
+                                            'runtime_eligible': False}
+            await asyncio.sleep(3600)
+            continue
+        process = None
+        try:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, str(ROOT / 'independent_signal_evaluator.py'),
+                '--model', str(MODEL_FILE), '--dataset', str(critic_dataset.CRITIC_FILE),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
+            if process.returncode:
+                raise RuntimeError(stderr.decode('utf-8', errors='replace')[-1000:])
+            state.independent_evaluation = json.loads(stdout.decode('utf-8'))
+        except asyncio.CancelledError:
+            if process is not None and process.returncode is None:
+                process.kill()
+                await process.wait()
+            raise
+        except Exception as exc:
+            if process is not None and process.returncode is None:
+                process.kill()
+                await process.wait()
+            state.independent_evaluation = {'verdict': 'BLOCKED', 'error': str(exc),
+                                            'runtime_eligible': False}
+            logging.getLogger('rl_headless_worker.independent_evaluation').exception(
+                'Independent evaluator blocked')
+        await asyncio.sleep(3600)
 
 
 async def _training_loop(state: WorkerState) -> None:
@@ -2107,6 +2146,7 @@ async def _amain(args: argparse.Namespace) -> int:
     )
 
     tasks = [
+        asyncio.create_task(_independent_evaluation_loop(state), name="independent_evaluation"),
         asyncio.create_task(_training_loop(state), name="training"),
         asyncio.create_task(_status_loop(state), name="status"),
         asyncio.create_task(_top_gainer_critic_loop(state), name="top_gainer_critic"),

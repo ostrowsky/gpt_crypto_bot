@@ -155,6 +155,42 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(sleep.call_args_list[0].args, (300,))
         self.assertTrue(state.collector_enabled)
 
+    def test_dataset_lock_timeout_is_a_known_retryable_failure(self):
+        state = worker.WorkerState(3600, 300, 120, 20, True)
+        error = critic_dataset.DatasetIntegrityError('lock contention')
+        error.__cause__ = TimeoutError('timeout acquiring critic_dataset lock: rows.lock')
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(worker, 'COLLECTOR_STOP_FILE', Path(directory) / 'stop'), \
+                patch.object(worker, '_write_status_now', new_callable=AsyncMock), \
+                patch.object(worker.data_collector, '_get_btc_context', new=AsyncMock(return_value={})), \
+                patch.object(worker.data_collector, '_collect_once', side_effect=error), \
+                patch.object(worker.asyncio, 'sleep', side_effect=asyncio.CancelledError()) as sleep:
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(worker._collector_supervisor(state))
+            sleep.assert_called_once_with(300)
+
+    def test_independent_evaluator_runs_without_collector_or_promotion(self):
+        state = worker.WorkerState(3600, 300, 120, 20, False)
+        process = AsyncMock()
+        process.returncode = 0
+        process.communicate.return_value = (b'{"verdict":"UNKNOWN","paired_groups":0}', b'')
+        with patch.object(worker.asyncio, 'create_subprocess_exec', return_value=process), \
+                patch.object(worker.asyncio, 'sleep', side_effect=asyncio.CancelledError()):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(worker._independent_evaluation_loop(state))
+        self.assertEqual(state.independent_evaluation['verdict'], 'UNKNOWN')
+        self.assertFalse(state.collector_enabled)
+
+    def test_independent_evaluator_rollback_disables_subprocess(self):
+        state = worker.WorkerState(3600, 300, 120, 20, False)
+        with patch.object(worker.config, 'INDEPENDENT_SIGNAL_EVALUATION_ENABLED', False), \
+                patch.object(worker.asyncio, 'create_subprocess_exec', new_callable=AsyncMock) as spawn, \
+                patch.object(worker.asyncio, 'sleep', side_effect=asyncio.CancelledError()):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(worker._independent_evaluation_loop(state))
+        spawn.assert_not_awaited()
+        self.assertFalse(state.independent_evaluation['runtime_eligible'])
+
     def test_worker_timeout_and_cancel_terminate_child(self):
         for error in (TimeoutError(), asyncio.CancelledError()):
             state = worker.WorkerState(3600, 300, 120, 20, False)
