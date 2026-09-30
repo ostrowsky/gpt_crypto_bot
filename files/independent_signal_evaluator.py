@@ -69,7 +69,9 @@ def register(model_path, registry=REGISTRY, now=None):
     return manifest
 
 
-def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
+def evaluate(registry, dataset, predictor=None, now=None, *, historical=False, execution=False):
+    if execution and not historical:
+        raise ValueError('execution reconstruction is retrospective only')
     now = now or datetime.now(timezone.utc)
     manifest_raw = (registry / 'manifest.json').read_bytes()
     manifest = json.loads(manifest_raw)
@@ -147,9 +149,17 @@ def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
                 violations.append('unsupported_timeframe')
             if not row.get('id') or row['id'] in ids:
                 violations.append('unknown_or_duplicate_id')
-            if decision is None or decision > feature + timedelta(minutes=1):
+            if decision is None or (not execution and decision > feature + timedelta(minutes=1)):
                 violations.append('unknown_or_late_decision')
+            if execution:
+                try:
+                    from causal_entry_reconstruction import execution_return
+                    execution_return(row, now)
+                except (ValueError, TypeError, KeyError, OverflowError):
+                    violations.append('unknown_or_invalid_execution_price')
             if violations:
+                if execution:
+                    incomplete_groups.add(provenance.utc_iso(feature) + '|' + str(row.get('tf')))
                 invalid += 1
                 for reason in violations:
                     invalid_reasons[reason] += 1
@@ -169,7 +179,7 @@ def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
                     pending += 1
                 continue
             try:
-                ret = float(labels['ret_5'])
+                ret = execution_return(row, now) if execution else float(labels['ret_5'])
                 score = float((row.get('decision') or {}).get('candidate_score'))
                 if (not math.isfinite(ret) or not math.isfinite(score)
                         or not provenance.label_provenance_valid(row, 'ret_5')
@@ -178,11 +188,14 @@ def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
                     raise ValueError('invalid causal target')
                 # Prediction never receives outcomes, teachers or label provenance.
                 causal = {k: v for k, v in row.items()
-                          if k not in {'labels', 'teacher', 'label_provenance'}}
+                          if k not in {'labels', 'teacher', 'label_provenance', 'execution_reconstruction',
+                                       'reconstruction_integrity'}}
                 prediction = float(predictor(payload, causal))
                 if not math.isfinite(prediction):
                     raise ValueError('nonfinite prediction')
             except (ValueError, TypeError, KeyError):
+                if execution:
+                    incomplete_groups.add(group)
                 invalid += 1
                 invalid_reasons['invalid_causal_target_or_prediction'] += 1
                 continue
@@ -209,7 +222,9 @@ def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
     baseline_wins = sum(p['baseline_ret5'] > 0 for p in pairs)
     candidate_wins = sum(p['candidate_ret5'] > 0 for p in pairs)
     return {
-        'schema_version': 1, 'contract': CONTRACT, 'generated_at': provenance.utc_iso(now),
+        'schema_version': 1,
+        'contract': 'independent-retrospective-causal-entry-v1' if execution else CONTRACT,
+        'generated_at': provenance.utc_iso(now),
         'evaluation_scope': 'retrospective_post_exposure_audit' if historical else 'prospective_frozen_cohort',
         'sealed_holdout': not historical,
         'evaluation_start': provenance.utc_iso(start),
@@ -233,6 +248,8 @@ def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
         'pairs': pairs, 'runtime_eligible': False, 'achievement_claimed': False,
         'daily_deltas': {k: sum(v)/len(v) for k, v in sorted(daily.items())},
         'limitations': ['forward proxy only; no fees, exits or portfolio alpha',
+                        'asynchronous next-minute-open diagnostic, not actual decision quote or fill' if execution
+                        else 'closed-bar price proxy requires decisions within one minute',
                         'no automatic candidate replacement or production promotion',
                         'retrospective audit is not a sealed promotion holdout' if historical
                         else 'sealed future cohort; trainer historical test not reused'],

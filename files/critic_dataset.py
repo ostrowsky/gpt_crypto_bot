@@ -41,6 +41,7 @@ SEQ_FEATURE_NAMES = [
 _FILE_LOCK = threading.RLock()
 _pylog = logging.getLogger("critic_dataset")
 _logged_candidates: OrderedDict[str, bool] = OrderedDict()
+_disk_id_cache: Dict[str, tuple] = {}
 _MAX_LOGGED = 100_000
 _CROSS_PROCESS_LOCK_TIMEOUT_SEC = max(
     10.0,
@@ -185,6 +186,14 @@ def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
     while True:
         try:
             tmp.replace(target)
+            cached = _disk_id_cache.pop(str(tmp.resolve()), None)
+            if cached:
+                stat = target.stat()
+                _disk_id_cache[str(target.resolve())] = (
+                    (stat.st_dev, stat.st_ino), stat.st_size, stat.st_mtime_ns, cached[3],
+                )
+            else:
+                _disk_id_cache.pop(str(target.resolve()), None)
             return
         except PermissionError:
             if time.monotonic() >= deadline:
@@ -217,6 +226,7 @@ def _scan_mutations(mutator) -> tuple[bool, bool]:
 def _write_mutated_stream(mutator, tmp: Path) -> tuple[bool, bool]:
     changed = False
     had_bad_rows = False
+    ids = set()
     try:
         with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source, tmp.open(
             "w", encoding="utf-8"
@@ -233,18 +243,59 @@ def _write_mutated_stream(mutator, tmp: Path) -> tuple[bool, bool]:
                     had_bad_rows = True
                     continue
                 changed = bool(mutator(rec)) or changed
+                if rec.get("id"):
+                    ids.add(rec["id"])
                 destination.write(json.dumps(rec, ensure_ascii=False, cls=_Enc) + "\n")
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
+    if changed or had_bad_rows:
+        stat = tmp.stat()
+        _disk_id_cache[str(tmp.resolve())] = ((stat.st_dev, stat.st_ino), stat.st_size, stat.st_mtime_ns, ids)
     return changed, had_bad_rows
 
 
-def _append(record: Dict[str, Any]) -> None:
+def _append(record: Dict[str, Any]) -> bool:
+    """Cross-process uniqueness check and append share the same IO barrier."""
     with _dataset_io_lock():
         CRITIC_FILE.parent.mkdir(parents=True, exist_ok=True)
+        record_id = record.get("id")
+        cache_key = str(CRITIC_FILE.resolve())
+        ids = set()
+        if record_id and CRITIC_FILE.exists():
+            stat = CRITIC_FILE.stat()
+            identity = (stat.st_dev, stat.st_ino)
+            cached = _disk_id_cache.get(cache_key)
+            offset = 0
+            if cached and cached[0] == identity and stat.st_size >= cached[1]:
+                # Cooperative writers append or atomically replace, never edit
+                # a prefix in place. Replacements force a full ID rescan.
+                if stat.st_size > cached[1] or stat.st_mtime_ns == cached[2]:
+                    offset, ids = cached[1], cached[3].copy()
+            with CRITIC_FILE.open("rb") as source:
+                source.seek(offset)
+                for line in source:
+                    if not line.strip():
+                        continue
+                    # Malformed history is an integrity failure, not permission
+                    # to append an ID whose uniqueness cannot be established.
+                    existing = json.loads(line)
+                    if not isinstance(existing, dict):
+                        raise DatasetIntegrityError("non-object dataset row")
+                    if existing.get("id"):
+                        ids.add(existing["id"])
+            _disk_id_cache[cache_key] = (identity, stat.st_size, stat.st_mtime_ns, ids)
+            if record_id in ids:
+                return False
         with CRITIC_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False, cls=_Enc) + "\n")
+        if record_id:
+            ids.add(record_id)
+            stat = CRITIC_FILE.stat()
+            _disk_id_cache[cache_key] = ((stat.st_dev, stat.st_ino), stat.st_size, stat.st_mtime_ns, ids)
+        else:
+            _disk_id_cache.pop(cache_key, None)
+        return True
 
 
 def get_records(record_ids: set[str]) -> Dict[str, Dict[str, Any]]:
@@ -372,10 +423,19 @@ def _update_existing_candidate(
         }
         decision_changed = rec.get("decision") != next_decision
         if decision_changed:
+            # A changed action/score is a new decision, not the first collector
+            # observation. Preserve its prior boundary instead of backdating it.
+            rec.setdefault("decision_history", []).append({
+                "decision": rec.get("decision"),
+                "decision_provenance": rec.get("decision_provenance"),
+            })
             rec["decision"] = next_decision
         provenance_changed = policy_provenance.update_decision_provenance(
             rec, decision_provenance
         )
+        if decision_changed and rec.get("decision_provenance") != decision_provenance:
+            rec["decision_provenance"] = dict(decision_provenance)
+            provenance_changed = True
         rec.setdefault("labels", {})
         trade_taken_changed = action == "take" and rec["labels"].get("trade_taken") is not True
         if trade_taken_changed:
@@ -501,7 +561,11 @@ def log_candidate(
         "linked_ml_record_id": "",
     }
     try:
-        _append(rec)
+        if _append(rec) is False:
+            _update_existing_candidate(
+                record_id=record_id, decision_provenance=decision_provenance,
+                strict=strict, **rec["decision"],
+            )
         _mark_logged(record_id)
     except Exception as e:
         _pylog.warning("critic_dataset write error: %s", e)
