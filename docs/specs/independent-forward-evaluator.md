@@ -3,6 +3,8 @@
 Status: independent forward evaluation foundation; promotion NOT implemented
 Date: 2026-09-30
 Parent: `continuous-signal-improvement.md`, P0 independent evaluation.
+Historical audit and fail-closed release readiness are specified separately in
+`historical-evaluation-release-controller.md`; neither grants production eligibility.
 
 ## Contract
 

@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| Historical evaluation and release controller | retrospective audit; fail-closed readiness only | `docs/specs/historical-evaluation-release-controller.md` | maximum available post-exposure proxy deltas, immutable evidence, release blockers | sealed portfolio replay and canary adapter required; no production adoption yet |
 | Independent forward evaluator | prospective foundation; no production promotion | `docs/specs/independent-forward-evaluator.md` | frozen future paired Top-1 proxy delta, daily CI, provenance coverage | accumulate sealed future evidence; historical portfolio replay and promotion remain separate |
 | Candidate label recovery loop | data repair; no trading-policy change | `docs/specs/candidate-label-recovery-loop.md` | mature pending rows/targets, invalid data rejection, recovery status | repair maximum-history backlog; independently re-evaluate training readiness |
 | Continuous signal improvement | required architecture; implementation pending | `docs/specs/continuous-signal-improvement.md` | independent learning evaluation, early/realized capture, after-cost portfolio outcome, promotions and rollbacks | repair labels, independent evaluation, maximum-period replay, shadow/canary and automatic gated adoption |

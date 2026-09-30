@@ -69,7 +69,7 @@ def register(model_path, registry=REGISTRY, now=None):
     return manifest
 
 
-def evaluate(registry, dataset, predictor=None, now=None):
+def evaluate(registry, dataset, predictor=None, now=None, *, historical=False):
     now = now or datetime.now(timezone.utc)
     manifest_raw = (registry / 'manifest.json').read_bytes()
     manifest = json.loads(manifest_raw)
@@ -95,32 +95,64 @@ def evaluate(registry, dataset, predictor=None, now=None):
     registered = provenance.parse_utc(manifest['registered_at'])
     if start is None or registered is None or start < registered + timedelta(hours=EMBARGO_HOURS):
         raise ValueError('holdout/embargo changed')
+    if historical:
+        scopes = (payload.get('evaluation_provenance') or {}).get('split_scopes') or {}
+        if set(scopes) != {'train', 'validation', 'test'}:
+            raise ValueError('unknown historical exposure')
+        exposure = [provenance.parse_utc(s.get(k)) for s in scopes.values()
+                    for k in ('last_feature_time', 'last_label_time', 'last_label_recorded_at')]
+        if any(t is None or t >= registered for t in exposure):
+            raise ValueError('unknown historical exposure')
+        start = max(exposure) + timedelta(hours=EMBARGO_HOURS)
     groups, ids, incomplete_groups = defaultdict(list), set(), set()
     pending, invalid, eligible = 0, 0, 0
+    invalid_reasons = defaultdict(int)
+    total, unknown_time, excluded = 0, 0, 0
+    first_available, last_available = None, None
     dataset_hash = hashlib.sha256()
     with dataset.open('rb') as handle:
         for line in handle:
+            total += 1
             dataset_hash.update(line)
             try:
                 row = json.loads(line)
             except (ValueError, TypeError):
                 invalid += 1
+                invalid_reasons['malformed_json'] += 1
                 continue
             if not isinstance(row, dict):
                 invalid += 1
+                invalid_reasons['non_object'] += 1
                 continue
             feature = provenance.parse_utc((row.get('provenance') or {}).get('feature_time'))
+            if feature is None:
+                unknown_time += 1
+            else:
+                first_available = min(first_available, feature) if first_available else feature
+                last_available = max(last_available, feature) if last_available else feature
+                if feature < start:
+                    excluded += 1
             if feature is None or not start <= feature <= now:
                 continue
             eligible += 1
             decision = provenance.parse_utc((row.get('decision_provenance') or {}).get('decision_time'))
-            if (not provenance.observation_provenance_valid(row)
-                    or provenance.canonical_policy_epoch((row.get('provenance') or {}).get('policy_epoch')) not in epochs
-                    or (row.get('provenance') or {}).get('dataset_contract') != 'candidate-outcome-v2'
-                    or row.get('tf') not in {'15m', '1h', '4h'}
-                    or not row.get('id') or row['id'] in ids
-                    or decision is None or decision > feature + timedelta(minutes=1)):
+            violations = []
+            if not provenance.observation_provenance_valid(row):
+                violations.append('invalid_observation_provenance')
+            if provenance.canonical_policy_epoch((row.get('provenance') or {}).get('policy_epoch')) not in epochs:
+                violations.append('other_policy_epoch')
+            if (row.get('provenance') or {}).get('dataset_contract') != 'candidate-outcome-v2':
+                violations.append('other_dataset_contract')
+            if row.get('tf') not in {'15m', '1h', '4h'}:
+                violations.append('unsupported_timeframe')
+            if not row.get('id') or row['id'] in ids:
+                violations.append('unknown_or_duplicate_id')
+            if decision is None or decision > feature + timedelta(minutes=1):
+                violations.append('unknown_or_late_decision')
+            if violations:
                 invalid += 1
+                for reason in violations:
+                    invalid_reasons[reason] += 1
                 continue
             ids.add(row['id'])
             group = provenance.utc_iso(datetime.fromtimestamp(int(row['bar_ts'])/1000,
@@ -152,6 +184,7 @@ def evaluate(registry, dataset, predictor=None, now=None):
                     raise ValueError('nonfinite prediction')
             except (ValueError, TypeError, KeyError):
                 invalid += 1
+                invalid_reasons['invalid_causal_target_or_prediction'] += 1
                 continue
             groups[group].append((row['id'], score, prediction, ret))
     daily, pairs = defaultdict(list), []
@@ -177,10 +210,18 @@ def evaluate(registry, dataset, predictor=None, now=None):
     candidate_wins = sum(p['candidate_ret5'] > 0 for p in pairs)
     return {
         'schema_version': 1, 'contract': CONTRACT, 'generated_at': provenance.utc_iso(now),
+        'evaluation_scope': 'retrospective_post_exposure_audit' if historical else 'prospective_frozen_cohort',
+        'sealed_holdout': not historical,
+        'evaluation_start': provenance.utc_iso(start),
+        'available_history': {'rows': total, 'unknown_feature_time_rows': unknown_time,
+                              'excluded_before_cutoff_rows': excluded,
+                              'first_feature_time': provenance.utc_iso(first_available) if first_available else None,
+                              'last_feature_time': provenance.utc_iso(last_available) if last_available else None},
         'candidate_sha256': digest(raw), 'manifest_sha256': digest(manifest_raw),
         'dataset_sha256': dataset_hash.hexdigest(), 'holdout_start': manifest['holdout_start'],
         'learning_quality': {'verdict': verdict, 'eligible_rows': eligible,
                              'invalid_rows': invalid, 'overdue_rows': pending,
+                             'invalid_reason_counts': dict(sorted(invalid_reasons.items())),
                              'paired_groups': len(pairs), 'valid_days': len(values),
                              'excluded_incomplete_groups': len(incomplete_groups),
                              'baseline_positive': {'numerator': baseline_wins, 'denominator': len(pairs)},
@@ -190,9 +231,11 @@ def evaluate(registry, dataset, predictor=None, now=None):
                              'paired_daily_95ci': ci},
         'signal_quality': {'verdict': 'UNKNOWN', 'reason': 'portfolio replay and live outcomes required'},
         'pairs': pairs, 'runtime_eligible': False, 'achievement_claimed': False,
+        'daily_deltas': {k: sum(v)/len(v) for k, v in sorted(daily.items())},
         'limitations': ['forward proxy only; no fees, exits or portfolio alpha',
                         'no automatic candidate replacement or production promotion',
-                        'sealed future cohort; trainer historical test not reused'],
+                        'retrospective audit is not a sealed promotion holdout' if historical
+                        else 'sealed future cohort; trainer historical test not reused'],
     }
 
 

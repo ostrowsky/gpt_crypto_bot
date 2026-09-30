@@ -191,6 +191,38 @@ class RecoveryTests(unittest.TestCase):
         spawn.assert_not_awaited()
         self.assertFalse(state.independent_evaluation['runtime_eligible'])
 
+    def test_release_controller_is_separate_and_fail_closed(self):
+        state = worker.WorkerState(3600, 300, 120, 20, False)
+        process = AsyncMock()
+        process.returncode = 0
+        process.communicate.return_value = (b'{"state":"BLOCKED","runtime_eligible":false}', b'')
+        with patch.object(worker.asyncio, 'create_subprocess_exec', return_value=process), \
+                patch.object(worker.asyncio, 'sleep', side_effect=asyncio.CancelledError()):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(worker._release_controller_loop(state))
+        self.assertEqual(state.release_controller['state'], 'BLOCKED')
+        self.assertFalse(state.release_controller['runtime_eligible'])
+
+    def test_release_controller_rollback_and_timeout(self):
+        state = worker.WorkerState(3600, 300, 120, 20, False)
+        with patch.object(worker.config, 'SIGNAL_RELEASE_CONTROLLER_ENABLED', False), \
+                patch.object(worker.asyncio, 'create_subprocess_exec', new_callable=AsyncMock) as spawn, \
+                patch.object(worker.asyncio, 'sleep', side_effect=asyncio.CancelledError()):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(worker._release_controller_loop(state))
+        spawn.assert_not_awaited()
+        process = AsyncMock()
+        process.returncode = None
+        process.kill = unittest.mock.Mock()
+        process.communicate = unittest.mock.Mock(return_value=None)
+        with patch.object(worker.asyncio, 'create_subprocess_exec', return_value=process), \
+                patch.object(worker.asyncio, 'wait_for', side_effect=TimeoutError()), \
+                patch.object(worker.asyncio, 'sleep', side_effect=asyncio.CancelledError()):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(worker._release_controller_loop(state))
+        process.kill.assert_called_once()
+        self.assertEqual(state.release_controller['state'], 'BLOCKED')
+
     def test_worker_timeout_and_cancel_terminate_child(self):
         for error in (TimeoutError(), asyncio.CancelledError()):
             state = worker.WorkerState(3600, 300, 120, 20, False)

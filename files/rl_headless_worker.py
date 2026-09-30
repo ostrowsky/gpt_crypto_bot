@@ -276,6 +276,7 @@ def build_status_snapshot(
             "critic_dataset": critic_report,
             "label_recovery": state.label_recovery,
             "independent_evaluation": state.independent_evaluation,
+            "release_controller": state.release_controller,
         },
         "research_universe_shadow": research_shadow_section,
         "static_target_top50_shadow": {
@@ -1220,6 +1221,7 @@ class WorkerState:
     collector_last_error: str = ""
     label_recovery: Dict[str, Any] = field(default_factory=dict)
     independent_evaluation: Dict[str, Any] = field(default_factory=dict)
+    release_controller: Dict[str, Any] = field(default_factory=dict)
     research_universe_shadow_enabled: bool = bool(getattr(config, "RESEARCH_UNIVERSE_SHADOW_ENABLED", True))
     research_universe_shadow_runs_total: int = 0
     research_universe_shadow_runs_ok: int = 0
@@ -1534,6 +1536,39 @@ async def _independent_evaluation_loop(state: WorkerState) -> None:
                                             'runtime_eligible': False}
             logging.getLogger('rl_headless_worker.independent_evaluation').exception(
                 'Independent evaluator blocked')
+        await asyncio.sleep(3600)
+
+
+async def _release_controller_loop(state: WorkerState) -> None:
+    """Read-only production readiness; cannot enable a model or trading policy."""
+    while True:
+        process = None
+        try:
+            if not bool(getattr(config, 'SIGNAL_RELEASE_CONTROLLER_ENABLED', True)):
+                state.release_controller = {'state': 'BLOCKED', 'reason': 'disabled',
+                                            'runtime_eligible': False}
+            else:
+                registry = ROOT.parent / '.runtime/independent_evaluation'
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable, str(ROOT / 'safe_signal_release.py'),
+                    '--registry', str(registry), '--forward', str(registry/'evaluation_latest.json'),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
+                if process.returncode:
+                    raise RuntimeError(stderr.decode('utf-8', errors='replace')[-1000:])
+                state.release_controller = json.loads(stdout.decode('utf-8'))
+        except asyncio.CancelledError:
+            if process is not None and process.returncode is None:
+                process.kill()
+                await process.wait()
+            raise
+        except Exception as exc:
+            if process is not None and process.returncode is None:
+                process.kill()
+                await process.wait()
+            state.release_controller = {'state': 'BLOCKED', 'reason': str(exc),
+                                        'runtime_eligible': False}
+            logging.getLogger('rl_headless_worker.release_controller').exception('Release readiness blocked')
         await asyncio.sleep(3600)
 
 
@@ -2147,6 +2182,7 @@ async def _amain(args: argparse.Namespace) -> int:
 
     tasks = [
         asyncio.create_task(_independent_evaluation_loop(state), name="independent_evaluation"),
+        asyncio.create_task(_release_controller_loop(state), name="release_controller"),
         asyncio.create_task(_training_loop(state), name="training"),
         asyncio.create_task(_status_loop(state), name="status"),
         asyncio.create_task(_top_gainer_critic_loop(state), name="top_gainer_critic"),
