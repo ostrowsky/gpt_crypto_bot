@@ -296,7 +296,7 @@ class PortfolioAlphaTest(unittest.TestCase):
             policy_manifest=_manifest(),
         )
 
-        self.assertTrue(payload["decision_grade"])
+        self.assertFalse(payload["decision_grade"], "sparse daily prices cannot certify a 15m grid")
         self.assertFalse(
             any(
                 row.startswith("open_positions_at_end")
@@ -329,8 +329,8 @@ class PortfolioAlphaTest(unittest.TestCase):
             policy_manifest=_manifest(),
         )
 
-        self.assertTrue(payload["decision_grade"])
-        self.assertEqual(payload["evidence_grade"], "decision_grade")
+        self.assertFalse(payload["decision_grade"], "endpoint span does not establish cadence")
+        self.assertEqual(payload["evidence_grade"], "diagnostic")
         expected = (
             payload["portfolio"]["net_return_after_costs_pct"]
             - payload["benchmark"]["net_return_after_costs_pct"]

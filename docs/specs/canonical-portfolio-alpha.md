@@ -1,7 +1,12 @@
 # Canonical Unified Portfolio Alpha
 
 Status: measurement-only implementation
-Last updated: 2026-08-13
+Last updated: 2026-10-01
+
+The v2 measurement repair in `closed-grid-policy-replay.md` additionally requires
+the complete aligned 15-minute benchmark grid and fresh holding marks. Endpoint
+span or sparse daily samples cannot certify coverage. Incomplete price paths
+publish null drawdown; v1 and v2 evidence must not be mixed in progress claims.
 
 ## Problem
 

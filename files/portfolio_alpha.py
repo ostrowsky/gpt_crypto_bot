@@ -12,7 +12,8 @@ from policy_provenance import current_policy_manifest, stable_hash
 
 
 SCHEMA_VERSION = 1
-METRIC_CONTRACT = "canonical_unified_ten_slot_alpha_v1"
+METRIC_CONTRACT = "canonical_unified_ten_slot_alpha_v2"
+VALUATION_INTERVAL_MS = 900_000
 BENCHMARK_NAME = "BTCUSDT_buy_and_hold_same_closed_bar_window"
 MAX_REPLAY_DAYS = 30
 MIN_PERIOD_COVERAGE = 0.95
@@ -131,7 +132,8 @@ def _price_at_or_before(
 ) -> float | None:
     timestamps, prices = normalized
     idx = bisect_right(timestamps, int(ts_ms)) - 1
-    return prices[idx] if idx >= 0 else None
+    # A price before a missing candle is not a valid current holding mark.
+    return prices[idx] if idx >= 0 and int(ts_ms)-timestamps[idx] < VALUATION_INTERVAL_MS else None
 
 
 def _max_drawdown(values: Sequence[float]) -> float:
@@ -385,7 +387,15 @@ def evaluate_portfolio_alpha(
     valuation_coverage = (
         net.fully_valued_points / net.valuation_points if net.valuation_points else 0.0
     )
+    grid = set(range(((int(window_start_ms)+VALUATION_INTERVAL_MS-1)//VALUATION_INTERVAL_MS)
+                     * VALUATION_INTERVAL_MS, int(window_end_ms)+1, VALUATION_INTERVAL_MS))
+    observed_grid = grid.intersection(benchmark_timestamps)
+    missing_grid = len(grid)-len(observed_grid)
     violations = sorted(set(net.violations))
+    if missing_grid:
+        violations.append(f"missing_benchmark_grid:{missing_grid}")
+    if net.fully_valued_points != net.valuation_points:
+        violations.append("incomplete_holding_price_grid")
     universe_clean = sorted({str(symbol).upper() for symbol in universe if str(symbol).strip()})
     benchmark_complete = benchmark.get("status") == "complete"
     provenance_complete = bool(manifest.get("policy_epoch") and manifest.get("policy_hash") and universe_clean)
@@ -444,7 +454,8 @@ def evaluate_portfolio_alpha(
             "cost_drag_pct": _round(gross.return_pct - net.return_pct),
             "fees_quote": _round(net.fees_quote),
             "slippage_quote": _round(net.slippage_quote),
-            "max_drawdown_after_costs_pct": _round(net.max_drawdown_pct),
+            "max_drawdown_after_costs_pct": (_round(net.max_drawdown_pct)
+                                             if not missing_grid and valuation_coverage == 1.0 else None),
             "max_concurrent_positions": net.max_concurrent_positions,
             "average_gross_utilization": _round(net.average_gross_utilization),
         },
@@ -454,6 +465,8 @@ def evaluate_portfolio_alpha(
             "valuation_points": net.valuation_points,
             "fully_valued_points": net.fully_valued_points,
             "valuation_coverage": _round(valuation_coverage),
+            "benchmark_grid": {"observed": len(observed_grid), "expected": len(grid),
+                               "missing": missing_grid, "interval_ms": VALUATION_INTERVAL_MS},
             "contract_violations": violations,
         },
         "provenance": {
