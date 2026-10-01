@@ -117,6 +117,8 @@ class ForwardServiceTests(unittest.TestCase):
         self.assertIn('$folder.RegisterTaskDefinition', text)
         self.assertIn('Refusing to replace a task belonging to another principal.', text)
         self.assertIn('$credential.GetNetworkCredential().Password', text)
+        self.assertIn('$trigger.Enabled = $true', text)
+        self.assertIn('$definition.Settings.DisallowStartIfOnBatteries = $false', text)
 
     def test_copied_gate_checks_live_project_harness(self):
         import independent_portfolio_gate as gate
@@ -128,6 +130,19 @@ class ForwardServiceTests(unittest.TestCase):
     def test_embedded_interpreter_resolves_role_source_first(self):
         import sys
         self.assertEqual(sys.path[0], str(Path(service.__file__).resolve().parent))
+
+    def test_bootstrap_feed_does_not_deadlock_at_installation_cutoff(self):
+        deployment = {'evaluator_sid':'expected', 'registry':str(self.root/'new'),
+                      'dataset':str(self.dataset), 'training_input':str(self.root/'train'),
+                      'candidate_input':str(self.root/'pending'), 'portfolio_request':str(self.root/'request'),
+                      'release_root':str(self.root/'release'), 'status':str(self.root/'status'),
+                      'bootstrap_cutoff':'2020-01-01T00:00:00Z'}
+        with patch.object(service, 'current_sid', return_value='expected'), \
+             patch.object(service, 'export_training', return_value=1) as export, \
+             patch.object(evaluator, 'register', side_effect=FileNotFoundError('pending candidate')):
+            result = service.run_tick(deployment, 'evaluator')
+        self.assertGreater(export.call_args.args[2], NOW)
+        self.assertEqual(result['controller']['state'], 'BLOCKED')
 
 
 if __name__ == '__main__':

@@ -58,6 +58,10 @@ grant role accounts read/execute only; only SYSTEM/Administrators can modify the
 Embedded Python explicitly prioritizes frozen role source over its checkout ._pth.
 Task updates during recovery require the same verified service principal; other
 existing tasks are never overwritten. Registration success alone is not run health.
+Triggers and demand starts are explicitly enabled; battery conditions must not
+silently suspend collection. Before any frozen candidate exists, training intake
+advances to evaluator's current time. After registration it is bounded by fixed
+holdout_start. Never deadlock bootstrap on an insufficient installation-day sample.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously

@@ -118,7 +118,12 @@ foreach ($role in @('evaluator','trainer')) {
     $definition.Settings.MultipleInstances = 2 # IgnoreNew
     $definition.Settings.ExecutionTimeLimit = if ($role -eq 'trainer') {'PT50M'} else {'PT5M'}
     $definition.Settings.StartWhenAvailable = $true
+    $definition.Settings.Enabled = $true
+    $definition.Settings.AllowDemandStart = $true
+    $definition.Settings.DisallowStartIfOnBatteries = $false
+    $definition.Settings.StopIfGoingOnBatteries = $false
     $trigger = $definition.Triggers.Create(1)
+    $trigger.Enabled = $true
     $trigger.StartBoundary = (Get-Date).AddMinutes(1).ToString('yyyy-MM-ddTHH:mm:ss')
     $trigger.Repetition.Interval = "PT${minutes}M"
     $action = $definition.Actions.Create(0)

@@ -223,7 +223,7 @@ def run_tick(deployment, role):
     try:
         if not (registry/'manifest.json').exists():
             result['bootstrap_training_rows'] = export_training(Path(deployment['dataset']),
-                Path(deployment['training_input']), provenance.parse_utc(deployment['bootstrap_cutoff']))
+                Path(deployment['training_input']), datetime.now(timezone.utc))
         evaluator.register(Path(deployment['candidate_input']), registry)
         result['collection'] = collect(registry, Path(deployment['dataset']))
         manifest = json.loads((registry/'manifest.json').read_bytes())
