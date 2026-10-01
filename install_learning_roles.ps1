@@ -132,8 +132,19 @@ foreach ($role in @('evaluator','trainer')) {
         # not retain a password for execution. Never place it in process arguments.
         $roleSid = if ($role -eq 'trainer') {$trainerSid} else {$evaluatorSid}
         $security = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGX;;;$roleSid)"
+        $existing = $null
+        try { $existing = $folder.GetTask("GptBot-$role") } catch {
+            if ($_.Exception.HResult -ne -2147024894) { throw }
+        }
+        $flags = 2 # create, not overwrite another principal's task
+        if ($existing) {
+            if ($existing.Definition.Principal.UserId -notin @($roleSid, $credential.UserName, $account)) {
+                throw 'Refusing to replace a task belonging to another principal.'
+            }
+            $flags = 6 # safely resume/update our exact role
+        }
         # Use the native API: the PowerShell credential overload changes S4U to Password.
-        $registered = $folder.RegisterTaskDefinition("GptBot-$role", $definition, 2,
+        $registered = $folder.RegisterTaskDefinition("GptBot-$role", $definition, $flags,
             $credential.UserName, $credential.GetNetworkCredential().Password, 2, $security)
     } finally {
         $credential = $null

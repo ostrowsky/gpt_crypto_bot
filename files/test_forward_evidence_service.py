@@ -115,6 +115,7 @@ class ForwardServiceTests(unittest.TestCase):
         self.assertNotIn("Get-ChildItem -LiteralPath (Join-Path $ProjectRoot '.runtime')", text)
         self.assertIn('$registered.Definition.Principal.LogonType -ne 2', text)
         self.assertIn('$folder.RegisterTaskDefinition', text)
+        self.assertIn('Refusing to replace a task belonging to another principal.', text)
         self.assertIn('$credential.GetNetworkCredential().Password', text)
 
     def test_copied_gate_checks_live_project_harness(self):
@@ -123,6 +124,10 @@ class ForwardServiceTests(unittest.TestCase):
             run.return_value.returncode = 1
             self.assertFalse(gate.harness_passes(self.root))
             self.assertEqual(run.call_args.args[0][1], str(self.root/'files'/'truth_harness.py'))
+
+    def test_embedded_interpreter_resolves_role_source_first(self):
+        import sys
+        self.assertEqual(sys.path[0], str(Path(service.__file__).resolve().parent))
 
 
 if __name__ == '__main__':

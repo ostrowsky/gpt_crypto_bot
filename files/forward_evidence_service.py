@@ -7,6 +7,11 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+# The bundled interpreter's isolated ._pth points to the original checkout.
+# Resolve role modules from the administrator-frozen source, not that checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import independent_signal_evaluator as evaluator
 import policy_provenance as provenance

@@ -55,6 +55,9 @@ The service accounts belong only to standard Users, not Administrators.
 Use native RegisterTaskDefinition with explicit TASK_LOGON_S4U=2, because the
 PowerShell User/Password overload replaces the principal logon type. Task DACLs
 grant role accounts read/execute only; only SYSTEM/Administrators can modify them.
+Embedded Python explicitly prioritizes frozen role source over its checkout ._pth.
+Task updates during recovery require the same verified service principal; other
+existing tasks are never overwritten. Registration success alone is not run health.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously
