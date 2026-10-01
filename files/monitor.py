@@ -15,6 +15,7 @@ Sends Telegram messages via callback for all meaningful events.
 import asyncio
 import json
 import logging
+import os
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -297,6 +298,26 @@ def _ml_candidate_ranker_components(
         )
         comps = predict_components_from_candidate_payload(payload, rec)
         comps["payload_version"] = float(int(payload.get("payload_version", 1) or 1))
+        # Certified overlay changes only the score delta, not EV/replacement
+        # components or legacy model files. Revalidate authorization each decision.
+        if bool(getattr(config, "VALIDATED_RANKER_ROLLOUT_ENABLED", False)):
+            from validated_ranker_rollout import ROOT, select, bounded_bonus
+            try:
+                champion_raw = _RANKER_MODEL_FILE.read_bytes()
+                selected = (select(ROOT, champion_raw, sym,
+                            os.environ.get("RANKER_EVALUATOR_KEY", "").encode(), enabled=True)
+                            if json.loads(champion_raw) == payload else None)
+                if selected:
+                    challenger, ticket = selected
+                    alternate = predict_components_from_candidate_payload(challenger, rec)
+                    alternate["payload_version"] = float(int(challenger.get("payload_version", 1) or 1))
+                    delta = _ml_candidate_ranker_runtime_bonus(alternate)-_ml_candidate_ranker_runtime_bonus(comps)
+                    comps["validated_overlay_bonus"] = bounded_bonus(delta)
+                    log.info("Validated ranker %s stage=%s symbol=%s tf=%s bar=%s delta=%.4f",
+                             ticket['candidate_sha256'], ticket['stage'], sym, tf, int(data['t'][i]),
+                             comps["validated_overlay_bonus"])
+            except Exception:
+                log.warning("Validated overlay failed; retaining champion components", exc_info=True)
         return {str(k): float(v) for k, v in comps.items()}
     except Exception:
         return None
@@ -317,13 +338,18 @@ def _ml_candidate_ranker_runtime_bonus(ranker_info: Optional[Dict[str, float]]) 
     weight = float(getattr(config, "ML_CANDIDATE_RANKER_SCORE_WEIGHT", 0.0))
     if weight == 0.0:
         return 0.0
+    overlay = 0.0
+    if bool(getattr(config, "VALIDATED_RANKER_ROLLOUT_ENABLED", False)):
+        from validated_ranker_rollout import bounded_bonus
+        overlay = bounded_bonus(ranker_info.get("validated_overlay_bonus", 0.0))
     if bool(getattr(config, "ML_CANDIDATE_RANKER_USE_FINAL_SCORE", True)) and int(ranker_info.get("payload_version", 1.0)) >= 2:
         clip = max(0.1, float(getattr(config, "ML_CANDIDATE_RANKER_SCORE_CLIP", 2.0)))
         raw = float(ranker_info.get("final_score", 0.0))
         raw = max(-clip, min(clip, raw))
-        return raw * weight
+        return raw * weight + overlay
     neutral = float(getattr(config, "ML_CANDIDATE_RANKER_NEUTRAL_PROBA", 0.50))
-    return (float(ranker_info.get("quality_proba", neutral)) - neutral) * weight
+    return ((float(ranker_info.get("quality_proba", neutral)) - neutral) * weight
+            + overlay)
 
 
 def _candidate_signal_flags(

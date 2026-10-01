@@ -107,6 +107,7 @@ class _AccountResult:
     valuation_points: int
     fully_valued_points: int
     violations: list[str]
+    equity_curve: list[tuple[int, float]]
 
 
 def _trade_value(trade: Any, name: str, default: Any = None) -> Any:
@@ -168,6 +169,7 @@ def _simulate_account(
     max_positions = 0
     utilization_sum = 0.0
     equity_curve: list[float] = []
+    timed_curve: list[tuple[int, float]] = []
     fully_valued_points = 0
     normalized = {
         str(symbol).upper(): _normalized_series(rows)
@@ -270,6 +272,7 @@ def _simulate_account(
         if ts_ms in valuation_set:
             equity, gross_exposure, complete = liquidation_equity(ts_ms)
             equity_curve.append(equity)
+            timed_curve.append((ts_ms, equity))
             if complete:
                 fully_valued_points += 1
             utilization_sum += gross_exposure / equity if equity > 0 else 0.0
@@ -293,6 +296,7 @@ def _simulate_account(
         valuation_points=len(valuation_timestamps),
         fully_valued_points=fully_valued_points,
         violations=violations,
+        equity_curve=timed_curve,
     )
 
 

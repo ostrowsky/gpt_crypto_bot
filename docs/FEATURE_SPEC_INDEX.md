@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| Validated ranker rollout | independent account gate and disabled bounded runtime adapter; no approval | `docs/specs/validated-ranker-rollout.md` | paired after-cost portfolios, block-bootstrap CI, exact model/authority binding | certify actual history/forward population; deploy separate authority ACLs; enable only after gates |
 | Closed-grid policy replay | current-rule baseline diagnostic; stale/gapped valuations rejected | `docs/specs/closed-grid-policy-replay.md` | complete BTC cadence, fresh holding marks, maximum archive baseline | complete population and champion/challenger parity still required |
 | Independent ten-slot replay foundation | after-cost fixed-T5 diagnostic; no release approval | `docs/specs/independent-ten-slot-replay.md` | cash reconciliation, capacity, paired simulated net return | champion admission/SELL parity, continuous drawdown and benchmark still required |
 | Causal entry reconstruction | retrospective diagnostic; conflicting duplicates quarantined | `docs/specs/causal-entry-reconstruction.md` | unique IDs, price coverage, next-minute-open paired return proxy | exact fills, portfolio replay and sealed forward evidence still required |
