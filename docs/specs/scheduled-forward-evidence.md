@@ -44,6 +44,10 @@ live project root, not an empty copied runtime. Existing legacy worker training 
 not claimed to be migrated; its outputs cannot substitute for this isolated cohort.
 The first candidate remains frozen throughout its holdout; new hourly candidates
 do not silently replace it or gain access to holdout labels.
+Provisioning may resume only with the exact previously observed account SIDs;
+it refuses unrelated existing principals. ACL work is scoped to the raw source and
+sealed evidence paths, not all runtime logs/locks. Partial installation is reported
+as such; only completed task registration writes the public installation marker.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously

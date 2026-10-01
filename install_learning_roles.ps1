@@ -1,4 +1,4 @@
-param([string]$ProjectRoot = $PSScriptRoot)
+param([string]$ProjectRoot = $PSScriptRoot, [string]$ResumeTrainerSid = '', [string]$ResumeEvaluatorSid = '')
 $ErrorActionPreference = 'Stop'
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -15,7 +15,7 @@ $source = Join-Path $root 'source'
 $release = Join-Path $ProjectRoot '.runtime\validated_ranker_rollout'
 trap {
     if ($root -and (Test-Path -LiteralPath $root)) {
-        $_.Exception.Message | Set-Content -LiteralPath (Join-Path $root 'installation_failure.txt') -Encoding UTF8
+        ($_.Exception.Message+"`n"+$_.ScriptStackTrace) | Set-Content -LiteralPath (Join-Path $root 'installation_failure.txt') -Encoding UTF8
     }
     throw
 }
@@ -33,14 +33,16 @@ function Set-PrivateDirectory([string]$Path, [hashtable]$Grants) {
     }
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
-Set-PrivateDirectory $root @{$identity.User.Value='FullControl'}
-Set-PrivateDirectory $admin @{}
 foreach ($name in @('GptBotTrainer', 'GptBotEvaluator')) {
     $user = Get-LocalUser -Name $name -ErrorAction SilentlyContinue
-    if ($user) { throw "Account $name already exists; refusing to reuse an unverified principal." }
+    $expectedSid = if ($name -eq 'GptBotTrainer') {$ResumeTrainerSid} else {$ResumeEvaluatorSid}
+    if ($user -and $user.SID.Value -ne $expectedSid) { throw "Account $name already exists; refusing to reuse an unverified principal." }
 }
+Set-PrivateDirectory $root @{$identity.User.Value='FullControl'}
+Set-PrivateDirectory $admin @{}
 # SecureString credentials are generated in-process; never written as plaintext.
 foreach ($name in @('GptBotTrainer', 'GptBotEvaluator')) {
+    if (Get-LocalUser -Name $name -ErrorAction SilentlyContinue) { continue }
     $bytes = New-Object byte[] 48
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $password = ConvertTo-SecureString ([Convert]::ToBase64String($bytes)+'aA1!') -AsPlainText -Force
@@ -55,7 +57,9 @@ Set-PrivateDirectory $admin @{$trainerSid='ReadAndExecute'; $evaluatorSid='ReadA
 $credentials = Join-Path $admin 'credentials'
 Set-PrivateDirectory $credentials @{}
 foreach ($name in @('GptBotTrainer','GptBotEvaluator')) {
-    Move-Item -LiteralPath (Join-Path $admin "$name.dpapi") -Destination $credentials
+    if (Test-Path -LiteralPath (Join-Path $admin "$name.dpapi")) {
+        Move-Item -LiteralPath (Join-Path $admin "$name.dpapi") -Destination $credentials
+    }
     $acl = Get-Acl -LiteralPath (Join-Path $credentials "$name.dpapi")
     $acl.SetAccessRuleProtection($false, $false)
     foreach ($rule in @($acl.Access)) { if (-not $rule.IsInherited) { $acl.RemoveAccessRuleSpecific($rule) } }
@@ -74,17 +78,12 @@ $acl = Get-Acl -LiteralPath $files
 $deny = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($trainerSid)), 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Deny')
 $acl.AddAccessRule($deny)
 Set-Acl -LiteralPath $files -AclObject $acl
-foreach ($path in (Get-ChildItem -LiteralPath (Join-Path $ProjectRoot '.runtime') -Directory)) {
-    if ($path.FullName -eq $root) { continue }
-    $acl = Get-Acl -LiteralPath $path.FullName
+foreach ($relative in @('.runtime\independent_evaluation')) {
+    $path = Join-Path $ProjectRoot $relative
+    if (-not (Test-Path -LiteralPath $path)) { continue }
+    $acl = Get-Acl -LiteralPath $path
     $acl.AddAccessRule($deny)
-    Set-Acl -LiteralPath $path.FullName -AclObject $acl
-}
-foreach ($path in (Get-ChildItem -LiteralPath (Join-Path $ProjectRoot '.runtime') -File)) {
-    $acl = Get-Acl -LiteralPath $path.FullName
-    $fileDeny = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($trainerSid)), 'ReadAndExecute', 'Deny')
-    $acl.AddAccessRule($fileDeny)
-    Set-Acl -LiteralPath $path.FullName -AclObject $acl
+    Set-Acl -LiteralPath $path -AclObject $acl
 }
 $deployment = @{
     project_root=$ProjectRoot
@@ -111,4 +110,8 @@ foreach ($role in @('evaluator','trainer')) {
     Start-ScheduledTask -TaskName "GptBot-$role"
 }
 @{installed_at=[DateTime]::UtcNow.ToString('o'); trainer_sid=$trainerSid; evaluator_sid=$evaluatorSid; state='INSTALLED_NOT_APPROVED'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $admin 'installation.json') -Encoding UTF8
+@{installed_at=[DateTime]::UtcNow.ToString('o'); state='INSTALLED_NOT_APPROVED'; tasks=@('GptBot-evaluator','GptBot-trainer')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'installation_public.json') -Encoding UTF8
+if (Test-Path -LiteralPath (Join-Path $root 'installation_failure.txt')) {
+    Remove-Item -LiteralPath (Join-Path $root 'installation_failure.txt')
+}
 Write-Output 'Service accounts and schedules installed. No model promotion or BUY enablement was performed.'
