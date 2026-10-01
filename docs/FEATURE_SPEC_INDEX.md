@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| Independent ten-slot replay foundation | after-cost fixed-T5 diagnostic; no release approval | `docs/specs/independent-ten-slot-replay.md` | cash reconciliation, capacity, paired simulated net return | champion admission/SELL parity, continuous drawdown and benchmark still required |
 | Causal entry reconstruction | retrospective diagnostic; conflicting duplicates quarantined | `docs/specs/causal-entry-reconstruction.md` | unique IDs, price coverage, next-minute-open paired return proxy | exact fills, portfolio replay and sealed forward evidence still required |
 | Historical evaluation and release controller | retrospective audit; fail-closed readiness only | `docs/specs/historical-evaluation-release-controller.md` | maximum available post-exposure proxy deltas, immutable evidence, release blockers | sealed portfolio replay and canary adapter required; no production adoption yet |
 | Independent forward evaluator | prospective foundation; no production promotion | `docs/specs/independent-forward-evaluator.md` | frozen future paired Top-1 proxy delta, daily CI, provenance coverage | accumulate sealed future evidence; historical portfolio replay and promotion remain separate |
