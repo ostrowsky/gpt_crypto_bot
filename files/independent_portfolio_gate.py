@@ -23,8 +23,10 @@ def source_hash():
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 
-def harness_passes():
-    result = subprocess.run([sys.executable, str(Path(__file__).with_name('truth_harness.py')), 'full'],
+def harness_passes(project_root=None):
+    harness = (Path(project_root)/'files'/'truth_harness.py' if project_root is not None
+               else Path(__file__).with_name('truth_harness.py'))
+    result = subprocess.run([sys.executable, str(harness), 'full'],
                             capture_output=True, timeout=120)
     return result.returncode == 0
 
@@ -126,7 +128,7 @@ def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha
 
 
 def authorize(evidence, authority_key, evaluator_key, candidate_raw, champion_raw,
-              stage='CANARY', now=None):
+              stage='CANARY', now=None, harness_root=None):
     now = time.time() if now is None else now
     if stage not in ('CANARY', 'PROMOTED'):
         raise ValueError('unsupported stage')
@@ -147,7 +149,7 @@ def authorize(evidence, authority_key, evaluator_key, candidate_raw, champion_ra
             raise ValueError('overlapping sealed/shadow/canary cohorts')
     if now-chronological[-1]['end_ms']/1000 > 86400:
         raise ValueError('latest forward evidence is stale')
-    if not harness_passes():
+    if not (harness_passes() if harness_root is None else harness_passes(harness_root)):
         raise ValueError('full Truth Harness FAIL/UNKNOWN blocks activation')
     body = {'contract': CONTRACT, 'stage': stage, 'issued_at': now, 'expires_at': now+86400,
             'candidate_sha256': sha(candidate_raw), 'champion_sha256': sha(champion_raw),
