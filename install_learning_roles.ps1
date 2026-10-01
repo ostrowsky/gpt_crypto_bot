@@ -105,30 +105,45 @@ $deploymentPath = Join-Path $admin 'deployment.json'
 $deployment | ConvertTo-Json | Set-Content -LiteralPath $deploymentPath -Encoding UTF8
 # Python accepts utf-8-sig for Windows PowerShell's JSON BOM.
 $python = Join-Path $ProjectRoot 'pyembed\python.exe'
+$scheduler = New-Object -ComObject Schedule.Service
+$scheduler.Connect()
+$folder = $scheduler.GetFolder('\')
 foreach ($role in @('evaluator','trainer')) {
     $account = if ($role -eq 'trainer') {'GptBotTrainer'} else {'GptBotEvaluator'}
     $minutes = if ($role -eq 'trainer') {60} else {1}
-    $action = New-ScheduledTaskAction -Execute $python -Argument "`"$(Join-Path $source 'forward_evidence_service.py')`" --deployment `"$deploymentPath`" --role $role" -WorkingDirectory $(if ($role -eq 'trainer') {$trainerOut} else {$evidence})
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes $minutes)
-    $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$account" -LogonType S4U -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes $(if ($role -eq 'trainer') {50} else {5})) -StartWhenAvailable
-    $definition = New-ScheduledTask -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings
+    $definition = $scheduler.NewTask(0)
+    $definition.Principal.UserId = "$env:COMPUTERNAME\$account"
+    $definition.Principal.LogonType = 2 # TASK_LOGON_S4U
+    $definition.Principal.RunLevel = 0 # least privilege
+    $definition.Settings.MultipleInstances = 2 # IgnoreNew
+    $definition.Settings.ExecutionTimeLimit = if ($role -eq 'trainer') {'PT50M'} else {'PT5M'}
+    $definition.Settings.StartWhenAvailable = $true
+    $trigger = $definition.Triggers.Create(1)
+    $trigger.StartBoundary = (Get-Date).AddMinutes(1).ToString('yyyy-MM-ddTHH:mm:ss')
+    $trigger.Repetition.Interval = "PT${minutes}M"
+    $action = $definition.Actions.Create(0)
+    $action.Path = $python
+    $action.Arguments = "`"$(Join-Path $source 'forward_evidence_service.py')`" --deployment `"$deploymentPath`" --role $role"
+    $action.WorkingDirectory = if ($role -eq 'trainer') {$trainerOut} else {$evidence}
     $protected = Get-Content -LiteralPath (Join-Path $credentials "$account.dpapi") | ConvertTo-SecureString
     $credential = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$account", $protected)
     try {
         # Windows requires a password at cross-user S4U registration, but S4U does
         # not retain a password for execution. Never place it in process arguments.
-        Register-ScheduledTask -TaskName "GptBot-$role" -InputObject $definition -User $credential.UserName -Password $credential.GetNetworkCredential().Password | Out-Null
+        $roleSid = if ($role -eq 'trainer') {$trainerSid} else {$evaluatorSid}
+        $security = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGX;;;$roleSid)"
+        # Use the native API: the PowerShell credential overload changes S4U to Password.
+        $registered = $folder.RegisterTaskDefinition("GptBot-$role", $definition, 2,
+            $credential.UserName, $credential.GetNetworkCredential().Password, 2, $security)
     } finally {
         $credential = $null
         $protected = $null
     }
-    $registered = Get-ScheduledTask -TaskName "GptBot-$role"
-    if ([string]$registered.Principal.LogonType -ne 'S4U') {
-        Unregister-ScheduledTask -TaskName "GptBot-$role" -Confirm:$false
+    if ($registered.Definition.Principal.LogonType -ne 2) {
+        $folder.DeleteTask("GptBot-$role", 0)
         throw 'Refusing a task that did not retain S4U isolation.'
     }
-    Start-ScheduledTask -TaskName "GptBot-$role"
+    $registered.Run($null) | Out-Null
 }
 @{installed_at=[DateTime]::UtcNow.ToString('o'); trainer_sid=$trainerSid; evaluator_sid=$evaluatorSid; state='INSTALLED_NOT_APPROVED'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $admin 'installation.json') -Encoding UTF8
 @{installed_at=[DateTime]::UtcNow.ToString('o'); state='INSTALLED_NOT_APPROVED'; tasks=@('GptBot-evaluator','GptBot-trainer')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'installation_public.json') -Encoding UTF8

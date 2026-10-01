@@ -109,11 +109,12 @@ class ForwardServiceTests(unittest.TestCase):
         script = Path(__file__).parents[1]/'install_learning_roles.ps1'
         text = script.read_text()
         for phrase in ('Administrator PowerShell is required', 'GptBotTrainer', 'GptBotEvaluator',
-                       "-LogonType S4U", '-MultipleInstances IgnoreNew', "'Deny'", 'ConvertFrom-SecureString',
+                       'LogonType = 2', 'MultipleInstances = 2', "'Deny'", 'ConvertFrom-SecureString',
                        '$ResumeTrainerSid', '$user.SID.Value -ne $expectedSid', 'installation_public.json'):
             self.assertIn(phrase, text)
         self.assertNotIn("Get-ChildItem -LiteralPath (Join-Path $ProjectRoot '.runtime')", text)
-        self.assertIn("$registered.Principal.LogonType -ne 'S4U'", text)
+        self.assertIn('$registered.Definition.Principal.LogonType -ne 2', text)
+        self.assertIn('$folder.RegisterTaskDefinition', text)
         self.assertIn('$credential.GetNetworkCredential().Password', text)
 
     def test_copied_gate_checks_live_project_harness(self):

@@ -52,6 +52,9 @@ Cross-user S4U registration supplies the account's DPAPI-decrypted password only
 in-process to the registration API (Microsoft Security Contexts for Tasks); never
 as shell/process arguments or logs. Read back LogonType=S4U before starting a task.
 The service accounts belong only to standard Users, not Administrators.
+Use native RegisterTaskDefinition with explicit TASK_LOGON_S4U=2, because the
+PowerShell User/Password overload replaces the principal logon type. Task DACLs
+grant role accounts read/execute only; only SYSTEM/Administrators can modify them.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously
