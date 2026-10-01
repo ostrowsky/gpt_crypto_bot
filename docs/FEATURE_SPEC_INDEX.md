@@ -154,6 +154,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Negative-day rebound score audit: `docs/specs/negative-day-rebound-replay.md` — maximum closed-archive diagnostic ablation; no production relaxation.
+
 Immutable training snapshots: `docs/specs/scheduled-forward-evidence.md` — content-addressed pre-holdout datasets; pinned trainer reads and digest validation, no replacement of active reader files.
 
 Independent portfolio confirmation intake: `docs/specs/independent-portfolio-confirmation.md` — phase-by-phase signed evidence recomputation; missing/failed inputs block rollout, no proxy promotion.
