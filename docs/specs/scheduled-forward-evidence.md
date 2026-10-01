@@ -62,6 +62,10 @@ Triggers and demand starts are explicitly enabled; battery conditions must not
 silently suspend collection. Before any frozen candidate exists, training intake
 advances to evaluator's current time. After registration it is bounded by fixed
 holdout_start. Never deadlock bootstrap on an insufficient installation-day sample.
+Provision only SeBatchLogonRight for the two exact service SIDs using additive
+LSA account-rights API. Do not grant administrator/debug/service privileges,
+overwrite global policy, or clear deny-logon rights. Security event 4625 status
+0xc000015b means scheduled logon has not been permitted; registration is not health.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously

@@ -119,6 +119,10 @@ class ForwardServiceTests(unittest.TestCase):
         self.assertIn('$credential.GetNetworkCredential().Password', text)
         self.assertIn('$trigger.Enabled = $true', text)
         self.assertIn('$definition.Settings.DisallowStartIfOnBatteries = $false', text)
+        self.assertIn('[GptBotBatchRights]::Grant($trainerSid)', text)
+        self.assertIn('[GptBotBatchRights]::Grant($evaluatorSid)', text)
+        self.assertIn('LsaAddAccountRights', text)
+        self.assertNotIn('LsaRemoveAccountRights', text)
 
     def test_copied_gate_checks_live_project_harness(self):
         import independent_portfolio_gate as gate

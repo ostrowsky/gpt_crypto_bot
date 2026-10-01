@@ -51,6 +51,46 @@ foreach ($name in @('GptBotTrainer', 'GptBotEvaluator')) {
 }
 $trainerSid = (Get-LocalUser GptBotTrainer).SID.Value
 $evaluatorSid = (Get-LocalUser GptBotEvaluator).SID.Value
+# Grant only the batch-logon right needed by scheduled non-admin principals.
+# Do not rewrite global security policy or remove any deny-logon rights.
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class GptBotBatchRights {
+    [StructLayout(LayoutKind.Sequential)] struct Attributes {
+        public uint Length; public IntPtr Root, Name; public uint Flags;
+        public IntPtr Descriptor, Quality;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct Unicode {
+        public ushort Length, MaximumLength; public IntPtr Buffer;
+    }
+    [DllImport("advapi32.dll")] static extern uint LsaOpenPolicy(IntPtr name, ref Attributes attr, uint access, out IntPtr policy);
+    [DllImport("advapi32.dll")] static extern uint LsaAddAccountRights(IntPtr policy, IntPtr sid, Unicode[] rights, uint count);
+    [DllImport("advapi32.dll")] static extern uint LsaNtStatusToWinError(uint status);
+    [DllImport("advapi32.dll")] static extern uint LsaClose(IntPtr policy);
+    static void Check(uint status) { if (status != 0) throw new Win32Exception((int)LsaNtStatusToWinError(status)); }
+    public static void Grant(string accountSid) {
+        var sid = new SecurityIdentifier(accountSid);
+        var bytes = new byte[sid.BinaryLength]; sid.GetBinaryForm(bytes, 0);
+        string privilege = "SeBatchLogonRight";
+        IntPtr binary = Marshal.AllocHGlobal(bytes.Length), text = Marshal.StringToHGlobalUni(privilege), policy = IntPtr.Zero;
+        try {
+            Marshal.Copy(bytes, 0, binary, bytes.Length);
+            var attr = new Attributes {Length=(uint)Marshal.SizeOf(typeof(Attributes))};
+            Check(LsaOpenPolicy(IntPtr.Zero, ref attr, 0x810, out policy));
+            var right = new Unicode {Length=(ushort)(privilege.Length*2), MaximumLength=(ushort)((privilege.Length+1)*2), Buffer=text};
+            Check(LsaAddAccountRights(policy, binary, new[] {right}, 1));
+        } finally {
+            if (policy != IntPtr.Zero) LsaClose(policy);
+            Marshal.FreeHGlobal(binary); Marshal.FreeHGlobal(text);
+        }
+    }
+}
+'@
+[GptBotBatchRights]::Grant($trainerSid)
+[GptBotBatchRights]::Grant($evaluatorSid)
 $usersGroup = Get-LocalGroup -SID S-1-5-32-545
 foreach ($name in @('GptBotTrainer','GptBotEvaluator')) {
     if (-not (Get-LocalGroupMember -Group $usersGroup | Where-Object {$_.SID.Value -eq (Get-LocalUser $name).SID.Value})) {
