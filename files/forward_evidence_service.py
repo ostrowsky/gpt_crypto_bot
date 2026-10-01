@@ -162,11 +162,14 @@ def export_training(dataset, output, cutoff):
     return count
 
 
-def controller_tick(request_path, release_root, now=None, harness_root=None):
+def controller_tick(request_path, release_root, now=None, harness_root=None, confirmation=None):
     """No proxy approval; portfolio evidence failure clears a prior overlay."""
     from independent_portfolio_gate import authorize
     prior = sha((release_root/'active.json').read_bytes()) if (release_root/'active.json').exists() else None
     try:
+        if confirmation is not None and confirmation.get('state') != 'READY':
+            raise ValueError('independent portfolio confirmation BLOCKED: '+
+                             '; '.join(confirmation.get('blockers', ['unknown evidence'])))
         request = json.loads(request_path.read_bytes())
         evidence = {phase:(Path(v['bundle']).read_bytes(), json.loads(Path(v['certification']).read_bytes()))
                     for phase,v in request['evidence'].items()}
@@ -242,8 +245,20 @@ def run_tick(deployment, role):
         result['evaluation'] = report['learning_quality']
     except Exception as exc:
         result['collection_blocker'] = str(exc)
+    from independent_portfolio_confirmation import confirm
+    confirmation = confirm(Path(deployment.get('portfolio_inputs', registry/'portfolio_inputs.json')),
+                           Path(deployment['portfolio_request']),
+                           os.environ.get('RANKER_COVERAGE_AUTHORITY_KEY', '').encode(),
+                           os.environ.get('RANKER_EVALUATOR_KEY', '').encode(),
+                           harness_root=deployment.get('project_root'))
+    try:
+        atomic(registry/'portfolio_confirmation_latest.json', confirmation)
+    except Exception as exc:
+        confirmation = {'state': 'BLOCKED', 'blockers': ['confirmation publication failed: '+str(exc)],
+                        'runtime_eligible': False}
+    result['portfolio_confirmation'] = confirmation
     result['controller'] = controller_tick(Path(deployment['portfolio_request']), Path(deployment['release_root']),
-                                           harness_root=deployment.get('project_root'))
+                                           harness_root=deployment.get('project_root'), confirmation=confirmation)
     atomic(Path(deployment['status']), result)
     return result
 

@@ -154,6 +154,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Independent portfolio confirmation intake: `docs/specs/independent-portfolio-confirmation.md` — phase-by-phase signed evidence recomputation; missing/failed inputs block rollout, no proxy promotion.
+
 Rocket capture and rule ablation: `docs/specs/rocket-capture-ablation.md` — research-only, maximum-period matched-trade measurement and isolated rule-only replay; no automatic production promotion.
 
 1. Follow `docs/specs/spec-first-workflow.md` for every non-trivial change.

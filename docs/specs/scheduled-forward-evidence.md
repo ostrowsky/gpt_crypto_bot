@@ -78,6 +78,12 @@ conflict is BLOCKED and runtime expiry remains an independent safety fallback.
 State/status contains reason, run time and next scheduled task identity. No automatic
 promotion from proxy collector output. Automatic portfolio bundle generation from
 real champion/challenger admission/fill logs is NOT certified by this stage.
+The evaluator now reads protected portfolio_inputs.json, recomputes independent
+phase evidence and publishes portfolio_confirmation_latest.json on every tick.
+Current confirmation must be READY before the controller may use a request;
+missing evidence cannot fall back to a previously successful request. See
+independent-portfolio-confirmation.md. Protected deployment remains separately
+versioned; checkout changes alone do not update Windows role processes.
 
 Verify synthetic arrival->maturity->evaluation, future/stale/conflicting labels,
 restart/idempotence, journal tampering, trainer SID mismatch, evaluation failure
