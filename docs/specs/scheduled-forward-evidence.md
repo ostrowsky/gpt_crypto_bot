@@ -71,6 +71,23 @@ If a Windows trainer read handle prevents atomic training-file replacement (erro
 tick. Report export row count as unknown, not the unpublished count. Other IO
 failures still block; never truncate an input used by the trainer.
 
+The scheduled roles now publish immutable content-addressed snapshots instead of
+replacing the reader's training.jsonl. Evaluator writes a complete fsynced file,
+stores it as training_snapshots/SHA256.jsonl, and atomically publishes only a small
+training.snapshot.json descriptor. Trainer pins and verifies digest/byte size/path
+before fitting and digest again before publishing a candidate; corrupt/missing
+pointers block training, with no legacy-file fallback. Rows remain pre-holdout and
+existing ML quality gates remain mandatory. Old files are retained while readers
+may use them; no automatic pruning or permission expansion. Publication failures
+remain BLOCKED and do not advance the pointer. Snapshot row counts are not proof
+of useful learning. Source/spec/tests are committed; input snapshots stay runtime.
+Regression verification includes locked legacy file, repeated publication,
+concurrent old reader, pointer failure, tamper, path escape and frozen cutoff.
+Identical eligible row IDs are deduplicated; conflicting eligible IDs block
+publication. Trainer status carries the exact snapshot digest, existing dataset
+quality verdict and chronological train/validation/test counts, not an improvement
+claim. No learning quality gate is weakened to make the task report success.
+
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously
 active overlay is cleared by atomic compare-and-swap on failed evaluation; rollback

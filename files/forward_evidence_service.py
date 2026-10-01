@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 
 # The bundled interpreter's isolated ._pth points to the original checkout.
 # Resolve role modules from the administrator-frozen source, not that checkout.
@@ -131,11 +132,21 @@ def collect(registry, dataset, now=None):
         lock.unlink()
 
 
-def export_training(dataset, output, cutoff):
+def export_training(dataset, output, cutoff, immutable=False):
     """Evaluator writes only pre-holdout data into trainer-readable intake."""
-    tmp = output.with_suffix('.tmp')
+    tmp = (output.with_name(output.name+'.'+uuid.uuid4().hex+'.tmp') if immutable
+           else output.with_suffix('.tmp'))
+    try:
+        return _export_training(dataset, output, cutoff, immutable, tmp)
+    finally:
+        if immutable:
+            tmp.unlink(missing_ok=True)
+
+
+def _export_training(dataset, output, cutoff, immutable, tmp):
     output.parent.mkdir(parents=True, exist_ok=True)
     count = 0
+    identities = {}
     with dataset.open(encoding='utf-8') as source, tmp.open('wb') as target:
         for line in source:
             row = json.loads(line)
@@ -148,8 +159,27 @@ def export_training(dataset, output, cutoff):
             if any(provenance.parse_utc(p.get('recorded_at')) is None or
                    provenance.parse_utc(p['recorded_at']) >= cutoff for p in labels):
                 continue
-            target.write(canonical(row)+b'\n')
+            encoded = canonical(row)
+            if immutable:
+                identity = row.get('id')
+                if not isinstance(identity, str) or not identity:
+                    raise ValueError('eligible training row lacks identity')
+                checksum = sha(encoded)
+                if identity in identities:
+                    if identities[identity] != checksum:
+                        raise ValueError('conflicting eligible training identity')
+                    continue
+                identities[identity] = checksum
+            target.write(encoded+b'\n')
             count += 1
+        target.flush()
+        os.fsync(target.fileno())
+    if immutable:
+        from training_snapshot import publish
+        try:
+            return publish(tmp, output, count, cutoff)
+        finally:
+            tmp.unlink(missing_ok=True)
     try:
         tmp.replace(output)
     except OSError as exc:
@@ -221,9 +251,16 @@ def run_tick(deployment, role):
         from ml_candidate_ranker import train_and_evaluate, build_live_model_payload
         try:
             verify_trainer_isolation(deployment)
-            report = train_and_evaluate(Path(deployment['training_input']))
+            from training_snapshot import resolve, digest
+            training_path, snapshot = resolve(Path(deployment['training_input']))
+            report = train_and_evaluate(training_path)
+            if digest(training_path) != snapshot['sha256']:
+                raise ValueError('training snapshot changed during fit')
             atomic(Path(deployment['candidate_output']), build_live_model_payload(report))
-            result = {'state': 'CANDIDATE_ONLY', 'runtime_eligible': False}
+            result = {'state': 'CANDIDATE_ONLY', 'runtime_eligible': False,
+                      'training_snapshot': snapshot,
+                      'dataset_quality': (report.get('model_payload') or {}).get('dataset_quality'),
+                      'split_rows': {k:report.get(k) for k in ('train_rows','val_rows','test_rows')}}
         except Exception as exc:
             result = {'state': 'BLOCKED', 'reason': str(exc), 'runtime_eligible': False}
         result['run_time'] = provenance.utc_iso(datetime.now(timezone.utc))
@@ -234,12 +271,12 @@ def run_tick(deployment, role):
     try:
         if not (registry/'manifest.json').exists():
             result['bootstrap_training_rows'] = export_training(Path(deployment['dataset']),
-                Path(deployment['training_input']), datetime.now(timezone.utc))
+                Path(deployment['training_input']), datetime.now(timezone.utc), immutable=True)
         evaluator.register(Path(deployment['candidate_input']), registry)
         result['collection'] = collect(registry, Path(deployment['dataset']))
         manifest = json.loads((registry/'manifest.json').read_bytes())
         result['training_rows'] = export_training(Path(deployment['dataset']), Path(deployment['training_input']),
-                                                 provenance.parse_utc(manifest['holdout_start']))
+                                                 provenance.parse_utc(manifest['holdout_start']), immutable=True)
         report = evaluator.evaluate(registry, registry/'forward_snapshot.jsonl')
         atomic(registry/'evaluation_latest.json', report)
         result['evaluation'] = report['learning_quality']

@@ -154,6 +154,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Immutable training snapshots: `docs/specs/scheduled-forward-evidence.md` — content-addressed pre-holdout datasets; pinned trainer reads and digest validation, no replacement of active reader files.
+
 Independent portfolio confirmation intake: `docs/specs/independent-portfolio-confirmation.md` — phase-by-phase signed evidence recomputation; missing/failed inputs block rollout, no proxy promotion.
 
 Rocket capture and rule ablation: `docs/specs/rocket-capture-ablation.md` — research-only, maximum-period matched-trade measurement and isolated rule-only replay; no automatic production promotion.
