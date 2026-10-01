@@ -46,3 +46,24 @@ Focused tests cover exact adjustment boundaries, unchanged other modes, copy
 isolation, chronological window coverage, missing/zero denominators. Run relevant
 tests, diff check, staged truth harness, commit and push source/spec/tests only.
 Rollback: stop offline command; production was never modified.
+
+## Registered execution result (2026-10-01)
+
+Completed 12 runs on 2026-04-01..2026-09-28 local dates: 181 days,
+93/105 complete symbols, 12 incomplete symbols excluded. Full-period baseline:
+10,538 reconstructed trades. All cash-account grids were complete, with zero
+contract violations. This is rule-only simulation, NOT live bot performance.
+
+| Arm | Additional full-period entry identities | Losing additional entries | Full-period net delta, pp | Validation delta, pp | Last historical-test delta, pp | Additional TRX entries |
+|---|---:|---:|---:|---:|---:|---:|
+| extra_penalty_off | 1 | 1/1 | -0.002498 | 0 | 0 | 0 |
+| negative_terms_off | 12 | 10/12 | -0.020739 | +0.064440 | -0.065676 | 0 |
+
+The last test covers 2026-08-23..2026-09-28 local dates. The positive middle
+partition is disclosed, not cherry-picked as improvement. Both full-period arms
+retain 16 TRX trades, same as baseline. Do not enable either ablation: no robust
+benefit demonstrated. Production eligibility remains UNKNOWN because population
+and independent-evidence limitations above remain; full harness remains FAIL
+TH-11. Evidence is retained under `.runtime/negative_day_rebound/20261001_v2/`
+with immutable report/source/input hashes and receipt; runtime files are not
+committed. Code and spec tests shipped in `baca729`; this section records results.
