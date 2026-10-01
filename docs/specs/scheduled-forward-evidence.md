@@ -66,6 +66,10 @@ Provision only SeBatchLogonRight for the two exact service SIDs using additive
 LSA account-rights API. Do not grant administrator/debug/service privileges,
 overwrite global policy, or clear deny-logon rights. Security event 4625 status
 0xc000015b means scheduled logon has not been permitted; registration is not health.
+If a Windows trainer read handle prevents atomic training-file replacement (error
+32), preserve the complete old eligible snapshot and defer publication to the next
+tick. Report export row count as unknown, not the unpublished count. Other IO
+failures still block; never truncate an input used by the trainer.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously

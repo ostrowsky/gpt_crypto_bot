@@ -87,6 +87,17 @@ class ForwardServiceTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(json.loads(output.read_text())['id'], row(0, -5)['id'])
 
+    def test_windows_read_lock_preserves_previous_training_snapshot(self):
+        self.write([row(0, -5)])
+        output = self.root/'training.jsonl'
+        output.write_bytes(b'previous-complete-snapshot\n')
+        locked = OSError('sharing violation')
+        locked.winerror = 32
+        with patch.object(Path, 'replace', side_effect=locked):
+            self.assertIsNone(service.export_training(self.dataset, output, self.feature))
+        self.assertEqual(output.read_bytes(), b'previous-complete-snapshot\n')
+        self.assertFalse(output.with_suffix('.tmp').exists())
+
     def test_wrong_sid_cannot_start_either_role(self):
         with patch.object(service, 'current_sid', return_value='wrong'):
             for role in ('trainer', 'evaluator'):

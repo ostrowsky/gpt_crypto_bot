@@ -150,7 +150,15 @@ def export_training(dataset, output, cutoff):
                 continue
             target.write(canonical(row)+b'\n')
             count += 1
-    tmp.replace(output)
+    try:
+        tmp.replace(output)
+    except OSError as exc:
+        if getattr(exc, 'winerror', None) != 32 or not output.exists():
+            raise
+        # Windows readers may deny rename. Preserve their complete old snapshot;
+        # defer publication, rather than truncating it or claiming the new count.
+        tmp.unlink()
+        return None
     return count
 
 
