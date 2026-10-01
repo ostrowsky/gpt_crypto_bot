@@ -48,6 +48,10 @@ Provisioning may resume only with the exact previously observed account SIDs;
 it refuses unrelated existing principals. ACL work is scoped to the raw source and
 sealed evidence paths, not all runtime logs/locks. Partial installation is reported
 as such; only completed task registration writes the public installation marker.
+Cross-user S4U registration supplies the account's DPAPI-decrypted password only
+in-process to the registration API (Microsoft Security Contexts for Tasks); never
+as shell/process arguments or logs. Read back LogonType=S4U before starting a task.
+The service accounts belong only to standard Users, not Administrators.
 
 Controller runs on every evaluator tick. Unsigned/missing portfolio request,
 certification, keys, stale cohort or failed Harness leaves BLOCKED. Previously

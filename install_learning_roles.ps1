@@ -51,6 +51,12 @@ foreach ($name in @('GptBotTrainer', 'GptBotEvaluator')) {
 }
 $trainerSid = (Get-LocalUser GptBotTrainer).SID.Value
 $evaluatorSid = (Get-LocalUser GptBotEvaluator).SID.Value
+$usersGroup = Get-LocalGroup -SID S-1-5-32-545
+foreach ($name in @('GptBotTrainer','GptBotEvaluator')) {
+    if (-not (Get-LocalGroupMember -Group $usersGroup | Where-Object {$_.SID.Value -eq (Get-LocalUser $name).SID.Value})) {
+        Add-LocalGroupMember -Group $usersGroup -Member $name
+    }
+}
 Set-PrivateDirectory $root @{$identity.User.Value='FullControl'; $trainerSid='ReadAndExecute'; $evaluatorSid='ReadAndExecute'}
 Set-PrivateDirectory $admin @{$trainerSid='ReadAndExecute'; $evaluatorSid='ReadAndExecute'}
 # Credentials stay in a separate administrator-only child (deployment has no secrets).
@@ -106,7 +112,22 @@ foreach ($role in @('evaluator','trainer')) {
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes $minutes)
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$account" -LogonType S4U -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes $(if ($role -eq 'trainer') {50} else {5})) -StartWhenAvailable
-    Register-ScheduledTask -TaskName "GptBot-$role" -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings | Out-Null
+    $definition = New-ScheduledTask -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings
+    $protected = Get-Content -LiteralPath (Join-Path $credentials "$account.dpapi") | ConvertTo-SecureString
+    $credential = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$account", $protected)
+    try {
+        # Windows requires a password at cross-user S4U registration, but S4U does
+        # not retain a password for execution. Never place it in process arguments.
+        Register-ScheduledTask -TaskName "GptBot-$role" -InputObject $definition -User $credential.UserName -Password $credential.GetNetworkCredential().Password | Out-Null
+    } finally {
+        $credential = $null
+        $protected = $null
+    }
+    $registered = Get-ScheduledTask -TaskName "GptBot-$role"
+    if ([string]$registered.Principal.LogonType -ne 'S4U') {
+        Unregister-ScheduledTask -TaskName "GptBot-$role" -Confirm:$false
+        throw 'Refusing a task that did not retain S4U isolation.'
+    }
     Start-ScheduledTask -TaskName "GptBot-$role"
 }
 @{installed_at=[DateTime]::UtcNow.ToString('o'); trainer_sid=$trainerSid; evaluator_sid=$evaluatorSid; state='INSTALLED_NOT_APPROVED'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $admin 'installation.json') -Encoding UTF8

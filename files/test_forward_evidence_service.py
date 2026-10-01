@@ -113,6 +113,8 @@ class ForwardServiceTests(unittest.TestCase):
                        '$ResumeTrainerSid', '$user.SID.Value -ne $expectedSid', 'installation_public.json'):
             self.assertIn(phrase, text)
         self.assertNotIn("Get-ChildItem -LiteralPath (Join-Path $ProjectRoot '.runtime')", text)
+        self.assertIn("$registered.Principal.LogonType -ne 'S4U'", text)
+        self.assertIn('$credential.GetNetworkCredential().Password', text)
 
     def test_copied_gate_checks_live_project_harness(self):
         import independent_portfolio_gate as gate
