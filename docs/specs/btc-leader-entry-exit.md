@@ -9,6 +9,8 @@ Binance candles and the recovered maximum archive. Conflicting duplicates fail;
 gaps invalidate windows, never imply zero returns. Hash every input, source and
 the output contract. Hourly data cannot resolve sub-hour ordering. Present both
 same-hour and delayed return correlations; correlation is not causality.
+Exclude manifest sidecars. Recovered dictionary OHLC uses inferred close times
+from hourly cadence, explicitly not independent raw-close certification.
 
 Pre-register BTC 1h triggers +0.25%, +0.5%, +1%; forward horizons 1/3/6/12/24h.
 Report positive, negative and >=2x BTC event counts with denominators, BTC-positive

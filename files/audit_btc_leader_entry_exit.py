@@ -21,9 +21,15 @@ def merge_rows(groups):
     result = {}
     for rows in groups:
         for r in rows:
-            t = int(r[0])
-            values = tuple(float(r[k]) for k in (1, 2, 3, 4))
-            if t % BAR or int(r[6]) != t + BAR - 1:
+            if isinstance(r, dict):
+                t = int(r['t'])
+                values = tuple(float(r[k]) for k in ('o','h','l','c'))
+                close_time = t + BAR - 1  # recovered serialized archive, not raw certification
+            else:
+                t = int(r[0])
+                values = tuple(float(r[k]) for k in (1, 2, 3, 4))
+                close_time = int(r[6])
+            if t % BAR or close_time != t + BAR - 1:
                 raise ValueError('not closed hourly candle')
             if any(not math.isfinite(v) or v <= 0 for v in values):
                 raise ValueError('invalid OHLC')
@@ -170,6 +176,7 @@ def analyze(data):
             'rows_per_symbol': {s:len(r) for s,r in data.items()}, 'results': results,
             'limitations': ['hourly ordering cannot prove sub-hour BTC lead',
                 'historical cache, not point-in-time live candidate population',
+                'recovered archive close times inferred from hourly cadence, not raw certification',
                 'overlapping unconditional baseline is descriptive only',
                 'no statistical promotion gate or live-bot portfolio alpha',
                 'three thresholds/horizons/exits: multiple-testing exploration',
@@ -181,6 +188,7 @@ def run(root, output):
     for symbol in ('BTCUSDT', *TARGETS):
         paths = sorted(set((root/'.runtime/price_cluster_cache').glob(symbol+'_1h_*.json')) |
                        set((root/'.runtime/closed_grid_policy_replay/20261001_max_archive_v1/market').glob(symbol+'_1h_*.json')))
+        paths = [p for p in paths if not p.name.endswith('.manifest.json')]
         if not paths:
             raise ValueError('missing hourly history: '+symbol)
         groups = []

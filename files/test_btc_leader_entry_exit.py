@@ -23,6 +23,11 @@ class LeaderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             a.merge_rows([[[0,100,101,99,100,0,0]]])
 
+    def test_recovered_archive_format(self):
+        raw=[0,100,101,99,100,0,a.BAR-1]
+        recovered={'t':0,'o':100,'h':101,'l':99,'c':100,'v':0}
+        self.assertEqual(len(a.merge_rows([[raw],[recovered]])),1)
+
     def test_next_open(self):
         d=history(); t=10*a.BAR
         r=a.trade(d,'SOLUSDT',t,'fixed24')
