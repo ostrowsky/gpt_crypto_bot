@@ -242,12 +242,32 @@ def verify_trainer_isolation(deployment):
 
 
 def run_tick(deployment, role):
-    if role not in ('trainer', 'evaluator', 'exporter'):
+    if role not in ('trainer', 'evaluator', 'exporter', 'controller'):
         raise ValueError('unsupported scheduled role')
-    sid_role = 'evaluator' if role == 'exporter' else role
+    local = deployment.get('isolation_mode') == 'logical_same_user'
+    if role == 'controller' and not local:
+        raise ValueError('separate controller requires local deployment')
+    sid_role = 'evaluator' if role in ('exporter', 'controller') else role
     if current_sid() != deployment[sid_role+'_sid']:
         raise PermissionError('service SID mismatch: '+role)
+    if local and (deployment.get('logical_isolation_accepted') is not True or
+                  deployment.get('trainer_sid') != deployment.get('evaluator_sid')):
+        raise PermissionError('local logical isolation was not explicitly accepted')
     registry = Path(deployment['registry'])
+    if role == 'controller':
+        from independent_portfolio_confirmation import confirm
+        confirmation = confirm(Path(deployment['portfolio_inputs']), Path(deployment['portfolio_request']),
+                               authority_material(), os.environ.get('RANKER_EVALUATOR_KEY', '').encode(),
+                               harness_root=deployment.get('project_root'))
+        result = {'portfolio_confirmation': confirmation,
+                  'controller': controller_tick(Path(deployment['portfolio_request']),
+                      Path(deployment['release_root']), harness_root=deployment.get('project_root'),
+                      confirmation=confirmation),
+                  'run_time': provenance.utc_iso(datetime.now(timezone.utc)),
+                  'isolation_mode': 'logical_same_user', 'os_access_isolation': False,
+                  'closed_loop': False}
+        atomic(Path(deployment['controller_status']), result)
+        return result
     if role == 'exporter':
         started = time.monotonic()
         result = {'state': 'BLOCKED', 'runtime_eligible': False,
@@ -274,7 +294,8 @@ def run_tick(deployment, role):
     if role == 'trainer':
         from ml_candidate_ranker import train_and_evaluate, build_live_model_payload
         try:
-            verify_trainer_isolation(deployment)
+            if not local:
+                verify_trainer_isolation(deployment)
             from training_snapshot import resolve, digest
             training_path, snapshot = resolve(Path(deployment['training_input']))
             report = train_and_evaluate(training_path)
@@ -288,6 +309,8 @@ def run_tick(deployment, role):
         except Exception as exc:
             result = {'state': 'BLOCKED', 'reason': str(exc), 'runtime_eligible': False}
         result['run_time'] = provenance.utc_iso(datetime.now(timezone.utc))
+        if local:
+            result.update(isolation_mode='logical_same_user', os_access_isolation=False)
         atomic(Path(deployment['trainer_status']), result)
         return result
     result = {'state': 'BLOCKED', 'runtime_eligible': False,
@@ -303,6 +326,13 @@ def run_tick(deployment, role):
         result['state'] = 'COLLECTED_PROXY_ONLY'
     except Exception as exc:
         result['collection_blocker'] = str(exc)
+    if local:
+        result.update(isolation_mode='logical_same_user', os_access_isolation=False,
+                      closed_loop=False, activation_authorized=False, production_effect='none',
+                      controller_schedule='separate_process')
+        result['duration_seconds'] = time.monotonic()-started
+        atomic(Path(deployment['status']), result)
+        return result
     from independent_portfolio_confirmation import confirm
     confirmation = confirm(Path(deployment.get('portfolio_inputs', registry/'portfolio_inputs.json')),
                            Path(deployment['portfolio_request']),

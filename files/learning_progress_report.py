@@ -105,7 +105,7 @@ def build_report(
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
         "training_results": training_results,
         "automatic_learning_loop": learning_loop_health.summarize(
-            reports_dir.parent/'learning_roles'/'evaluator'),
+            learning_loop_health.runtime_root(reports_dir.parent)),
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "exit_failure_learning": exit_failure_learning,
         "shadow_tail_selector": shadow_tail_selector,
@@ -261,6 +261,11 @@ def render_text(report: dict[str, Any]) -> str:
     lines.extend(["", "🧠 Контур обучения:"])
     loop = report.get('automatic_learning_loop') or {}
     if loop:
+        lines.append(f"  • разделение ролей: {loop.get('isolation_mode', 'UNKNOWN')}; "
+                     f"изоляция прав ОС={loop.get('os_access_isolation')}")
+        if loop.get('isolation_mode') == 'logical_same_user':
+            lines.append(f"  • локальный обучатель: {loop.get('trainer_state', 'UNKNOWN')}; "
+                         f"последний результат={loop.get('trainer_last_run')}")
         lines.append(
             f"  • автоматическое улучшение: {loop.get('state', 'UNKNOWN')}; "
             f"развитие/деградация: {loop.get('improvement_verdict', 'UNKNOWN')}; "
