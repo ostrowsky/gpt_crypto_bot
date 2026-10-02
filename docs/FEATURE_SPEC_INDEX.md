@@ -154,6 +154,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Scheduled export latency isolation and loop health: `docs/specs/scheduled-forward-evidence.md` — separate hourly evaluator-owned export; minute collector never scans training for export; morning report distinguishes proxies, authorization and unverified live consumption. Full loop NOT_CLOSED pending independent portfolios and live receipts.
+
 Frozen full-policy paired replay: `docs/specs/paired-full-policy-replay.md` — independent full BUY/SELL accounts and bounded overlay parity; unsigned history never promotes, inactive live ranker blocks preflight.
 
 Negative-day rebound score audit: `docs/specs/negative-day-rebound-replay.md` — maximum closed-archive diagnostic ablation; no production relaxation.

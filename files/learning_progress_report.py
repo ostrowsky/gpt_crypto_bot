@@ -15,6 +15,7 @@ import report_blocked_winner_causal_reward
 import report_portfolio_replacement_shadow_reward
 import replay_observable_tail_selector
 import research_artifact_provenance as artifact_provenance
+import learning_loop_health
 
 
 ROOT = Path(__file__).resolve().parent
@@ -103,6 +104,8 @@ def build_report(
         "rolling": _rolling_summary(days),
         "learning_components": _learning_components(status, feedback, latest.day, reports_dir),
         "training_results": training_results,
+        "automatic_learning_loop": learning_loop_health.summarize(
+            reports_dir.parent/'learning_roles'/'evaluator'),
         "shadow_reentry": _shadow_reentry_summary(shadow_reentry),
         "exit_failure_learning": exit_failure_learning,
         "shadow_tail_selector": shadow_tail_selector,
@@ -256,6 +259,17 @@ def render_text(report: dict[str, Any]) -> str:
     for alert in alerts[:4]:
         lines.append(f"  • {alert['severity']}: {alert['text']}")
     lines.extend(["", "🧠 Контур обучения:"])
+    loop = report.get('automatic_learning_loop') or {}
+    if loop:
+        lines.append(
+            f"  • автоматическое улучшение: {loop.get('state', 'UNKNOWN')}; "
+            f"развитие/деградация: {loop.get('improvement_verdict', 'UNKNOWN')}; "
+            f"применение в live={loop.get('production_effect', 'UNKNOWN')}; "
+            f"сбор={loop.get('collection_state', 'UNKNOWN')}, "
+            f"observations={loop.get('observations')}, outcomes={loop.get('outcomes')}"
+        )
+        for blocker in (loop.get('blockers') or [])[:4]:
+            lines.append('    ↳ '+str(blocker))
     for name, comp in components.items():
         lines.append(f"  • {comp['label']}: {comp['status']} — {comp['detail']}")
     lines.append(

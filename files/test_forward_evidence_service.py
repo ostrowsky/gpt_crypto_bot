@@ -107,9 +107,9 @@ class ForwardServiceTests(unittest.TestCase):
 
     def test_wrong_sid_cannot_start_either_role(self):
         with patch.object(service, 'current_sid', return_value='wrong'):
-            for role in ('trainer', 'evaluator'):
+            for role in ('trainer', 'evaluator', 'exporter'):
                 with self.assertRaises(PermissionError):
-                    service.run_tick({role+'_sid':'expected'}, role)
+                    service.run_tick({'trainer_sid':'expected','evaluator_sid':'expected'}, role)
 
     def test_same_user_readable_holdout_blocks_training(self):
         with self.assertRaisesRegex(PermissionError, 'protected registry'):
@@ -153,18 +153,78 @@ class ForwardServiceTests(unittest.TestCase):
         import sys
         self.assertEqual(sys.path[0], str(Path(service.__file__).resolve().parent))
 
-    def test_bootstrap_feed_does_not_deadlock_at_installation_cutoff(self):
-        deployment = {'evaluator_sid':'expected', 'registry':str(self.root/'new'),
-                      'dataset':str(self.dataset), 'training_input':str(self.root/'train'),
-                      'candidate_input':str(self.root/'pending'), 'portfolio_request':str(self.root/'request'),
-                      'release_root':str(self.root/'release'), 'status':str(self.root/'status'),
-                      'bootstrap_cutoff':'2020-01-01T00:00:00Z'}
+    def deployment(self):
+        return {'evaluator_sid':'expected', 'registry':str(self.root/'new'),
+                'dataset':str(self.dataset), 'training_input':str(self.root/'train'),
+                'candidate_input':str(self.root/'pending'), 'portfolio_request':str(self.root/'request'),
+                'release_root':str(self.root/'release'), 'status':str(self.root/'status')}
+
+    def test_minute_bootstrap_never_performs_full_export(self):
+        deployment = self.deployment()
         with patch.object(service, 'current_sid', return_value='expected'), \
              patch.object(service, 'export_training', return_value=1) as export, \
              patch.object(evaluator, 'register', side_effect=FileNotFoundError('pending candidate')):
             result = service.run_tick(deployment, 'evaluator')
-        self.assertGreater(export.call_args.args[2], NOW)
+        export.assert_not_called()
         self.assertEqual(result['controller']['state'], 'BLOCKED')
+
+    def test_exporter_bootstraps_and_does_not_write_collector_status(self):
+        deployment = self.deployment()
+        with patch.object(service,'current_sid',return_value='expected'), \
+             patch.object(service,'export_training',return_value={'rows':1}) as export:
+            result = service.run_tick(deployment,'exporter')
+        self.assertGreater(export.call_args.args[2],NOW)
+        self.assertTrue(export.call_args.kwargs['immutable'])
+        self.assertEqual(result['state'],'EXPORTED_NOT_APPROVED')
+        self.assertFalse(Path(deployment['status']).exists())
+
+    def test_exporter_pins_cutoff_and_releases_registration_barrier_before_scan(self):
+        deployment = self.deployment()
+        deployment['registry'] = str(self.registry)
+        cutoff = json.loads((self.registry/'manifest.json').read_bytes())['holdout_start']
+        def scan(*args, **kwargs):
+            with service.process_lock(self.registry/'registration.lock'):
+                pass
+            with self.assertRaises(BlockingIOError):
+                with service.process_lock(self.registry/'training_export.lock'):
+                    pass
+            return {'rows':1}
+        with patch.object(service,'current_sid',return_value='expected'), \
+             patch.object(service,'export_training',side_effect=scan) as export:
+            result = service.run_tick(deployment,'exporter')
+        self.assertEqual(export.call_args.args[2],service.provenance.parse_utc(cutoff))
+        self.assertEqual(result['state'],'EXPORTED_NOT_APPROVED')
+
+    def test_invalid_cutoff_blocks_without_export(self):
+        deployment = self.deployment()
+        deployment['registry'] = str(self.registry)
+        service.atomic(self.registry/'manifest.json',{'holdout_start':'not-a-date'})
+        with patch.object(service,'current_sid',return_value='expected'), \
+             patch.object(service,'export_training') as export:
+            result = service.run_tick(deployment,'exporter')
+        export.assert_not_called()
+        self.assertEqual(result['state'],'BLOCKED')
+
+    def test_minute_success_is_proxy_only_even_when_controller_authorizes(self):
+        deployment = self.deployment()
+        deployment['registry'] = str(self.registry)
+        import independent_portfolio_confirmation as confirmation
+        with patch.object(service,'current_sid',return_value='expected'), \
+             patch.object(evaluator,'register'), patch.object(service,'collect',return_value={'observations':1}), \
+             patch.object(evaluator,'evaluate',return_value={'learning_quality':'UNKNOWN'}), \
+             patch.object(service,'export_training') as export, \
+             patch.object(confirmation,'confirm',return_value={'state':'READY'}), \
+             patch.object(service,'controller_tick',return_value={'state':'CANARY','runtime_eligible':True}):
+            result = service.run_tick(deployment,'evaluator')
+        export.assert_not_called()
+        self.assertEqual(result['state'],'COLLECTED_PROXY_ONLY')
+        self.assertTrue(result['activation_authorized'])
+        self.assertFalse(result['closed_loop'])
+        self.assertEqual(result['production_effect'],'UNKNOWN')
+
+    def test_unknown_role_rejected(self):
+        with self.assertRaises(ValueError):
+            service.run_tick({},'administrator')
 
 
 if __name__ == '__main__':

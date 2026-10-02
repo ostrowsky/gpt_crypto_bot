@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import uuid
+import time
 
 # The bundled interpreter's isolated ._pth points to the original checkout.
 # Resolve role modules from the administrator-frozen source, not that checkout.
@@ -240,9 +241,35 @@ def verify_trainer_isolation(deployment):
 
 
 def run_tick(deployment, role):
-    if current_sid() != deployment[role+'_sid']:
+    if role not in ('trainer', 'evaluator', 'exporter'):
+        raise ValueError('unsupported scheduled role')
+    sid_role = 'evaluator' if role == 'exporter' else role
+    if current_sid() != deployment[sid_role+'_sid']:
         raise PermissionError('service SID mismatch: '+role)
     registry = Path(deployment['registry'])
+    if role == 'exporter':
+        started = time.monotonic()
+        result = {'state': 'BLOCKED', 'runtime_eligible': False,
+                  'run_time': provenance.utc_iso(datetime.now(timezone.utc))}
+        try:
+            with process_lock(registry/'training_export.lock'):
+                # Only read the cutoff under this short barrier. Bootstrap
+                # cutoff is now, whereas first registration embargoes holdout
+                # by 48h; the slow export must not block minute collection.
+                with process_lock(registry/'registration.lock'):
+                    manifest_path = registry/'manifest.json'
+                    cutoff = (provenance.parse_utc(json.loads(manifest_path.read_bytes())['holdout_start'])
+                              if manifest_path.exists() else datetime.now(timezone.utc))
+                    if cutoff is None:
+                        raise ValueError('invalid frozen training cutoff')
+                result['training_snapshot'] = export_training(Path(deployment['dataset']),
+                    Path(deployment['training_input']), cutoff, immutable=True)
+            result['state'] = 'EXPORTED_NOT_APPROVED'
+        except Exception as exc:
+            result['reason'] = str(exc)
+        result['duration_seconds'] = time.monotonic()-started
+        atomic(Path(deployment.get('export_status', registry/'training_export_latest.json')), result)
+        return result
     if role == 'trainer':
         from ml_candidate_ranker import train_and_evaluate, build_live_model_payload
         try:
@@ -264,18 +291,15 @@ def run_tick(deployment, role):
         return result
     result = {'state': 'BLOCKED', 'runtime_eligible': False,
               'run_time': provenance.utc_iso(datetime.now(timezone.utc))}
+    started = time.monotonic()
     try:
-        if not (registry/'manifest.json').exists():
-            result['bootstrap_training_rows'] = export_training(Path(deployment['dataset']),
-                Path(deployment['training_input']), datetime.now(timezone.utc), immutable=True)
-        evaluator.register(Path(deployment['candidate_input']), registry)
+        with process_lock(registry/'registration.lock'):
+            evaluator.register(Path(deployment['candidate_input']), registry)
         result['collection'] = collect(registry, Path(deployment['dataset']))
-        manifest = json.loads((registry/'manifest.json').read_bytes())
-        result['training_rows'] = export_training(Path(deployment['dataset']), Path(deployment['training_input']),
-                                                 provenance.parse_utc(manifest['holdout_start']), immutable=True)
         report = evaluator.evaluate(registry, registry/'forward_snapshot.jsonl')
         atomic(registry/'evaluation_latest.json', report)
         result['evaluation'] = report['learning_quality']
+        result['state'] = 'COLLECTED_PROXY_ONLY'
     except Exception as exc:
         result['collection_blocker'] = str(exc)
     from independent_portfolio_confirmation import confirm
@@ -292,6 +316,11 @@ def run_tick(deployment, role):
     result['portfolio_confirmation'] = confirmation
     result['controller'] = controller_tick(Path(deployment['portfolio_request']), Path(deployment['release_root']),
                                            harness_root=deployment.get('project_root'), confirmation=confirmation)
+    result['duration_seconds'] = time.monotonic()-started
+    # A successful collector is not a closed/self-improving trading loop.
+    result['closed_loop'] = False
+    result['activation_authorized'] = bool(result['controller'].get('runtime_eligible'))
+    result['production_effect'] = 'UNKNOWN' if result['activation_authorized'] else 'none'
     atomic(Path(deployment['status']), result)
     return result
 
@@ -300,7 +329,7 @@ if __name__ == '__main__':
     import argparse
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--deployment', type=Path, required=True)
-    p.add_argument('--role', choices=('trainer', 'evaluator'), required=True)
+    p.add_argument('--role', choices=('trainer', 'evaluator', 'exporter'), required=True)
     args = p.parse_args()
     result = run_tick(json.loads(args.deployment.read_text(encoding='utf-8-sig')), args.role)
     print(json.dumps(result))

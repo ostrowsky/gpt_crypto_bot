@@ -138,6 +138,7 @@ $deployment = @{
     training_input=(Join-Path $intake 'training.jsonl')
     candidate_output=(Join-Path $trainerOut 'candidate.json'); candidate_input=(Join-Path $trainerOut 'candidate.json')
     trainer_status=(Join-Path $trainerOut 'status.json'); status=(Join-Path $evidence 'status.json')
+    export_status=(Join-Path $evidence 'training_export_latest.json')
     bootstrap_cutoff=[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
     portfolio_request=(Join-Path $evidence 'portfolio_request.json'); release_root=$release
 }
@@ -148,15 +149,15 @@ $python = Join-Path $ProjectRoot 'pyembed\python.exe'
 $scheduler = New-Object -ComObject Schedule.Service
 $scheduler.Connect()
 $folder = $scheduler.GetFolder('\')
-foreach ($role in @('evaluator','trainer')) {
+foreach ($role in @('evaluator','exporter','trainer')) {
     $account = if ($role -eq 'trainer') {'GptBotTrainer'} else {'GptBotEvaluator'}
-    $minutes = if ($role -eq 'trainer') {60} else {1}
+    $minutes = if ($role -eq 'evaluator') {1} else {60}
     $definition = $scheduler.NewTask(0)
     $definition.Principal.UserId = "$env:COMPUTERNAME\$account"
     $definition.Principal.LogonType = 2 # TASK_LOGON_S4U
     $definition.Principal.RunLevel = 0 # least privilege
     $definition.Settings.MultipleInstances = 2 # IgnoreNew
-    $definition.Settings.ExecutionTimeLimit = if ($role -eq 'trainer') {'PT50M'} else {'PT5M'}
+    $definition.Settings.ExecutionTimeLimit = if ($role -eq 'evaluator') {'PT5M'} else {'PT50M'}
     $definition.Settings.StartWhenAvailable = $true
     $definition.Settings.Enabled = $true
     $definition.Settings.AllowDemandStart = $true
@@ -202,7 +203,7 @@ foreach ($role in @('evaluator','trainer')) {
     $registered.Run($null) | Out-Null
 }
 @{installed_at=[DateTime]::UtcNow.ToString('o'); trainer_sid=$trainerSid; evaluator_sid=$evaluatorSid; state='INSTALLED_NOT_APPROVED'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $admin 'installation.json') -Encoding UTF8
-@{installed_at=[DateTime]::UtcNow.ToString('o'); state='INSTALLED_NOT_APPROVED'; tasks=@('GptBot-evaluator','GptBot-trainer')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'installation_public.json') -Encoding UTF8
+@{installed_at=[DateTime]::UtcNow.ToString('o'); state='INSTALLED_NOT_APPROVED'; tasks=@('GptBot-evaluator','GptBot-exporter','GptBot-trainer')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'installation_public.json') -Encoding UTF8
 if (Test-Path -LiteralPath (Join-Path $root 'installation_failure.txt')) {
     Remove-Item -LiteralPath (Join-Path $root 'installation_failure.txt')
 }

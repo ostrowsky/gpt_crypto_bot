@@ -33,6 +33,35 @@ cleanup. Rollback uses the same crash-safe lock and original compare-and-swap.
 Deployment under isolated accounts requires the new process_lock.py dependency;
 checkout tests alone do not establish restored scheduled collection.
 
+Latency isolation (2026-10-02): the minute evaluator must never export the full
+training dataset, including bootstrap. A separate hourly `exporter` task uses
+the existing evaluator SID/ACLs, not a new privileged account. Its status is
+`training_export_latest.json`; it cannot overwrite collector status. Both candidate
+registration and cutoff selection take the same short nonblocking registration
+barrier, released before scanning. Bootstrap cutoff is current time and first
+registration starts holdout 48 hours later; it cannot cross that boundary.
+Exporter additionally serializes snapshot publication with an OS-owned lock.
+Before registration the cutoff is current time; afterwards it is fixed holdout
+start. Busy barriers defer work, never advance cutoff or steal a live lock.
+Missing candidate/intake is BLOCKED while the exporter bootstraps independently;
+the minute role never falls back to expensive export. Report measured duration
+for both roles. This removes export from the collector critical path, but does
+not assert the remaining full dataset scan meets the 120s arrival deadline.
+Real scheduled run duration must be measured after protected deployment.
+Collector success is explicitly `COLLECTED_PROXY_ONLY`, not portfolio learning
+or strategy improvement. Controller activation is eligibility only; actual
+production effect is UNKNOWN until a live consumption receipt is verified.
+No trading rules are changed here.
+
+Morning learning progress reads isolated evaluator/exporter statuses separately
+from legacy worker reports. Missing, corrupt, future or older-than-240s collector
+statuses are UNKNOWN with null observation/outcome counts, not zero success.
+Exporter freshness budget is 75 minutes. Proxy collection, snapshot export and
+signed activation eligibility must never be called proven strategy improvement.
+Until a verified live consumption receipt and independent after-cost forward
+comparison exist, the explicit automatic-loop verdict is NOT_CLOSED / UNKNOWN.
+No caller-supplied closed_loop flag can override that measurement contract.
+
 Evaluator-owned training export excludes all features/labels at or after frozen
 holdout start. Trainer receives only this sanitized file and cannot read raw
 critic data, evaluator registry, journal, coverage/evaluator secrets or active
