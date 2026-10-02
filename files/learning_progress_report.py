@@ -266,6 +266,13 @@ def render_text(report: dict[str, Any]) -> str:
         if loop.get('isolation_mode') == 'logical_same_user':
             lines.append(f"  • локальный обучатель: {loop.get('trainer_state', 'UNKNOWN')}; "
                          f"последний результат={loop.get('trainer_last_run')}")
+        lines.append(f"  • полные сравнительные портфели: {loop.get('full_portfolio_state', 'UNKNOWN')}; "
+                     f"свечных шагов={loop.get('full_portfolio_frames')}; "
+                     f"монет={loop.get('full_portfolio_symbols')}; "
+                     f"начало наблюдений UTC={loop.get('full_portfolio_observation_start_utc')}")
+        lines.append(f"  • независимый приём доказательств: {loop.get('portfolio_intake_state', 'UNKNOWN')}")
+        for phase, evidence in (loop.get('portfolio_intake_phases') or {}).items():
+            lines.append(f"    ↳ {phase}: {evidence.get('state', 'UNKNOWN')}")
         lines.append(
             f"  • автоматическое улучшение: {loop.get('state', 'UNKNOWN')}; "
             f"развитие/деградация: {loop.get('improvement_verdict', 'UNKNOWN')}; "

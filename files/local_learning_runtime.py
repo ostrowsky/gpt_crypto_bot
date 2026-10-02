@@ -102,6 +102,9 @@ def worker(path, role):
                     result['run_time'] = datetime.now(timezone.utc).isoformat()
                     atomic(base/'evaluator/portfolio_producer_latest.json', result)
                 else:
+                    if role == 'controller':
+                        from portfolio_evidence_intake import tick as intake_tick
+                        intake_tick(deployment)
                     result = run_tick(deployment, role)
                 blocked = result.get('state') == 'BLOCKED'
                 atomic(base/(role+'.lifecycle.json'), {'state': 'WAITING', 'pid': os.getpid(),

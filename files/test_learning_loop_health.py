@@ -65,6 +65,28 @@ class LoopHealthTests(unittest.TestCase):
         self.assertIn('развитие/деградация: UNKNOWN',text)
         self.assertIn('применение в live=UNKNOWN',text)
 
+    def test_full_portfolio_embargo_and_missing_frames_are_not_learning_success(self):
+        self.write('portfolio_producer_latest.json',{'state':'EMBARGO','run_time':self.now.isoformat(),
+            'symbols':91,'observation_start_ms':int(self.now.timestamp()*1000)+172800000})
+        self.write('portfolio_intake_latest.json',{'state':'BLOCKED','run_time':self.now.isoformat(),
+            'phases':{'sealed':{'state':'UNKNOWN'}}})
+        value=health.summarize(self.root,self.now)
+        self.assertEqual(value['full_portfolio_state'],'EMBARGO')
+        self.assertIsNone(value['full_portfolio_frames'])
+        self.assertEqual(value['portfolio_intake_state'],'BLOCKED')
+        self.assertFalse(value['closed_loop'])
+        import learning_progress_report as report
+        text=report.render_text({'automatic_learning_loop':value})
+        self.assertIn('EMBARGO',text)
+        self.assertIn('sealed: UNKNOWN',text)
+
+    def test_stale_full_portfolio_result_is_unknown(self):
+        self.write('portfolio_producer_latest.json',{'state':'COLLECTED_FULL_POLICY_PAPER',
+            'run_time':(self.now-timedelta(minutes=5)).isoformat(),'frames':999})
+        value=health.summarize(self.root,self.now)
+        self.assertEqual(value['full_portfolio_state'],'UNKNOWN')
+        self.assertIsNone(value['full_portfolio_frames'])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -29,6 +29,14 @@ def runtime_root(runtime):
     return runtime/'learning_roles'/'evaluator'
 
 
+def utc_from_ms(value):
+    try:
+        if isinstance(value, bool) or not isinstance(value, int): return None
+        return datetime.fromtimestamp(value/1000, timezone.utc).isoformat()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def summarize(root, now=None):
     now = now or datetime.now(timezone.utc)
     root = Path(root)
@@ -49,6 +57,10 @@ def summarize(root, now=None):
         if not controller_fresh:
             problems.append('controller: missing/stale/future separate status')
     trainer = read_status(root.parent/'trainer'/'status.json') if local else {}
+    portfolio = read_status(root/'portfolio_producer_latest.json')
+    intake = read_status(root/'portfolio_intake_latest.json')
+    portfolio_fresh = fresh(portfolio, now, 240)
+    intake_fresh = fresh(intake, now, 600)
     collection = collector.get('collection') or {}
     collector_fresh = fresh(collector, now, 240)
     exporter_fresh = fresh(exporter, now, 75*60)
@@ -75,6 +87,15 @@ def summarize(root, now=None):
             'os_access_isolation': False if local else None,
             'trainer_state': trainer.get('state', 'UNKNOWN'),
             'trainer_last_run': trainer.get('run_time'),
+            'full_portfolio_state': portfolio.get('state', 'UNKNOWN') if portfolio_fresh else 'UNKNOWN',
+            'full_portfolio_fresh': portfolio_fresh,
+            'full_portfolio_frames': portfolio.get('frames') if portfolio_fresh else None,
+            'full_portfolio_observation_start_ms': portfolio.get('observation_start_ms') if portfolio_fresh else None,
+            'full_portfolio_observation_start_utc': utc_from_ms(portfolio.get('observation_start_ms')) if portfolio_fresh else None,
+            'full_portfolio_symbols': portfolio.get('symbols') if portfolio_fresh else None,
+            'portfolio_intake_state': intake.get('state', 'UNKNOWN') if intake_fresh else 'UNKNOWN',
+            'portfolio_intake_phases': intake.get('phases', {}) if intake_fresh else {},
+            'portfolio_intake_blockers': intake.get('blockers', []) if intake_fresh else ['missing/stale independent intake'],
             'production_effect': 'UNKNOWN', 'closed_loop': False,
             'collection_state': collection_state, 'collector_fresh': collector_fresh,
             'exporter_fresh': exporter_fresh,
