@@ -1,5 +1,10 @@
 # Local logical learning runtime
 
+Explicit identity migration: `local_learning_runtime.py --adopt-current-user`
+may rebind a stopped, accepted logical deployment to the current user. Require
+both stop.request and supervisor state STOPPED; preserve deployment backup.
+Normal initialization still rejects a different SID. No OS isolation is claimed.
+
 2026-10-02. User explicitly accepts same-Lenovo logical role separation instead
 of new Windows accounts/UAC. TH-01..TH-12 remain applicable.
 

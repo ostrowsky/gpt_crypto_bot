@@ -42,6 +42,28 @@ class LocalRuntimeTests(unittest.TestCase):
             self.assertEqual(set(env), {'PATH', 'TEMP'} | (
                 {'RANKER_EVALUATOR_KEY'} if role == 'controller' else set()))
 
+    def test_identity_adoption_requires_stop_and_preserves_backup(self):
+        base = self.path.parent
+        service.atomic(base/'supervisor.json', {'state': 'RUNNING'})
+        (base/'stop.request').touch()
+        with self.assertRaises(ValueError): local.adopt_current_user(self.root)
+        service.atomic(base/'supervisor.json', {'state': 'STOPPED'})
+        old = self.path.read_bytes()
+        with patch.object(local, 'current_sid', return_value='actual-user'):
+            local.adopt_current_user(self.root)
+        value = json.loads(self.path.read_bytes())
+        self.assertEqual(value['trainer_sid'], 'actual-user')
+        self.assertEqual(value['evaluator_sid'], 'actual-user')
+        self.assertFalse(value['os_access_isolation'])
+        self.assertEqual(next(base.glob('deployment.before_identity_*.json')).read_bytes(), old)
+
+    def test_unaccepted_identity_adoption_is_rejected(self):
+        base = self.path.parent
+        (base/'stop.request').touch()
+        service.atomic(base/'supervisor.json', {'state': 'STOPPED'})
+        service.atomic(self.path, dict(self.deployment, logical_isolation_accepted=False))
+        with self.assertRaises(ValueError): local.adopt_current_user(self.root)
+
     def test_role_requires_explicit_acceptance_and_matching_sid(self):
         for key, value in (('logical_isolation_accepted', False), ('trainer_sid', 'other')):
             deployment = dict(self.deployment, **{key: value})

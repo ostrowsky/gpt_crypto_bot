@@ -66,6 +66,25 @@ def role_environment(role, source=None):
     return env
 
 
+def adopt_current_user(root=ROOT):
+    """Explicit stopped-runtime migration, not automatic identity bypass."""
+    base = root.resolve()/'.runtime/learning_roles_local'
+    path = base/'deployment.json'
+    value = json.loads(path.read_bytes())
+    status = json.loads((base/'supervisor.json').read_bytes())
+    if (not (base/'stop.request').exists() or status.get('state') != 'STOPPED'
+            or value.get('isolation_mode') != MODE
+            or value.get('logical_isolation_accepted') is not True):
+        raise ValueError('identity migration requires stopped accepted logical runtime')
+    from shutil import copyfile
+    backup = base/('deployment.before_identity_'+str(time.time_ns())+'.json')
+    copyfile(path, backup)
+    sid = current_sid()
+    value.update(trainer_sid=sid, evaluator_sid=sid, os_access_isolation=False)
+    atomic(path, value)
+    return path
+
+
 def worker(path, role):
     base = path.parent
     with process_lock(base/(role+'.worker.lock')):
@@ -138,9 +157,12 @@ if __name__ == '__main__':
     parser.add_argument('--deployment', type=Path)
     parser.add_argument('--worker', choices=tuple(INTERVALS))
     parser.add_argument('--stop', action='store_true')
+    parser.add_argument('--adopt-current-user', action='store_true')
     args = parser.parse_args()
-    path = args.deployment or initialize()
-    if args.stop:
+    path = adopt_current_user() if args.adopt_current_user else args.deployment or initialize()
+    if args.adopt_current_user:
+        print('Stopped logical deployment rebound to current user; backup preserved')
+    elif args.stop:
         (path.parent/'stop.request').touch()
     elif args.worker:
         worker(path, args.worker)
