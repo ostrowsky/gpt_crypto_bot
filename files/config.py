@@ -441,6 +441,7 @@ OPEN_SIGNAL_CLUSTER_CAP_WATCH_ALERT_BUCKETS: tuple[str, ...] = ("15m_impulse", "
 # Agent: use full portfolio capacity. Top-mover leader_score decides the top 10;
 # do not let the coarse "momentum" mode cluster collapse the portfolio to 2.
 VALIDATED_RANKER_ROLLOUT_ENABLED: bool = False  # requires independent signed evidence; kill switch
+CERTIFIED_RULE_SCORE_POLICY_ENABLED: bool = False  # separate signed rule-champion score family
 AGENT_MAX_POSITIONS: int = 10
 AGENT_ALLOWED_MODES: tuple[str, ...] = ("trend", "strong_trend", "impulse_speed", "4h_leader_watch")
 AGENT_ALLOWED_TIMEFRAMES: tuple[str, ...] = ("15m", "1h")

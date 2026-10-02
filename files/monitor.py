@@ -5715,7 +5715,7 @@ async def _poll_coin(
                 candidate_score += (
                     ml_proba - float(getattr(config, "ML_GENERAL_NEUTRAL_PROBA", 0.50))
                 ) * float(getattr(config, "ML_GENERAL_SCORE_WEIGHT", 10.0))
-            ranker_info = _ml_candidate_ranker_components(
+            ranker_kwargs = dict(
                 sym=sym,
                 tf=tf,
                 signal_type=preview_mode,
@@ -5736,8 +5736,11 @@ async def _poll_coin(
                 near_miss=promoted_from_near_miss,
                 signal_flags=signal_flags,
             )
+            ranker_info = _ml_candidate_ranker_components(**ranker_kwargs)
             ranker_proba = None if ranker_info is None else float(ranker_info.get("quality_proba", 0.0))
             candidate_score += _ml_candidate_ranker_runtime_bonus(ranker_info)
+            from certified_rule_score_policy import bonus as certified_score_bonus
+            candidate_score += certified_score_bonus(**ranker_kwargs)
             if preview_mode == "trend" and not is_bull_day_now:
                 if ml_proba is None:
                     ml_proba = _ml_trend_nonbull_score(sym, tf, feat, data, i)

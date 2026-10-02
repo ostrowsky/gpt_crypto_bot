@@ -154,6 +154,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Certified rule-champion score policy: `docs/specs/certified-rule-score-policy.md` — independent bounded score hook shared by monitor/replay, disabled without signed descriptor-bound authorization; legacy ranker remains unchanged; full forward portfolios still required.
+
 Scheduled export latency isolation and loop health: `docs/specs/scheduled-forward-evidence.md` — separate hourly evaluator-owned export; minute collector never scans training for export; morning report distinguishes proxies, authorization and unverified live consumption. Full loop NOT_CLOSED pending independent portfolios and live receipts.
 
 Frozen full-policy paired replay: `docs/specs/paired-full-policy-replay.md` — independent full BUY/SELL accounts and bounded overlay parity; unsigned history never promotes, inactive live ranker blocks preflight.

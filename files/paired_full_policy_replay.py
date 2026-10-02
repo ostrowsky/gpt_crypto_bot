@@ -15,6 +15,7 @@ import config
 import monitor
 import replay_backtest as rb
 import validated_ranker_rollout as rollout
+import certified_rule_score_policy as rule_score
 from audit_negative_day_rebound import bounded_cache, finalize_at_boundary
 from closed_grid_policy_replay import SOURCES, event_clock, validate_series
 from historical_signal_evaluation import freeze, sha
@@ -23,6 +24,13 @@ from portfolio_alpha import closed_price_series
 
 
 def preflight(champion):
+    if champion.get('contract') == rule_score.CONTRACT:
+        blockers = []
+        if rollout.canonical(champion) != rule_score.champion_bytes():
+            blockers.append('rule champion descriptor differs from current sources/config/models')
+        if getattr(config, 'VALIDATED_RANKER_ROLLOUT_ENABLED', False):
+            blockers.append('active legacy overlay cannot be reconstructed as rule champion')
+        return blockers
     blockers = []
     if not getattr(config, 'ML_CANDIDATE_RANKER_RUNTIME_ENABLED', False):
         blockers.append('live ranker runtime disabled')
@@ -42,13 +50,19 @@ def frozen_arm(directory, arm):
     candidate = json.loads((directory/'candidate.json').read_bytes())
     general = json.loads((directory/'general.json').read_bytes())
     with ExitStack() as stack:
-        stack.enter_context(patch.object(monitor, '_RANKER_MODEL_FILE', directory/'champion.json'))
+        is_rule = champion.get('contract') == rule_score.CONTRACT
+        stack.enter_context(patch.object(monitor, '_RANKER_MODEL_FILE',
+            directory/('base_ranker.json' if is_rule else 'champion.json')))
         stack.enter_context(patch.object(monitor, '_RANKER_MODEL_CACHE', None))
         stack.enter_context(patch.object(rb, '_load_ml_model_payload', return_value=general))
         # Same champion components/exit rules in both arms. Only bounded overlay
         # selection is substituted; this does not issue a production ticket.
         stack.enter_context(patch.object(config, 'VALIDATED_RANKER_ROLLOUT_ENABLED',
-                                         arm == 'candidate'))
+                                         arm == 'candidate' and not is_rule))
+        stack.enter_context(patch.object(config, 'CERTIFIED_RULE_SCORE_POLICY_ENABLED',
+                                         arm == 'candidate' and is_rule))
+        stack.enter_context(patch.object(rule_score, 'champion_bytes',
+                                         return_value=(directory/'champion.json').read_bytes()))
         stack.enter_context(patch.object(rollout, 'select', return_value=(candidate,
             {'candidate_sha256': sha(directory/'candidate.json'), 'stage':'OFFLINE_REPLAY'})
             if arm == 'candidate' else None))
@@ -82,21 +96,27 @@ async def run_arms(cache, symbols, start, end, directory):
     return result
 
 
-async def run(archive, champion_path, candidate_path, output):
+async def run(archive, champion_path, candidate_path, output, *, policy_family='legacy-ranker'):
     manifest_raw = (archive/'manifest.json').read_bytes()
     manifest = json.loads(manifest_raw)
     sources = {n: sha(Path(__file__).with_name(n)) for n in
         (*SOURCES, 'paired_full_policy_replay.py', 'audit_negative_day_rebound.py',
          'independent_portfolio_gate.py', 'validated_ranker_rollout.py',
-         'process_lock.py', 'ml_candidate_ranker.py', 'ml_signal_model.py')}
+         'process_lock.py', 'ml_candidate_ranker.py', 'ml_signal_model.py',
+         'certified_rule_score_policy.py')}
     output.mkdir(parents=True, exist_ok=False)
     for name, path in [('champion', champion_path), ('candidate', candidate_path),
                        ('general', Path(rb.__file__).with_name('ml_signal_model.json'))]:
-        raw = path.read_bytes()
+        raw = (rule_score.champion_bytes() if name == 'champion' and policy_family == 'rule-score'
+               else path.read_bytes())
         if not isinstance(json.loads(raw), dict):
             raise ValueError('model must be a mapping')
         freeze(output/(name+'.json'), raw)
-    models = {n: sha(output/(n+'.json')) for n in ('champion','candidate','general')}
+    if policy_family == 'rule-score':
+        freeze(output/'base_ranker.json', champion_path.read_bytes())
+    elif policy_family != 'legacy-ranker':
+        raise ValueError('unknown policy family')
+    models = {p.stem:sha(p) for p in output.glob('*.json')}
     def verify():
         if (archive/'manifest.json').read_bytes() != manifest_raw:
             raise ValueError('archive manifest drift')
@@ -116,7 +136,8 @@ async def run(archive, champion_path, candidate_path, output):
     freeze(output/'registration.json', rollout.canonical({
         'contract':'paired-full-policy-replay-v1', 'maximum_available_bounds':
         [manifest['start_ms'],manifest['end_ms']], 'sources':sources, 'models':models,
-        'archive_sha256':sha(archive/'manifest.json'), 'runtime_eligible':False}))
+        'archive_sha256':sha(archive/'manifest.json'), 'policy_family':policy_family,
+        'runtime_eligible':False}))
     blockers = preflight(json.loads((output/'champion.json').read_bytes()))
     if blockers:
         report = {'state':'BLOCKED', 'runtime_eligible':False, 'blockers':blockers,
@@ -161,7 +182,9 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     for arg in ('archive','champion','candidate','output'):
         p.add_argument('--'+arg, type=Path, required=True)
+    p.add_argument('--policy-family', choices=('legacy-ranker','rule-score'), default='legacy-ranker')
     args = p.parse_args()
-    result = asyncio.run(run(args.archive,args.champion,args.candidate,args.output))
+    result = asyncio.run(run(args.archive,args.champion,args.candidate,args.output,
+                            policy_family=args.policy_family))
     print(json.dumps({'state':result['state'], 'blockers':result['blockers']}))
     raise SystemExit(0 if result['comparison'] is not None else 1)

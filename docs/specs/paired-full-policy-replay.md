@@ -1,5 +1,12 @@
 # Frozen full-policy paired replay
 
+2026-10-02: a separate `--policy-family rule-score` uses
+`certified-rule-score-policy.md`. It freezes a rule/config/source/model champion
+descriptor plus the original legacy model, preserves the legacy scorer state and
+tests only the independent +/-1 score bonus. Both full populations and exits are
+rebuilt independently. Legacy-family disabled/zero-weight/provenance preflight
+remains unchanged. No historical runner can issue a production authorization.
+
 Date: 2026-10-02. Status: diagnostic infrastructure, not live strategy approval.
 TH-01..TH-12 apply. Full Harness at registration: FAIL TH-11 (current source hash).
 

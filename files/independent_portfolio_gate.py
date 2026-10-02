@@ -20,7 +20,8 @@ def source_hash():
     names = ('independent_portfolio_gate.py', 'independent_portfolio_confirmation.py',
              'portfolio_alpha.py', 'validated_ranker_rollout.py',
              'monitor.py', 'ml_candidate_ranker.py', 'config.py', 'strategy.py',
-             'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py')
+             'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py',
+             'certified_rule_score_policy.py')
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 

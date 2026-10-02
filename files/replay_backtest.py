@@ -2176,7 +2176,7 @@ async def _build_candidates_for_symbol(
                             continue
             score_floor = _entry_score_floor(tf) if getattr(config, "ENTRY_SCORE_MIN_ENABLED", False) else 0.0
             mtf_soft_penalty = _mtf_soft_penalty_from_reason(mtf_reason)
-            ranker_info = _ml_candidate_ranker_components(
+            ranker_kwargs = dict(
                 sym=sym,
                 tf=tf,
                 signal_type=mode,
@@ -2196,7 +2196,10 @@ async def _build_candidates_for_symbol(
                 continuation_profile=continuation_profile,
                 signal_flags=signal_flags,
             )
+            ranker_info = _ml_candidate_ranker_components(**ranker_kwargs)
             candidate_score += _ml_candidate_ranker_runtime_bonus(ranker_info)
+            from certified_rule_score_policy import bonus as certified_score_bonus
+            candidate_score += certified_score_bonus(**ranker_kwargs)
             if _chase_guard_reason_for_replay_variant(
                 variant=variant,
                 tf=tf,

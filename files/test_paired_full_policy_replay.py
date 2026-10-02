@@ -57,6 +57,19 @@ class PairedPolicyTests(unittest.TestCase):
             self.assertEqual(call.kwargs['max_open_positions'],10)
             self.assertEqual(call.kwargs['variant'],'score_replace_cluster')
 
+    def test_rule_family_changes_only_separate_bonus_switch(self):
+        (self.root/'champion.json').write_text(json.dumps({'contract':paired.rule_score.CONTRACT}))
+        (self.root/'base_ranker.json').write_text('{}')
+        with patch.object(paired.config,'ML_CANDIDATE_RANKER_RUNTIME_ENABLED',False,create=True):
+            with paired.frozen_arm(self.root,'candidate'):
+                self.assertTrue(paired.config.CERTIFIED_RULE_SCORE_POLICY_ENABLED)
+                self.assertFalse(paired.config.VALIDATED_RANKER_ROLLOUT_ENABLED)
+                self.assertFalse(paired.config.ML_CANDIDATE_RANKER_RUNTIME_ENABLED)
+                self.assertEqual(paired.monitor._RANKER_MODEL_FILE,self.root/'base_ranker.json')
+            with paired.frozen_arm(self.root,'champion'):
+                self.assertFalse(paired.config.CERTIFIED_RULE_SCORE_POLICY_ENABLED)
+                self.assertIsNone(paired.rollout.select())
+
     def test_unsigned_comparison_has_no_release_authority(self):
         result = gate.compare_accounts(bundle(),NOW)
         self.assertTrue(result['passed'])
