@@ -47,3 +47,24 @@ Admissions are current only with unchanged active authorization and a receipt
 within 600 seconds. Rollback fallback must concern a symbol assigned to the
 previous signed candidate; repeated controller failures preserve the original
 rollback request and its verified observation. Neither status proves profits.
+
+## Actual canary outcome collection (next stage)
+
+Runtime exit requests bind a verified CANARY admission, entry identity, exit bar,
+price and reason. A request alone is not a closed position. Only a subsequent
+successful atomic positions save, showing that exact entry is no longer present,
+creates a signed paper-exit receipt. Failed saves and surviving original entries
+must not create closures. Re-entry of the same symbol is distinguished by entry
+timestamp. Duplicate immutable requests/receipts are idempotent; conflicts fail.
+The independent scheduled collector re-verifies both signatures, assignments,
+chronology, admission hashes and persisted snapshot absence. Missing exits remain
+open/unknown, not losses or successful trades. Net per-trade returns after the
+registered cost assumption are diagnostic, not unified portfolio alpha.
+
+The collector must not create canary_unsigned.json or full-policy validation
+from a set of matched decisions: full marked portfolio, unchanged control arm,
+complete BUY population and closed-price coverage are separately required.
+No rollout switches, BUY gates or SELL rules change in this observation stage.
+The closure save must arrive within 120 seconds of the exit request. Conflicting
+requests invalidate that entry's outcome rather than later certifying the first
+intent's price. Only admissions from the current frozen canary cohort are counted.

@@ -111,6 +111,8 @@ def worker(path, role):
                     if role == 'controller':
                         from learning_cohort_controller import tick as cohort_tick
                         cohort_tick(deployment)
+                        from actual_canary_outcomes import tick as canary_tick
+                        canary_tick(deployment)
                 blocked = result.get('state') == 'BLOCKED'
                 atomic(base/(role+'.lifecycle.json'), {'state': 'WAITING', 'pid': os.getpid(),
                        'at': time.time(), 'last_result': result.get('state', 'UNKNOWN'),

@@ -274,6 +274,9 @@ def render_text(report: dict[str, Any]) -> str:
         lines.append(f"  • выдача сертификатов: {loop.get('certificate_issuer_state', 'UNKNOWN')}; "
                      f"переход когорт={loop.get('cohort_controller_state', 'UNKNOWN')}; "
                      f"фаза={loop.get('cohort_phase')}; откат={loop.get('rollback_verification', 'UNKNOWN')}")
+        lines.append(f"  • реальные paper-решения canary: {loop.get('actual_canary_state', 'UNKNOWN')}; "
+                     f"входов={loop.get('actual_canary_admissions')}, закрытий={loop.get('actual_canary_closed')}; "
+                     "не полное портфельное подтверждение")
         for phase, evidence in (loop.get('portfolio_intake_phases') or {}).items():
             lines.append(f"    ↳ {phase}: {evidence.get('state', 'UNKNOWN')}")
         lines.append(

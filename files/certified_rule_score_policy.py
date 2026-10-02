@@ -9,7 +9,7 @@ import validated_ranker_rollout as release
 CONTRACT = 'certified-rule-score-policy-v1'
 SOURCES = ('monitor.py', 'replay_backtest.py', 'strategy.py', 'indicators.py',
            'config.py', 'ml_candidate_ranker.py', 'policy_provenance.py',
-           'certified_rule_score_policy.py', 'policy_runtime_receipts.py')
+           'certified_rule_score_policy.py', 'policy_runtime_receipts.py', 'actual_canary_outcomes.py')
 
 
 def champion_bytes():

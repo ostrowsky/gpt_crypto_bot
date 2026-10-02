@@ -91,6 +91,7 @@ def summarize(root, now=None):
         problems.append('live consumption: no current verified paper admission')
     issuer=read_status(root/'certificate_issuer_latest.json')
     cohort=read_status(root/'cohort_controller_latest.json')
+    canary=read_status(root/'canary_outcomes_latest.json')
     return {'state': 'NOT_CLOSED', 'improvement_verdict': 'UNKNOWN',
             'isolation_mode': 'logical_same_user' if local else 'os_roles_or_unknown',
             'os_access_isolation': False if local else None,
@@ -108,6 +109,9 @@ def summarize(root, now=None):
             'certificate_issuer_state': issuer.get('state','UNKNOWN') if fresh(issuer,now,600) else 'UNKNOWN',
             'cohort_controller_state': cohort.get('state','UNKNOWN') if fresh(cohort,now,600) else 'UNKNOWN',
             'cohort_phase': cohort.get('phase') if fresh(cohort,now,600) else None,
+            'actual_canary_state': canary.get('state','UNKNOWN') if fresh(canary,now,600) else 'UNKNOWN',
+            'actual_canary_admissions': canary.get('admissions') if fresh(canary,now,600) else None,
+            'actual_canary_closed': canary.get('closed') if fresh(canary,now,600) else None,
             'rollback_verification': receipt['rollback'],
             'production_effect': receipt['application'], 'closed_loop': False,
             'collection_state': collection_state, 'collector_fresh': collector_fresh,

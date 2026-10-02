@@ -25,7 +25,7 @@ def source_hash():
              'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py',
              'certified_rule_score_policy.py', 'coverage_public_verifier.py',
              'logical_learning_authority.py', 'learning_certificate_issuer.py',
-             'learning_cohort_controller.py','policy_runtime_receipts.py')
+             'learning_cohort_controller.py','policy_runtime_receipts.py','actual_canary_outcomes.py')
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 

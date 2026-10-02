@@ -3719,6 +3719,11 @@ def save_positions(positions: dict) -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             _json_pers.dump(data, f, ensure_ascii=False, indent=2)
         _os_pers.replace(tmp, path)
+        try:
+            from actual_canary_outcomes import runtime as canary_observation
+            canary_observation('finalize',path)
+        except Exception as observation_error:
+            log.warning('Canary exit observation unavailable: %s',observation_error)
     except Exception as e:
         log.warning("save_positions failed: %s", e)
 
@@ -4610,6 +4615,12 @@ def _register_suspicious_reentry_watch(
     exit_ts: int,
     pnl_pct: float,
 ) -> None:
+    try:
+        from actual_canary_outcomes import runtime as canary_observation
+        canary_observation('request',pos.symbol,pos.tf,int(pos.entry_ts),int(exit_ts),
+                           float(exit_price),str(exit_reason))
+    except Exception as observation_error:
+        log.warning('Canary exit request unavailable: %s',observation_error)
     _register_observable_tail_shadow(
         state,
         pos,
@@ -6782,6 +6793,13 @@ async def _poll_coin(
                             exit_ts=int(data["t"][i]),
                             pnl_pct=replace_pnl,
                         )
+                        try:
+                            from actual_canary_outcomes import runtime as canary_observation
+                            canary_observation('request',replace_pos.symbol,replace_pos.tf,
+                                               int(replace_pos.entry_ts),int(data['t'][i]),
+                                               float(replace_price),replace_reason)
+                        except Exception as observation_error:
+                            log.warning('Canary rotation observation unavailable: %s',observation_error)
                         old_tf = replace_pos.tf
                         del state.positions[replace_pos.symbol]
                         save_positions(state.positions)
