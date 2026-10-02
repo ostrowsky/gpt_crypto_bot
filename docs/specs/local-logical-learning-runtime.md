@@ -18,14 +18,17 @@ the NTFS-denial probe only in this opt-in mode. This is NOT OS isolation: Lenovo
 can read all local files. Trainer code receives only immutable pre-holdout intake,
 not raw holdout as its training argument. Frozen candidate registration, label
 timing, deduplication, chronological splits and 48h embargo are unchanged.
-Child environment is allowlisted: no inherited Telegram/exchange keys; only
-controller may inherit an explicitly supplied evaluator key. No keys, certificates
-or successful no-trainer-access assertions are fabricated by initialization.
+Child environment is allowlisted: no inherited Telegram/exchange keys. Local
+coverage/evaluator keys are stored in the user-level runtime and read only by
+controller code, not trainer code. They are not Windows-protected from Lenovo.
+Initialization creates keys, never certifications or no-trainer-access assertions.
 
 Existing cryptographic provenance, full-period portfolio comparison, forward and
 canary cohorts, Harness and rollback gates remain fail-closed. Local execution
 does not approve a candidate or automatically connect its dedicated release pointer
-to production. Coverage certification still requires genuine inputs; accepting
+to production by default. The disabled LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED route
+requires the same signed gates and records score-consumption receipts, not fills.
+Coverage certification still requires genuine inputs; accepting
 logical process separation does not prove untouched holdout or population parity.
 Current maximum 181-day paired replay has zero uplift: no policy relaxation here.
 Missing intake/candidate/evidence is BLOCKED, not learning success. Collection is

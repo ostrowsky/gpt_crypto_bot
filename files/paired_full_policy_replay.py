@@ -61,6 +61,7 @@ def frozen_arm(directory, arm):
                                          arm == 'candidate' and not is_rule))
         stack.enter_context(patch.object(config, 'CERTIFIED_RULE_SCORE_POLICY_ENABLED',
                                          arm == 'candidate' and is_rule))
+        stack.enter_context(patch.object(config, 'LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED', False))
         stack.enter_context(patch.object(rule_score, 'champion_bytes',
                                          return_value=(directory/'champion.json').read_bytes()))
         stack.enter_context(patch.object(rollout, 'select', return_value=(candidate,

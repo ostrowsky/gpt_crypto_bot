@@ -18,12 +18,13 @@ class LocalRuntimeTests(unittest.TestCase):
             self.path = local.initialize(self.root)
         self.deployment = json.loads(self.path.read_bytes())
 
-    def test_initialization_does_not_create_keys_or_approve(self):
+    def test_initialization_creates_local_keys_but_no_approval(self):
         self.assertFalse(self.deployment['os_access_isolation'])
         self.assertEqual(self.deployment['isolation_mode'], 'logical_same_user')
         self.assertFalse(Path(self.deployment['release_root']).exists())
         self.assertFalse(Path(self.deployment['portfolio_inputs']).exists())
         self.assertFalse((self.root/'.runtime/learning_roles').exists())
+        self.assertEqual((self.path.parent/'authority/coverage.key').stat().st_size, 48)
 
     def test_initialize_is_idempotent_but_refuses_other_sid(self):
         with patch.object(local, 'current_sid', return_value='test-sid'):
@@ -106,7 +107,7 @@ class LocalRuntimeTests(unittest.TestCase):
         with patch.object(local.subprocess, 'Popen', side_effect=spawn), \
              patch.object(local, 'atomic', side_effect=publish), patch.object(local.time, 'sleep'):
             local.supervise(self.path)
-        self.assertEqual(len(children), 4)
+        self.assertEqual(len(children), 5)
         for child in children:
             child.terminate.assert_called_once()
             child.wait.assert_called_once()

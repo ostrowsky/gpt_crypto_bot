@@ -190,7 +190,8 @@ def _export_training(dataset, output, cutoff, immutable, tmp):
     return count
 
 
-def controller_tick(request_path, release_root, now=None, harness_root=None, confirmation=None):
+def controller_tick(request_path, release_root, now=None, harness_root=None, confirmation=None,
+                    authority=None, evaluator_key=None):
     """No proxy approval; portfolio evidence failure clears a prior overlay."""
     from independent_portfolio_gate import authorize
     prior = sha((release_root/'active.json').read_bytes()) if (release_root/'active.json').exists() else None
@@ -202,8 +203,8 @@ def controller_tick(request_path, release_root, now=None, harness_root=None, con
         evidence = {phase:(Path(v['bundle']).read_bytes(), json.loads(Path(v['certification']).read_bytes()))
                     for phase,v in request['evidence'].items()}
         model, champion = Path(request['candidate']).read_bytes(), Path(request['champion']).read_bytes()
-        key = os.environ.get('RANKER_EVALUATOR_KEY', '').encode()
-        ticket = authorize(evidence, authority_material(),
+        key = os.environ.get('RANKER_EVALUATOR_KEY', '').encode() if evaluator_key is None else evaluator_key
+        ticket = authorize(evidence, authority_material() if authority is None else authority,
                            key, model, champion, request.get('stage', 'CANARY'), now=now,
                            harness_root=harness_root)
         rollout(release_root, model, ticket, key, champion, expected=prior, now=now)
@@ -256,13 +257,15 @@ def run_tick(deployment, role):
     registry = Path(deployment['registry'])
     if role == 'controller':
         from independent_portfolio_confirmation import confirm
+        from logical_learning_authority import material
+        authority, key = material(deployment)
         confirmation = confirm(Path(deployment['portfolio_inputs']), Path(deployment['portfolio_request']),
-                               authority_material(), os.environ.get('RANKER_EVALUATOR_KEY', '').encode(),
+                               authority, key,
                                harness_root=deployment.get('project_root'))
         result = {'portfolio_confirmation': confirmation,
                   'controller': controller_tick(Path(deployment['portfolio_request']),
                       Path(deployment['release_root']), harness_root=deployment.get('project_root'),
-                      confirmation=confirmation),
+                      confirmation=confirmation, authority=authority, evaluator_key=key),
                   'run_time': provenance.utc_iso(datetime.now(timezone.utc)),
                   'isolation_mode': 'logical_same_user', 'os_access_isolation': False,
                   'closed_loop': False}

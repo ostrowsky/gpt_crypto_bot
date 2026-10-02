@@ -2,6 +2,7 @@ import ast
 import json
 from pathlib import Path
 import unittest
+import tempfile
 from unittest.mock import patch
 
 import config
@@ -52,6 +53,8 @@ class CertifiedRulePolicyTests(unittest.TestCase):
         original = policy.champion_bytes()
         with patch.object(config,'CERTIFIED_RULE_SCORE_POLICY_ENABLED',True):
             self.assertEqual(policy.champion_bytes(),original)
+        with patch.object(config,'LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED',True):
+            self.assertEqual(policy.champion_bytes(),original)
         with patch.object(config,'TOP_GAINER_SCORE_GATE_MIN_SCORE',999):
             self.assertNotEqual(policy.champion_bytes(),original)
         body = json.loads(original)
@@ -71,6 +74,34 @@ class CertifiedRulePolicyTests(unittest.TestCase):
         self.assertEqual(paired.preflight(body),[])
         body['config']['TOP_GAINER_SCORE_GATE_MIN_SCORE']=999
         self.assertTrue(paired.preflight(body))
+
+    def test_local_ticket_cannot_claim_os_authority(self):
+        with patch.object(config, 'LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED', True), \
+             patch('json.loads', return_value={'release_root': '.'}), \
+             patch.object(Path, 'read_bytes', return_value=b'{}'), \
+             patch('logical_learning_authority.material', return_value=(None, b'key')), \
+             patch.object(policy, 'champion_bytes', return_value=b'champion'), \
+             patch.object(policy.release, 'select', return_value=({}, {'authority_mode': 'isolated_authority'})), \
+             patch.object(ranker, 'build_runtime_candidate_record') as build:
+            self.assertEqual(policy.bonus(sym='BTCUSDT'), 0)
+        build.assert_not_called()
+
+    def test_local_receipt_is_score_consumption_not_fill(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(config, 'LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED', True), \
+                 patch('json.loads', return_value={'release_root': td}), \
+                 patch.object(Path, 'read_bytes', return_value=b'{}'), \
+                 patch('logical_learning_authority.material', return_value=(None, b'key')), \
+                 patch.object(policy, 'champion_bytes', return_value=b'champion'), \
+                 patch.object(policy.release, 'select', return_value=({}, {'authority_mode': 'logical_same_user', 'candidate_sha256': 'candidate'})), \
+                 patch.object(ranker, 'build_runtime_candidate_record', return_value={}), \
+                 patch.object(ranker, 'predict_components_from_candidate_payload', return_value={'quality_proba': .9}):
+                self.assertAlmostEqual(policy.bonus(sym='BTCUSDT', tf='15m', data={'t': [900000]}, i=0), .8)
+            receipts = list((Path(td)/'receipts').glob('*.json'))
+            self.assertEqual(len(receipts), 1)
+            receipt = json.loads(receipts[0].read_text())
+            self.assertEqual(receipt['scope'], 'score_only_not_buy_or_fill')
+            self.assertFalse(receipt['closed_loop'])
 
 
 if __name__ == '__main__': unittest.main()

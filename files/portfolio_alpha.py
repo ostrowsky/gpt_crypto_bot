@@ -35,6 +35,7 @@ def _trade_stream_hash(trades: Sequence[Any]) -> str:
     fields = (
         "sym", "tf", "mode", "entry_ts", "entry_price", "exit_ts", "exit_price",
         "partial_exit_taken", "partial_exit_fraction", "partial_exit_ts", "partial_exit_price",
+        "position_open",
     )
     rows = [tuple(_trade_value(trade, field, None) for field in fields) for trade in trades]
     return _stream_hash(rows)
@@ -177,16 +178,22 @@ def _simulate_account(
     }
 
     events: dict[int, list[tuple[int, int, str, float]]] = {}
+    declared_open: set[int] = set()
     for trade_id, trade in enumerate(trades):
         entry_ts = int(_trade_value(trade, "entry_ts", 0) or 0)
         exit_ts = int(_trade_value(trade, "exit_ts", 0) or 0)
         entry_price = float(_trade_value(trade, "entry_price", 0.0) or 0.0)
         exit_price = float(_trade_value(trade, "exit_price", 0.0) or 0.0)
         symbol = str(_trade_value(trade, "sym", _trade_value(trade, "symbol", "")) or "").upper()
-        if not symbol or entry_ts <= 0 or exit_ts < entry_ts or entry_price <= 0 or exit_price <= 0:
+        still_open = _trade_value(trade, 'position_open', False) is True
+        valid_exit = (exit_ts == 0 and exit_price == 0 if still_open
+                      else exit_ts >= entry_ts and exit_price > 0)
+        if not symbol or entry_ts <= 0 or not valid_exit or entry_price <= 0:
             violations.append(f"invalid_trade:{trade_id}")
             continue
         events.setdefault(entry_ts, []).append((2, trade_id, "entry", entry_price))
+        if still_open:
+            declared_open.add(trade_id)
         partial_fraction = float(_trade_value(trade, "partial_exit_fraction", 0.0) or 0.0)
         partial_ts = int(_trade_value(trade, "partial_exit_ts", 0) or 0)
         partial_price = float(_trade_value(trade, "partial_exit_price", 0.0) or 0.0)
@@ -197,7 +204,8 @@ def _simulate_account(
         # but a boundary-liquidated trade must exist before its own same-timestamp
         # exit is booked. Otherwise the later entry becomes a phantom open position.
         exit_priority = 3 if exit_ts == entry_ts else 1
-        events.setdefault(exit_ts, []).append((exit_priority, trade_id, "exit", exit_price))
+        if not still_open:
+            events.setdefault(exit_ts, []).append((exit_priority, trade_id, "exit", exit_price))
 
     def liquidation_equity(ts_ms: int) -> tuple[float, float, bool]:
         equity = cash
@@ -279,8 +287,9 @@ def _simulate_account(
 
     final_ts = all_timestamps[-1] if all_timestamps else 0
     ending_equity, _, complete = liquidation_equity(final_ts)
-    if positions:
-        violations.append(f"open_positions_at_end:{len(positions)}")
+    unexpected_open = set(positions)-declared_open
+    if unexpected_open:
+        violations.append(f"open_positions_at_end:{len(unexpected_open)}")
     if not complete:
         violations.append("missing_final_mark")
     if not equity_curve:

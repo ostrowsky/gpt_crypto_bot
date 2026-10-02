@@ -164,7 +164,7 @@ class TruthHarnessTest(unittest.TestCase):
 
         self.assertTrue(any(f.check_id == "TH11_PORTFOLIO_ALPHA" for f in audit.findings))
 
-    def test_portfolio_alpha_accepts_complete_current_contract(self) -> None:
+    def test_portfolio_alpha_accepts_complete_current_contract(self, v2=False, missing=0, drawdown=4.0) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             reports = root / ".runtime" / "reports"
@@ -193,6 +193,10 @@ class TruthHarnessTest(unittest.TestCase):
                     "price_stream_hash": "prices",
                 },
             }
+            if v2:
+                payload["metric_contract"] = "canonical_unified_ten_slot_alpha_v2"
+                payload["coverage"]["benchmark_grid"] = {"expected": 100, "observed": 100-missing, "missing": missing}
+                payload["portfolio"]["max_drawdown_after_costs_pct"] = drawdown
             for source_name in ("portfolio_alpha.py", "replay_backtest.py"):
                 source = root / "files" / source_name
                 source.parent.mkdir(parents=True, exist_ok=True)
@@ -203,7 +207,17 @@ class TruthHarnessTest(unittest.TestCase):
             with patch("policy_provenance.current_policy_manifest", return_value={"policy_epoch": "pe-current"}):
                 truth_harness.audit_portfolio_alpha(audit, root)
 
-        self.assertFalse(any(f.check_id == "TH11_PORTFOLIO_ALPHA" for f in audit.findings))
+        failed = any(f.check_id == "TH11_PORTFOLIO_ALPHA" for f in audit.findings)
+        self.assertEqual(failed, bool(missing) or drawdown != drawdown)
+
+    def test_v2_complete_grid_is_accepted(self):
+        self.test_portfolio_alpha_accepts_complete_current_contract(v2=True)
+
+    def test_v2_missing_grid_is_rejected(self):
+        self.test_portfolio_alpha_accepts_complete_current_contract(v2=True, missing=1)
+
+    def test_v2_nonfinite_drawdown_is_rejected(self):
+        self.test_portfolio_alpha_accepts_complete_current_contract(v2=True, drawdown=float('nan'))
 
     def test_portfolio_alpha_fails_on_current_policy_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as td:

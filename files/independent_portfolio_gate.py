@@ -11,6 +11,7 @@ import time
 from portfolio_alpha import evaluate_portfolio_alpha, _simulate_account
 from validated_ranker_rollout import CONTRACT, canonical, seal, sha, unseal
 from coverage_public_verifier import PublicAuthority, verify as verify_coverage, authority_material
+from logical_learning_authority import LogicalAuthority, verify as verify_logical
 
 DAY = 86400000
 STEP = 900000
@@ -22,7 +23,8 @@ def source_hash():
              'portfolio_alpha.py', 'validated_ranker_rollout.py',
              'monitor.py', 'ml_candidate_ranker.py', 'config.py', 'strategy.py',
              'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py',
-             'certified_rule_score_policy.py', 'coverage_public_verifier.py')
+             'certified_rule_score_policy.py', 'coverage_public_verifier.py',
+             'logical_learning_authority.py')
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 
@@ -35,7 +37,9 @@ def harness_passes(project_root=None):
 
 
 def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha, now):
-    cert = (verify_coverage(attestation, authority_key) if isinstance(authority_key, PublicAuthority)
+    logical = isinstance(authority_key, LogicalAuthority)
+    cert = (verify_logical(attestation, authority_key) if logical else
+            verify_coverage(attestation, authority_key) if isinstance(authority_key, PublicAuthority)
             else unseal(attestation, authority_key))
     if (cert.get('bundle_sha256') != sha(raw)
             or cert.get('candidate_sha256') != candidate_sha
@@ -43,10 +47,12 @@ def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha
             or cert.get('evaluator_sha256') != source_hash()
             or not cert.get('issued_at', math.inf) <= now < cert.get('expires_at', 0)
             or cert['expires_at']-cert['issued_at'] > 86400
-            or cert.get('contract') != 'independent-market-policy-certification-v1'
+            or cert.get('contract') != ('logical-market-policy-certification-v1' if logical
+                                        else 'independent-market-policy-certification-v1')
             or any(cert.get(k) is not True for k in
                    ('point_in_time_universe', 'raw_closed_provenance', 'live_policy_parity',
-                    'no_trainer_holdout_access', 'operator_experiment_approved'))):
+                    'operator_experiment_approved'))
+            or (not logical and cert.get('no_trainer_holdout_access') is not True)):
         raise ValueError('missing independent population/policy certification')
     bundle = json.loads(raw)
     if bundle.get('phase') == 'canary' and cert.get('actual_assignment_verified') is not True:
@@ -87,13 +93,16 @@ def compare_accounts(bundle, now):
     reports, curves = {}, {}
     for arm in ('champion', 'candidate'):
         trades = bundle[arm+'_trades']
-        if len(trades) < 100:
+        if sum(t.get('position_open') is not True for t in trades) < 100:
             raise ValueError('insufficient trades')
         for trade in trades:
-            if (trade['sym'] not in universe or not start <= trade['entry_ts'] <= trade['exit_ts'] <= end
-                    or trade['entry_ts'] % STEP or trade['exit_ts'] % STEP
+            still_open = trade.get('position_open') is True
+            exit_valid = (trade['exit_ts'] == 0 and trade['exit_price'] == 0 if still_open
+                          else trade['entry_ts'] <= trade['exit_ts'] <= end)
+            if (trade['sym'] not in universe or not start <= trade['entry_ts'] <= end or not exit_valid
+                    or trade['entry_ts'] % STEP or (not still_open and trade['exit_ts'] % STEP)
                     or any(not math.isfinite(float(trade[k])) or float(trade[k]) <= 0
-                           for k in ('entry_price', 'exit_price'))
+                           for k in (('entry_price',) if still_open else ('entry_price', 'exit_price')))
                     or trade.get('partial_exit_taken', False)):
                 raise ValueError('unsupported or noncausal trade')
         report = evaluate_portfolio_alpha(trades, price_series_by_symbol=prices,
@@ -161,6 +170,7 @@ def authorize(evidence, authority_key, evaluator_key, candidate_raw, champion_ra
     if not (harness_passes() if harness_root is None else harness_passes(harness_root)):
         raise ValueError('full Truth Harness FAIL/UNKNOWN blocks activation')
     body = {'contract': CONTRACT, 'stage': stage, 'issued_at': now, 'expires_at': now+86400,
+            'authority_mode': 'logical_same_user' if isinstance(authority_key, LogicalAuthority) else 'isolated_authority',
             'candidate_sha256': sha(candidate_raw), 'champion_sha256': sha(champion_raw),
             'evaluator_sha256': source_hash(), 'max_bonus': 1.0,
             'fraction': 0.05 if stage == 'CANARY' else 1.0,

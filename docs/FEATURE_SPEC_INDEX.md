@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| Prospective full-policy portfolios | incremental shared engine and explicit logical authority; release remains evidence-gated | `docs/specs/prospective-full-policy-portfolios.md` | complete closed frames, persistent BUY/SELL state, paired after-cost portfolios | maximum-period parity and sealed/forward/canary evidence before adoption |
 | Local logical learning processes | same-user opt-in runtime; no OS isolation or strategy approval | `docs/specs/local-logical-learning-runtime.md` | role liveness, causal observations, pre-holdout training, explicit isolation mode | genuine certified portfolios and full Harness PASS remain required |
 | Scheduled independent forward evidence | prospective collector, fixed holdout isolation, lock-safe bootstrap feed and least-privilege batch-logon S4U tasks | `docs/specs/scheduled-forward-evidence.md` | causal arrival coverage, mature labels, isolated role SID, signed portfolio release gate | verify candidate readiness and prospective coverage; no proxy promotion |
 | Validated ranker rollout | independent account gate and disabled bounded runtime adapter; no approval | `docs/specs/validated-ranker-rollout.md` | paired after-cost portfolios, block-bootstrap CI, exact model/authority binding | certify actual history/forward population; deploy separate authority ACLs; enable only after gates |

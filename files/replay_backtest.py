@@ -2018,6 +2018,8 @@ async def _build_candidates_for_symbol(
     *,
     variant: str = "score_replace",
     include_trend_start: bool = False,
+    stream_state: Optional[dict] = None,
+    frame_ms: Optional[int] = None,
 ) -> List[ReplayCandidate]:
     candidates: List[ReplayCandidate] = []
     c = data["c"].astype(float)
@@ -2025,11 +2027,22 @@ async def _build_candidates_for_symbol(
     time_block_streak_count = 0
     time_block_streak_mode: Optional[str] = None
     time_block_streak_ts: Optional[int] = None
+    if stream_state is not None:
+        if frame_ms is None:
+            raise ValueError('candidate streaming requires a closed frame clock')
+        last_time_block_ts = stream_state.get('last_time_block_ts')
+        time_block_streak_count = stream_state.get('time_block_streak_count', 0)
+        time_block_streak_mode = stream_state.get('time_block_streak_mode')
+        time_block_streak_ts = stream_state.get('time_block_streak_ts')
     prev_bull_state = bool(getattr(config, "_bull_day_active", False))
     prev_btc_vs_ema50 = float(getattr(config, "_btc_vs_ema50", 0.0))
     try:
-        for i in range(max(25, 5), len(c) - 1):
+        first_i = (max(25, stream_state.get('last_i', len(c)-3)+1)
+                   if stream_state is not None else max(25, 5))
+        for i in range(first_i, len(c) - 1):
             ts_ms = int(data["t"][i]) + BAR_MS[tf]
+            if frame_ms is not None and ts_ms != frame_ms:
+                continue
             is_bull_day, btc_vs_ema50 = _market_context_at(market_ctx, ts_ms)
             config._bull_day_active = is_bull_day
             config._btc_vs_ema50 = btc_vs_ema50
@@ -2350,6 +2363,10 @@ async def _build_candidates_for_symbol(
     finally:
         config._bull_day_active = prev_bull_state
         config._btc_vs_ema50 = prev_btc_vs_ema50
+    if stream_state is not None:
+        stream_state.update(last_i=len(c)-2, last_time_block_ts=last_time_block_ts,
+            time_block_streak_count=time_block_streak_count,
+            time_block_streak_mode=time_block_streak_mode, time_block_streak_ts=time_block_streak_ts)
     return candidates
 
 
@@ -3044,6 +3061,8 @@ async def build_replay_candidate_snapshot(
     market_ctx: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
     *,
     variant: str = "baseline",
+    candidate_stream_state: Optional[dict] = None,
+    frame_ms: Optional[int] = None,
 ) -> Tuple[Dict[int, List[ReplayCandidate]], set[int], int]:
     """Build immutable candidate inputs once for policy variants with identical entry rules."""
     candidates_by_ts: Dict[int, List[ReplayCandidate]] = {}
@@ -3067,6 +3086,9 @@ async def build_replay_candidate_snapshot(
                 market_ctx,
                 variant=variant,
                 include_trend_start=variant == "trend_start",
+                stream_state=(candidate_stream_state.setdefault(sym+'/'+tf, {})
+                              if candidate_stream_state is not None else None),
+                frame_ms=frame_ms,
             )
             candidates_total += len(built)
             for candidate in built:
@@ -3088,6 +3110,7 @@ async def simulate_portfolio(
     variant: str = "baseline",
     top_gainer_score_min: float = 0.0,
     candidate_snapshot: Optional[Tuple[Dict[int, List[ReplayCandidate]], set[int], int]] = None,
+    stream_state: Optional[dict] = None,
 ) -> Tuple[List[ReplayTrade], ReplayRunStats]:
     stats = ReplayRunStats()
     if candidate_snapshot is None:
@@ -3114,6 +3137,15 @@ async def simulate_portfolio(
     last_closed_by_symbol: Dict[str, ReplayTrade] = {}
     suspicious_reentry_until: Dict[str, int] = {}
     trades: List[ReplayTrade] = []
+    if stream_state is not None:
+        if ordered_ts and ordered_ts[0] <= stream_state.get('last_ts', -1):
+            raise ValueError('stream frame already processed or unordered')
+        open_positions = {(r['sym'], r['tf']): ReplayTrade(**r)
+                          for r in stream_state.get('open_positions', [])}
+        cooldown_until = dict(stream_state.get('cooldown_until', {}))
+        last_closed_by_symbol = {s: ReplayTrade(**r) for s, r in
+                                 stream_state.get('last_closed_by_symbol', {}).items()}
+        suspicious_reentry_until = dict(stream_state.get('suspicious_reentry_until', {}))
 
     for ts_ms in ordered_ts:
         to_close: List[Tuple[Tuple[str, str], ReplayTrade]] = []
@@ -3537,6 +3569,16 @@ async def simulate_portfolio(
                 min_price_since_entry=float(candidate.price),
             )
 
+    if stream_state is not None:
+        from dataclasses import asdict
+        stream_state.update(open_positions=[asdict(t) for t in open_positions.values()],
+            cooldown_until=cooldown_until,
+            last_closed_by_symbol={s: asdict(t) for s, t in last_closed_by_symbol.items()},
+            suspicious_reentry_until=suspicious_reentry_until)
+        if ordered_ts:
+            stream_state['last_ts'] = ordered_ts[-1]
+        return trades, stats
+
     for key, trade in list(open_positions.items()):
         data, feat = cache[(trade.sym, trade.tf)]
         idx = len(data["c"]) - 2
@@ -3950,6 +3992,14 @@ async def run_replay(
         start_ms=start_ms,
         end_ms=end_ms,
     )
+    # A window starts at a candle *close*, while cache filtering uses opens.
+    # Recover the exact preceding closed BTC candle, never forward-fill its mark.
+    if market_data_mode != 'network' and (not benchmark_series or benchmark_series[0][0] != start_ms):
+        prior = _load_cached_klines(market_cache_dir, 'BTCUSDT', '15m',
+                                   start_ms-BAR_MS['15m'], start_ms, cache_index=local_index)
+        boundary = closed_price_series(prior, bar_ms=BAR_MS['15m'], start_ms=start_ms, end_ms=start_ms)
+        if len(boundary) == 1 and boundary[0][0] == start_ms:
+            benchmark_series = boundary+benchmark_series
     price_series_by_symbol = {
         sym: closed_price_series(
             data,

@@ -310,8 +310,19 @@ def audit_portfolio_alpha(audit: Audit, root: Path = ROOT) -> None:
     coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
     window = payload.get("window") if isinstance(payload.get("window"), dict) else {}
     missing: list[str] = []
-    if payload.get("metric_contract") != "canonical_unified_ten_slot_alpha_v1":
+    if payload.get("metric_contract") not in ("canonical_unified_ten_slot_alpha_v1",
+                                              "canonical_unified_ten_slot_alpha_v2"):
         missing.append("metric_contract")
+    if payload.get('metric_contract') == 'canonical_unified_ten_slot_alpha_v2':
+        grid = coverage.get('benchmark_grid') or {}
+        if (grid.get('missing') != 0 or not grid.get('expected') or
+                grid.get('observed') != grid.get('expected')):
+            missing.append('complete_closed_benchmark_grid')
+        drawdown = portfolio.get('max_drawdown_after_costs_pct')
+        import math
+        if (not isinstance(drawdown, (int, float)) or isinstance(drawdown, bool)
+                or not math.isfinite(drawdown) or not 0 <= drawdown <= 100):
+            missing.append('finite_continuous_drawdown')
     if not payload.get("decision_grade") or payload.get("evidence_grade") != "decision_grade":
         missing.append("decision_grade")
     if int(contract.get("capacity") or 0) != 10 or int(contract.get("same_symbol_concurrency") or 0) != 1:

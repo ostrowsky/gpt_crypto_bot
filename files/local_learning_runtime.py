@@ -13,7 +13,7 @@ from forward_evidence_service import atomic, current_sid, run_tick
 from process_lock import process_lock
 
 ROOT = Path(__file__).resolve().parents[1]
-INTERVALS = {'evaluator': 60, 'exporter': 3600, 'trainer': 3600, 'controller': 300}
+INTERVALS = {'evaluator': 60, 'exporter': 3600, 'trainer': 3600, 'controller': 300, 'portfolio': 60}
 MODE = 'logical_same_user'
 
 
@@ -21,6 +21,8 @@ def initialize(root=ROOT):
     root = root.resolve()
     base = root/'.runtime/learning_roles_local'
     base.mkdir(parents=True, exist_ok=True)
+    from logical_learning_authority import provision
+    provision(base/'authority')
     path = base/'deployment.json'
     sid = current_sid()
     if path.exists():
@@ -72,15 +74,27 @@ def worker(path, role):
             atomic(base/(role+'.lifecycle.json'), {'state': 'RUNNING', 'pid': os.getpid(),
                    'at': time.time(), 'isolation_mode': MODE})
             try:
-                result = run_tick(json.loads(path.read_bytes()), role)
+                deployment = json.loads(path.read_bytes())
+                if role == 'portfolio':
+                    import asyncio
+                    from prospective_policy_portfolios import tick
+                    result = asyncio.run(tick(deployment))
+                    from datetime import datetime, timezone
+                    result['run_time'] = datetime.now(timezone.utc).isoformat()
+                    atomic(base/'evaluator/portfolio_producer_latest.json', result)
+                else:
+                    result = run_tick(deployment, role)
                 blocked = result.get('state') == 'BLOCKED'
                 atomic(base/(role+'.lifecycle.json'), {'state': 'WAITING', 'pid': os.getpid(),
                        'at': time.time(), 'last_result': result.get('state', 'UNKNOWN'),
                        'isolation_mode': MODE})
             except Exception as exc:
                 blocked = True
-                atomic(base/(role+'.error.json'), {'state': 'BLOCKED', 'reason': str(exc),
-                       'isolation_mode': MODE, 'runtime_eligible': False, 'at': time.time()})
+                error = {'state': 'BLOCKED', 'reason': str(exc),
+                         'isolation_mode': MODE, 'runtime_eligible': False, 'at': time.time()}
+                atomic(base/(role+'.error.json'), error)
+                if role == 'portfolio':
+                    atomic(base/'evaluator/portfolio_producer_latest.json', error)
             # Per-role cadence, no overlapping fit/export or catch-up burst.
             interval = min(60, INTERVALS[role]) if blocked else INTERVALS[role]
             deadline = time.monotonic()+max(1, interval-(time.monotonic()-started))
