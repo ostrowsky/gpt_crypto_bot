@@ -10,6 +10,7 @@ import time
 
 from portfolio_alpha import evaluate_portfolio_alpha, _simulate_account
 from validated_ranker_rollout import CONTRACT, canonical, seal, sha, unseal
+from coverage_public_verifier import PublicAuthority, verify as verify_coverage, authority_material
 
 DAY = 86400000
 STEP = 900000
@@ -21,7 +22,7 @@ def source_hash():
              'portfolio_alpha.py', 'validated_ranker_rollout.py',
              'monitor.py', 'ml_candidate_ranker.py', 'config.py', 'strategy.py',
              'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py',
-             'certified_rule_score_policy.py')
+             'certified_rule_score_policy.py', 'coverage_public_verifier.py')
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 
@@ -34,7 +35,8 @@ def harness_passes(project_root=None):
 
 
 def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha, now):
-    cert = unseal(attestation, authority_key)
+    cert = (verify_coverage(attestation, authority_key) if isinstance(authority_key, PublicAuthority)
+            else unseal(attestation, authority_key))
     if (cert.get('bundle_sha256') != sha(raw)
             or cert.get('candidate_sha256') != candidate_sha
             or cert.get('champion_sha256') != champion_sha
@@ -179,7 +181,7 @@ if __name__ == '__main__':
     evidence = {phase: (Path(item['bundle']).read_bytes(),
                          json.loads(Path(item['certification']).read_bytes()))
                 for phase, item in request['evidence'].items()}
-    ticket = authorize(evidence, os.environ.get('RANKER_COVERAGE_AUTHORITY_KEY', '').encode(),
+    ticket = authorize(evidence, authority_material(),
                        os.environ.get('RANKER_EVALUATOR_KEY', '').encode(),
                        Path(request['candidate']).read_bytes(), Path(request['champion']).read_bytes(),
                        request.get('stage', 'CANARY'))

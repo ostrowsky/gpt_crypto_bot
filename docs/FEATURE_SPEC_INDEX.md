@@ -154,7 +154,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
-Coverage authority provisioning: `docs/specs/coverage-authority-provisioning.md` — verified Windows restore point, separate non-admin signing principal and protected RSA keys; provisioning alone never certifies evidence or enables a model.
+Coverage authority provisioning: `docs/specs/coverage-authority-provisioning.md` — verified Windows restore point, separate non-admin signing principal, ephemeral RSA-CNG key generation and public-only verification in production evaluator/controller; no shared coverage HMAC fallback; provisioning alone never certifies evidence or enables a model.
 
 Certified rule-champion score policy: `docs/specs/certified-rule-score-policy.md` — independent bounded score hook shared by monitor/replay, disabled without signed descriptor-bound authorization; legacy ranker remains unchanged; full forward portfolios still required.
 

@@ -94,7 +94,9 @@ try {
     Set-AuthorityAcl $admin @{}
     $password | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $admin 'credential.dpapi') -Encoding ASCII
     $password = $null
-    $rsa = [Security.Cryptography.RSA]::Create()
+    # RSACng creates an ephemeral key; CSP defaults can persist a second private
+    # key in the administrator's profile outside the protected authority store.
+    $rsa = New-Object Security.Cryptography.RSACng
     try {
         $rsa.KeySize = 3072
         $rsa.ToXmlString($true) | Set-Content -LiteralPath (Join-Path $private 'signing_key.xml') -Encoding ASCII

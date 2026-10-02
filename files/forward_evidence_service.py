@@ -19,6 +19,7 @@ import independent_signal_evaluator as evaluator
 import policy_provenance as provenance
 from validated_ranker_rollout import canonical, sha, rollback, rollout
 from process_lock import process_lock
+from coverage_public_verifier import authority_material
 
 
 def atomic(path, value):
@@ -202,7 +203,7 @@ def controller_tick(request_path, release_root, now=None, harness_root=None, con
                     for phase,v in request['evidence'].items()}
         model, champion = Path(request['candidate']).read_bytes(), Path(request['champion']).read_bytes()
         key = os.environ.get('RANKER_EVALUATOR_KEY', '').encode()
-        ticket = authorize(evidence, os.environ.get('RANKER_COVERAGE_AUTHORITY_KEY', '').encode(),
+        ticket = authorize(evidence, authority_material(),
                            key, model, champion, request.get('stage', 'CANARY'), now=now,
                            harness_root=harness_root)
         rollout(release_root, model, ticket, key, champion, expected=prior, now=now)
@@ -305,7 +306,7 @@ def run_tick(deployment, role):
     from independent_portfolio_confirmation import confirm
     confirmation = confirm(Path(deployment.get('portfolio_inputs', registry/'portfolio_inputs.json')),
                            Path(deployment['portfolio_request']),
-                           os.environ.get('RANKER_COVERAGE_AUTHORITY_KEY', '').encode(),
+                           authority_material(),
                            os.environ.get('RANKER_EVALUATOR_KEY', '').encode(),
                            harness_root=deployment.get('project_root'))
     try:

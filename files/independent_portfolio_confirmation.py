@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 
 import independent_portfolio_gate as gate
+from coverage_public_verifier import authority_material
 from validated_ranker_rollout import canonical, sha
 
 CONTRACT = 'independent-portfolio-inputs-v1'
@@ -114,7 +115,7 @@ if __name__ == '__main__':
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
     report = confirm(args.manifest, args.request,
-                     os.environ.get('RANKER_COVERAGE_AUTHORITY_KEY', '').encode(),
+                     authority_material(),
                      os.environ.get('RANKER_EVALUATOR_KEY', '').encode())
     atomic(args.report, report)
     print(json.dumps({'state': report['state'], 'blockers': report['blockers']}))

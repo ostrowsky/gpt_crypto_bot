@@ -27,6 +27,18 @@ legacy shared-key signing, change verification gates, issue a certificate, enabl
 BUY or claim a closed loop. Public-key verification and a validated signer service
 are separate required integration work before authority evidence can be consumed.
 
+Public verification is now wired into scheduled evaluator/controller and both
+production portfolio CLIs using `coverage-rsa-sha256-v1`. They read only the fixed
+OS-protected public trust store and pinned raw key digest, never the old coverage
+HMAC environment secret. Windows RSA SHA256/PKCS1 verification uses the native
+provider, accepts only public RSA-3072 parameters, and fails closed on missing
+key/pin, changed payload, malformed signature, provider failure or timeout.
+Explicit byte-key function callers remain legacy test/migration interfaces; the
+scheduled production path cannot choose that fallback from an input certificate.
+No signer task, automatically certified provenance or production promotion is
+implied. Existing protected scheduled source must be separately deployed after
+restore; changing checkout files does not update that frozen source.
+
 The installer records restore sequence, exact SID, public fingerprint, grants and
 state PROVISIONED_NOT_CERTIFYING. Any failure after account creation removes only
 the newly created account and its newly created directory after containment
