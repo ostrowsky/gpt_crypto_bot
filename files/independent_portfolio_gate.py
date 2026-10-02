@@ -24,7 +24,8 @@ def source_hash():
              'monitor.py', 'ml_candidate_ranker.py', 'config.py', 'strategy.py',
              'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py',
              'certified_rule_score_policy.py', 'coverage_public_verifier.py',
-             'logical_learning_authority.py')
+             'logical_learning_authority.py', 'learning_certificate_issuer.py',
+             'learning_cohort_controller.py','policy_runtime_receipts.py')
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 

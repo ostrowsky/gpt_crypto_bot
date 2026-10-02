@@ -79,9 +79,18 @@ def summarize(root, now=None):
                         (confirmation.get('blockers') or ['independent evidence not ready']))
     if controller.get('state') not in ('CANARY', 'PROMOTED') or not controller.get('runtime_eligible'):
         problems.append('controller: '+str(controller.get('reason') or 'not authorized'))
-    # Authorization/config switches are not receipts of actual live consumption.
-    # No such receipt contract is implemented yet, so never infer application.
-    problems.append('live consumption: no verified receipt contract')
+    receipt = {'application':'UNKNOWN','rollback':'UNKNOWN'}
+    if local:
+        try:
+            from policy_runtime_receipts import summarize as runtime_summary
+            from certified_rule_score_policy import champion_bytes
+            receipt = runtime_summary(root.parent/'release',
+                (root.parent/'authority'/'evaluator.key').read_bytes(),champion_bytes(),now.timestamp())
+        except (OSError,ValueError,KeyError,TypeError): pass
+    if receipt['application']=='UNKNOWN':
+        problems.append('live consumption: no current verified paper admission')
+    issuer=read_status(root/'certificate_issuer_latest.json')
+    cohort=read_status(root/'cohort_controller_latest.json')
     return {'state': 'NOT_CLOSED', 'improvement_verdict': 'UNKNOWN',
             'isolation_mode': 'logical_same_user' if local else 'os_roles_or_unknown',
             'os_access_isolation': False if local else None,
@@ -96,7 +105,11 @@ def summarize(root, now=None):
             'portfolio_intake_state': intake.get('state', 'UNKNOWN') if intake_fresh else 'UNKNOWN',
             'portfolio_intake_phases': intake.get('phases', {}) if intake_fresh else {},
             'portfolio_intake_blockers': intake.get('blockers', []) if intake_fresh else ['missing/stale independent intake'],
-            'production_effect': 'UNKNOWN', 'closed_loop': False,
+            'certificate_issuer_state': issuer.get('state','UNKNOWN') if fresh(issuer,now,600) else 'UNKNOWN',
+            'cohort_controller_state': cohort.get('state','UNKNOWN') if fresh(cohort,now,600) else 'UNKNOWN',
+            'cohort_phase': cohort.get('phase') if fresh(cohort,now,600) else None,
+            'rollback_verification': receipt['rollback'],
+            'production_effect': receipt['application'], 'closed_loop': False,
             'collection_state': collection_state, 'collector_fresh': collector_fresh,
             'exporter_fresh': exporter_fresh,
             'observations': collection.get('observations') if collection_state == 'PROXY_ONLY' else None,

@@ -271,6 +271,9 @@ def render_text(report: dict[str, Any]) -> str:
                      f"монет={loop.get('full_portfolio_symbols')}; "
                      f"начало наблюдений UTC={loop.get('full_portfolio_observation_start_utc')}")
         lines.append(f"  • независимый приём доказательств: {loop.get('portfolio_intake_state', 'UNKNOWN')}")
+        lines.append(f"  • выдача сертификатов: {loop.get('certificate_issuer_state', 'UNKNOWN')}; "
+                     f"переход когорт={loop.get('cohort_controller_state', 'UNKNOWN')}; "
+                     f"фаза={loop.get('cohort_phase')}; откат={loop.get('rollback_verification', 'UNKNOWN')}")
         for phase, evidence in (loop.get('portfolio_intake_phases') or {}).items():
             lines.append(f"    ↳ {phase}: {evidence.get('state', 'UNKNOWN')}")
         lines.append(

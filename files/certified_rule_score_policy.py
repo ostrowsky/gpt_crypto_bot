@@ -9,7 +9,7 @@ import validated_ranker_rollout as release
 CONTRACT = 'certified-rule-score-policy-v1'
 SOURCES = ('monitor.py', 'replay_backtest.py', 'strategy.py', 'indicators.py',
            'config.py', 'ml_candidate_ranker.py', 'policy_provenance.py',
-           'certified_rule_score_policy.py')
+           'certified_rule_score_policy.py', 'policy_runtime_receipts.py')
 
 
 def champion_bytes():
@@ -33,6 +33,7 @@ def probability_bonus(value):
 
 
 def bonus(**kwargs):
+    live_receipts=kwargs.pop('_live_receipts',False)
     local = getattr(config, 'LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED', False)
     if not local and not getattr(config, 'CERTIFIED_RULE_SCORE_POLICY_ENABLED', False):
         return 0.0
@@ -47,6 +48,12 @@ def bonus(**kwargs):
             root = Path(deployment['release_root'])
         selected = release.select(root, champion_bytes(), kwargs['sym'], key, enabled=True)
         if selected is None:
+            if local and live_receipts:
+                try:
+                    from policy_runtime_receipts import fallback
+                    fallback(root,key,kwargs['sym'],kwargs['tf'],int(kwargs['data']['t'][kwargs['i']]))
+                except Exception:
+                    pass  # no rollback request/receipt is not a BUY signal
             return 0.0
         model, ticket = selected
         if local and ticket.get('authority_mode') != 'logical_same_user':
@@ -68,6 +75,25 @@ def bonus(**kwargs):
                        'ticket_sha256': release.sha(release.canonical(ticket)),
                        'scope': 'score_only_not_buy_or_fill', 'closed_loop': False}
             atomic(root/'receipts'/(release.sha(release.canonical(receipt))+'.json'), receipt)
+            if live_receipts:
+                import json
+                from policy_runtime_receipts import context_path
+                authorization=json.loads((root/'active.json').read_bytes())
+                if release.unseal(authorization,key)!=ticket:
+                    raise ValueError('release changed during live score observation')
+                atomic(context_path(root,args['sym'],args['tf'],args['bar_ts']),
+                       {'score':receipt,'authorization':authorization})
         return value
     except Exception:
         return 0.0
+
+
+def record_admission(sym,tf,bar,positions):
+    if not getattr(config,'LOCAL_LOGICAL_POLICY_ROLLOUT_ENABLED',False): return
+    import json
+    from logical_learning_authority import material
+    from policy_runtime_receipts import admission
+    base=Path(__file__).resolve().parents[1]/'.runtime/learning_roles_local'
+    deployment=json.loads((base/'deployment.json').read_bytes())
+    _,key=material(deployment)
+    admission(Path(deployment['release_root']),key,champion_bytes(),positions,sym,tf,bar)

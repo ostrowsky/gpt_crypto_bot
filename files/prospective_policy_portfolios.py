@@ -128,7 +128,8 @@ def export_unsigned(root, manifest, state):
     start, end = frames[0]['body']['frame'], frames[-1]['body']['frame']
     if [f['body']['frame'] for f in frames] != list(range(start, end+1, STEP)):
         raise ValueError('incomplete portfolio valuation clock')
-    bundle = {'phase': 'sealed', 'start_ms': start, 'end_ms': end,
+    phase=manifest.get('phase','sealed')
+    bundle = {'phase': phase, 'start_ms': start, 'end_ms': end,
               'maximum_available_bounds': [start, end],
               'last_model_exposure_ms': manifest['registered_ms'],
               'universe': manifest['symbols'], 'fee_bps': max(7.5, float(config.PAPER_FEE_BPS)),
@@ -139,7 +140,7 @@ def export_unsigned(root, manifest, state):
     for arm, owned in state['arms'].items():
         bundle[arm+'_trades'] = owned['closed_trades']+[
             dict(t, position_open=True) for t in owned['state']['open_positions']]
-    atomic(root/'sealed_unsigned.json', bundle)
+    atomic(root/(phase+'_unsigned.json'), bundle)
 
 
 async def advance(root, manifest, state, incoming, frame, now):
@@ -200,7 +201,7 @@ async def advance(root, manifest, state, incoming, frame, now):
                                           'sha256': sha(canonical(body))})
     result['last_frame'] = frame
     verify_registration(root, manifest)
-    atomic(root/'checkpoint.json', {'body': result, 'sha256': sha(canonical(result))})
+    atomic(root/manifest.get('checkpoint_name','checkpoint.json'), {'body': result, 'sha256': sha(canonical(result))})
     return result
 
 
@@ -209,14 +210,28 @@ async def tick(deployment):
     async with aiohttp.ClientSession() as session:
         root, manifest = await register(deployment, session, now)
         verify_registration(root, manifest)
+        if (root/'cohort.json').exists():
+            from learning_cohort_controller import CONTRACT
+            cohort=json.loads((root/'cohort.json').read_bytes())
+            if cohort.get('contract')!=CONTRACT or cohort.get('phase') not in ('sealed','shadow','canary'):
+                raise ValueError('invalid independent cohort')
+            if cohort.get('state')!='COLLECTING':
+                return {'state':cohort.get('state','BLOCKED'),'runtime_eligible':False}
+            phase=cohort['phase']
+            if phase=='canary':
+                return {'state':'WAITING_ACTUAL_CANARY_COLLECTOR','runtime_eligible':False,
+                        'reason':'hypothetical full-candidate paper is not actual assigned canary'}
+            manifest=dict(manifest,phase=phase,observation_start_ms=cohort['start_ms'],
+                          checkpoint_name='checkpoint.json' if phase=='sealed' else 'checkpoint_'+phase+'.json')
         if now < manifest['observation_start_ms']:
             return {'state': 'EMBARGO', 'observation_start_ms': manifest['observation_start_ms'],
                     'symbols': len(manifest['symbols']), 'runtime_eligible': False}
         frame = now//STEP*STEP
         with process_lock(root/'portfolio.lock'):
             state = {}
-            if (root/'checkpoint.json').exists():
-                envelope = json.loads((root/'checkpoint.json').read_bytes())
+            checkpoint=root/manifest.get('checkpoint_name','checkpoint.json')
+            if checkpoint.exists():
+                envelope = json.loads(checkpoint.read_bytes())
                 if sha(canonical(envelope['body'])) != envelope['sha256']:
                     raise ValueError('portfolio checkpoint corrupt')
                 state = envelope['body']

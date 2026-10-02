@@ -66,7 +66,7 @@ class CertifiedRulePolicyTests(unittest.TestCase):
         for name in ('monitor.py','replay_backtest.py'):
             source=Path(policy.__file__).with_name(name).read_text(encoding='utf-8')
             ast.parse(source)
-            self.assertIn('candidate_score += certified_score_bonus(**ranker_kwargs)',source)
+            self.assertIn('candidate_score += certified_score_bonus('+('_live_receipts=True, ' if name=='monitor.py' else '')+'**ranker_kwargs)',source)
             self.assertIn('ranker_info = _ml_candidate_ranker_components(**ranker_kwargs)',source)
 
     def test_rule_preflight_does_not_need_invalid_legacy_champion(self):

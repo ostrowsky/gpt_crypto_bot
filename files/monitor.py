@@ -5740,7 +5740,7 @@ async def _poll_coin(
             ranker_proba = None if ranker_info is None else float(ranker_info.get("quality_proba", 0.0))
             candidate_score += _ml_candidate_ranker_runtime_bonus(ranker_info)
             from certified_rule_score_policy import bonus as certified_score_bonus
-            candidate_score += certified_score_bonus(**ranker_kwargs)
+            candidate_score += certified_score_bonus(_live_receipts=True, **ranker_kwargs)
             if preview_mode == "trend" and not is_bull_day_now:
                 if ml_proba is None:
                     ml_proba = _ml_trend_nonbull_score(sym, tf, feat, data, i)
@@ -6942,6 +6942,11 @@ async def _poll_coin(
             # и не потеряется. Именно это было причиной "нет позиций при сигналах".
             state.positions[sym] = pos
             save_positions(state.positions)
+            try:
+                from certified_rule_score_policy import record_admission
+                record_admission(sym,tf,int(data['t'][i]),getattr(config,'POSITIONS_FILE','positions.json'))
+            except Exception as receipt_error:
+                log.warning('Policy admission receipt unavailable: %s',receipt_error)
             pos.critic_record_id = await _log_critic_candidate(
                 sym=sym,
                 tf=tf,

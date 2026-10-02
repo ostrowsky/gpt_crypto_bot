@@ -103,9 +103,14 @@ def worker(path, role):
                     atomic(base/'evaluator/portfolio_producer_latest.json', result)
                 else:
                     if role == 'controller':
+                        from learning_certificate_issuer import tick as certificate_tick
+                        certificate_tick(deployment)
                         from portfolio_evidence_intake import tick as intake_tick
                         intake_tick(deployment)
                     result = run_tick(deployment, role)
+                    if role == 'controller':
+                        from learning_cohort_controller import tick as cohort_tick
+                        cohort_tick(deployment)
                 blocked = result.get('state') == 'BLOCKED'
                 atomic(base/(role+'.lifecycle.json'), {'state': 'WAITING', 'pid': os.getpid(),
                        'at': time.time(), 'last_result': result.get('state', 'UNKNOWN'),

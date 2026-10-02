@@ -195,6 +195,7 @@ def controller_tick(request_path, release_root, now=None, harness_root=None, con
     """No proxy approval; portfolio evidence failure clears a prior overlay."""
     from independent_portfolio_gate import authorize
     prior = sha((release_root/'active.json').read_bytes()) if (release_root/'active.json').exists() else None
+    key = os.environ.get('RANKER_EVALUATOR_KEY', '').encode() if evaluator_key is None else evaluator_key
     try:
         if confirmation is not None and confirmation.get('state') != 'READY':
             raise ValueError('independent portfolio confirmation BLOCKED: '+
@@ -213,8 +214,18 @@ def controller_tick(request_path, release_root, now=None, harness_root=None, con
         result = {'state': 'BLOCKED', 'reason': str(exc), 'runtime_eligible': False}
         if prior is not None:
             try:
-                rollback(release_root, prior)
+                previous_authorization = json.loads((release_root/'active.json').read_bytes())
+                already = previous_authorization.get('state') == 'ROLLED_BACK'
+                if not already:
+                    rollback(release_root, prior)
                 result['rollback'] = 'applied'
+                if not already or not (release_root/'rollback_request.json').exists():
+                    atomic(release_root/'rollback_request.json',{
+                        'requested_at':time.time() if now is None else now,'previous_pointer_sha256':prior,
+                        'previous_authorization':previous_authorization,
+                        'rollback_pointer_sha256':sha((release_root/'active.json').read_bytes())})
+                from policy_runtime_receipts import verify_rollback
+                result['rollback_verification']=verify_rollback(release_root,key,now)
             except Exception as failure:
                 result['rollback'] = 'blocked: '+str(failure)
         return result
