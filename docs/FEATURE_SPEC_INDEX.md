@@ -154,6 +154,8 @@ earlier capture of same-day watchlist top movers with a single unified
 
 ## Governance
 
+Frozen full-policy paired replay: `docs/specs/paired-full-policy-replay.md` — independent full BUY/SELL accounts and bounded overlay parity; unsigned history never promotes, inactive live ranker blocks preflight.
+
 Negative-day rebound score audit: `docs/specs/negative-day-rebound-replay.md` — maximum closed-archive diagnostic ablation; no production relaxation.
 
 Immutable training snapshots: `docs/specs/scheduled-forward-evidence.md` — content-addressed pre-holdout datasets; pinned trainer reads and digest validation, no replacement of active reader files.

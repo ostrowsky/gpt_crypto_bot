@@ -20,7 +20,7 @@ def source_hash():
     names = ('independent_portfolio_gate.py', 'independent_portfolio_confirmation.py',
              'portfolio_alpha.py', 'validated_ranker_rollout.py',
              'monitor.py', 'ml_candidate_ranker.py', 'config.py', 'strategy.py',
-             'replay_backtest.py', 'indicators.py', 'policy_provenance.py')
+             'replay_backtest.py', 'indicators.py', 'policy_provenance.py', 'process_lock.py')
     return sha(canonical({name: sha(Path(__file__).with_name(name).read_bytes()) for name in names}))
 
 
@@ -46,6 +46,14 @@ def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha
                     'no_trainer_holdout_access', 'operator_experiment_approved'))):
         raise ValueError('missing independent population/policy certification')
     bundle = json.loads(raw)
+    if bundle.get('phase') == 'canary' and cert.get('actual_assignment_verified') is not True:
+        raise ValueError('canary assignment not certified')
+    result = compare_accounts(bundle, now)
+    return dict(result, bundle_sha256=sha(raw), certification_sha256=sha(canonical(attestation)))
+
+
+def compare_accounts(bundle, now):
+    """Numerical comparison only; this function never certifies provenance or release."""
     phase = bundle['phase']
     if phase not in ('historical', 'sealed', 'shadow', 'canary'):
         raise ValueError('unknown evidence phase')
@@ -60,8 +68,6 @@ def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha
         raise ValueError('unsealed model exposure')
     if end-start < 30*DAY:
         raise ValueError('insufficient observation period')
-    if phase == 'canary' and cert.get('actual_assignment_verified') is not True:
-        raise ValueError('canary assignment not certified')
     prices = bundle['prices']
     universe = bundle['universe']
     if (not universe or len(universe) != len(set(universe)) or set(prices) != set(universe)
@@ -122,7 +128,6 @@ def evaluate_bundle(raw, attestation, authority_key, candidate_sha, champion_sha
     passed = (ci is not None and ci[0] > 0 and delta > 0 and dd <= 15 and dd <= left['max_drawdown_after_costs_pct']+1
               and reports['candidate']['net_alpha_after_costs'] >= 0)
     return {'phase': phase, 'start_ms': start, 'end_ms': end,
-            'bundle_sha256': sha(raw), 'certification_sha256': sha(canonical(attestation)),
             'portfolio_delta_pp': delta, 'reports': reports, 'passed': passed,
             'paired_daily_95ci_pp': ci, 'paired_days': len(daily),
             'uncertainty': 'seven-day moving-block bootstrap; not a guarantee of future return'}

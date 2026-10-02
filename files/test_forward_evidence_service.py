@@ -51,6 +51,13 @@ class ForwardServiceTests(unittest.TestCase):
         result = service.collect(self.registry, self.dataset, self.feature+timedelta(seconds=10))
         self.assertEqual(result['observations'], 0)
 
+    def test_orphan_legacy_lock_does_not_reset_or_block_forward_journal(self):
+        (self.registry/'collector.lock').touch()
+        self.assertEqual(self.observe([row(0)])['new_observations'],1)
+        before = (self.registry/'forward_journal.jsonl').read_bytes()
+        self.assertEqual(self.observe([row(0)])['new_observations'],0)
+        self.assertEqual((self.registry/'forward_journal.jsonl').read_bytes(),before)
+
     def test_late_observation_rejected(self):
         r = row(0)
         r['labels']['ret_5'] = None

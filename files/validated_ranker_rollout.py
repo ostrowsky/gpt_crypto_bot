@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import time
+from process_lock import process_lock
 
 ROOT = Path(__file__).resolve().parents[1] / '.runtime/validated_ranker_rollout'
 CONTRACT = 'validated-ranker-rollout-v1'
@@ -36,10 +37,7 @@ def unseal(value, key):
 
 def atomic_pointer(root, value, expected):
     root.mkdir(parents=True, exist_ok=True)
-    lock = root / 'pointer.lock'
-    with lock.open('xb'):
-        pass
-    try:
+    with process_lock(root / 'pointer.lock'):
         path = root / 'active.json'
         current = sha(path.read_bytes()) if path.exists() else None
         if current != expected:
@@ -50,8 +48,6 @@ def atomic_pointer(root, value, expected):
             handle.flush()
             os.fsync(handle.fileno())
         tmp.replace(path)
-    finally:
-        lock.unlink()
 
 
 def rollout(root, candidate_raw, authorization, key, champion_raw, expected=None, now=None):

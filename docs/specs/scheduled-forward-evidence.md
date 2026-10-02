@@ -22,6 +22,17 @@ rows are not misses or successes. Outcomes remain T+5 proxies, not portfolio fil
 Collector exports an evaluator-owned snapshot and calls existing independent
 evaluator; incomplete population is never certified for portfolio rollout.
 
+Recovery contract (2026-10-02): collector and release-pointer locks are now
+nonblocking OS-owned byte/file locks. Process death automatically releases them;
+an orphan legacy sentinel cannot block collection permanently. Never remove a
+lock file while writers can run: that permits locking distinct inodes. A live
+owner still blocks a second writer; no age-based stealing, PID guessing or journal
+reset. Existing journal hashes, frozen candidate and holdout dates are retained.
+Test real subprocess contention, abrupt termination, legacy empty file and error
+cleanup. Rollback uses the same crash-safe lock and original compare-and-swap.
+Deployment under isolated accounts requires the new process_lock.py dependency;
+checkout tests alone do not establish restored scheduled collection.
+
 Evaluator-owned training export excludes all features/labels at or after frozen
 holdout start. Trainer receives only this sanitized file and cannot read raw
 critic data, evaluator registry, journal, coverage/evaluator secrets or active

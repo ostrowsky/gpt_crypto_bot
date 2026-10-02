@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import independent_signal_evaluator as evaluator
 import policy_provenance as provenance
 from validated_ranker_rollout import canonical, sha, rollback, rollout
+from process_lock import process_lock
 
 
 def atomic(path, value):
@@ -58,10 +59,7 @@ def collect(registry, dataset, now=None):
     start = provenance.parse_utc(manifest['holdout_start'])
     journal = registry/'forward_journal.jsonl'
     counters = {'new_observations': 0, 'new_outcomes': 0, 'late_or_invalid': 0}
-    lock = registry/'collector.lock'
-    with lock.open('xb'):
-        pass
-    try:
+    with process_lock(registry/'collector.lock'):
         observations, outcomes, previous = read_journal(journal)
         def append(kind, identity, row):
             nonlocal previous
@@ -128,8 +126,6 @@ def collect(registry, dataset, now=None):
         return {**counters, 'observations': len(observations), 'outcomes': len(outcomes),
                 'journal_sha256': sha(journal.read_bytes()) if journal.exists() else None,
                 'runtime_eligible': False, 'scope': 'prospective_ret5_proxy_not_portfolio'}
-    finally:
-        lock.unlink()
 
 
 def export_training(dataset, output, cutoff, immutable=False):

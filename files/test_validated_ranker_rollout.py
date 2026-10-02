@@ -52,6 +52,18 @@ def evidence(value):
 
 
 class RolloutTests(unittest.TestCase):
+    def test_orphan_pointer_lock_keeps_compare_and_swap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'pointer.lock').touch()
+            release.atomic_pointer(root, {'state':'initial'}, None)
+            raw = (root/'active.json').read_bytes()
+            with self.assertRaisesRegex(ValueError,'concurrently'):
+                release.atomic_pointer(root, {'state':'wrong'}, None)
+            self.assertEqual((root/'active.json').read_bytes(),raw)
+            release.rollback(root, release.sha(raw))
+            self.assertEqual(json.loads((root/'active.json').read_bytes())['state'],'ROLLED_BACK')
+
     def test_runtime_bonus_disabled_and_clipped(self):
         import monitor
         info = {'payload_version': 2, 'final_score': 0, 'validated_overlay_bonus': 100}
