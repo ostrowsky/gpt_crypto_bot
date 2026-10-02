@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| BTC leader entry/exit hypothesis | pre-registered causal hourly research; no live approval | `docs/specs/btc-leader-entry-exit.md` | delayed correlations, false signals, 2x amplification, paired after-cost exits | maximum local history; train-only selection; separate prospective validation |
 | Maximum candidate population parity | closed-prefix vs batch generator audit; research-only, not live-policy certification | `docs/specs/candidate-population-parity.md` | all candidate fields/multiplicity, frame denominators, causal prefix coverage | maximum-period result plus independent monitor BUY-path equivalence |
 | Certified learning lifecycle | proof-bound issuance, disjoint cohorts, admission/rollback receipts and actual canary exit collection; no production approval | `docs/specs/certified-learning-lifecycle.md` | verified proof scope, cohort-bound durable entries/exits, fallback receipts | full BUY-path parity, complete marked canary/control portfolios and genuine forward evidence |
 | Automatic portfolio evidence intake | signed-evidence discovery and maximum execution parity tooling; no synthetic approvals | `docs/specs/automatic-portfolio-evidence-intake.md` | certified phase readiness, independent rejection, batch/stream execution parity | candidate-generation parity, raw/PIT certification and genuine forward cohorts |
