@@ -17,10 +17,12 @@ from paired_full_policy_replay import frozen_arm
 from process_lock import process_lock
 from recover_rocket_history import exchange_rows, valid
 from validated_ranker_rollout import canonical, sha
+from replay_closed_trade_accounting import extend_index, reconcile
 
 STEP = 900000
 DAY = 86400000
-SOURCES = (*policy.SOURCES, 'prospective_policy_portfolios.py', 'paired_full_policy_replay.py')
+SOURCES = (*policy.SOURCES, 'prospective_policy_portfolios.py', 'paired_full_policy_replay.py',
+           'replay_closed_trade_accounting.py')
 
 
 async def register(deployment, session, now):
@@ -185,6 +187,9 @@ async def advance(root, manifest, state, incoming, frame, now):
                 variant='score_replace_cluster', top_gainer_score_min=float(config.TOP_GAINER_SCORE_GATE_MIN_SCORE),
                 candidate_snapshot=({frame: candidates}, {frame}, len(candidates)), stream_state=owned['state'])
             owned['closed_trades'].extend(asdict(t) for t in trades)
+            history_index = {}
+            extend_index(history_index, owned['closed_trades'])
+            reconcile(history_index, owned['state'])
             # The objective day is not finished. Do not publish partial-day
             # ranges as final early-capture labels.
             for row in (*owned['closed_trades'], *owned['state']['open_positions']):
