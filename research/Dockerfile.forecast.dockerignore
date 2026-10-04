@@ -1,0 +1,7 @@
+**
+!files/
+!files/research_forecast.py
+!research/
+!research/requirements-forecast.txt
+!research/Dockerfile.forecast
+!research/Dockerfile.forecast.dockerignore

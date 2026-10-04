@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| BTC/ETH/SOL forecasting interview demo | isolated causal research and runnable forecast API; no trading approval | `docs/specs/research-forecast-notebook.md` | paired forecast errors, interval counts, UTC split integrity, API freshness | longer sealed history and prospective evidence; trading gates unchanged |
 | BTC leader entry/exit hypothesis | pre-registered causal hourly research; raw/cache archive formats separated; no live approval | `docs/specs/btc-leader-entry-exit.md` | delayed correlations, false signals, 2x amplification, paired after-cost exits | maximum local history; train-only selection; separate prospective validation |
 | Maximum candidate population parity | closed-prefix vs batch generator audit; research-only, not live-policy certification | `docs/specs/candidate-population-parity.md` | all candidate fields/multiplicity, frame denominators, causal prefix coverage | maximum-period result plus independent monitor BUY-path equivalence |
 | Certified learning lifecycle | proof-bound issuance, disjoint cohorts, admission/rollback receipts and actual canary exit collection; no production approval | `docs/specs/certified-learning-lifecycle.md` | verified proof scope, cohort-bound durable entries/exits, fallback receipts | full BUY-path parity, complete marked canary/control portfolios and genuine forward evidence |

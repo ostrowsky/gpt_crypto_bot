@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY research/requirements-forecast.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+COPY files/research_forecast.py research_forecast.py
+RUN useradd --create-home forecast && mkdir -p /app/evidence && chown forecast:forecast /app/evidence
+USER forecast
+ENV PYTHONUNBUFFERED=1 MPLCONFIGDIR=/tmp/matplotlib
+EXPOSE 8000
+ENTRYPOINT ["python", "research_forecast.py"]
+CMD ["--serve", "--host", "0.0.0.0", "--cache", "/app/evidence/cache", "--output", "/app/evidence/benchmark.json"]
