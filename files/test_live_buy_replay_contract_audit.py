@@ -8,11 +8,11 @@ import audit_live_buy_replay_contract as audit
 
 
 class AuditTests(unittest.TestCase):
-    def test_real_conditional_contract_probes_fail_not_full_live_pass(self):
+    def test_base_hold_fixed_but_capacity_still_fails_not_full_live_pass(self):
         rows=asyncio.run(audit.probes())
         self.assertEqual(rows[0]['live'],16)
-        self.assertEqual(rows[0]['replay'],48)
-        self.assertEqual([r['state'] for r in rows],['FAIL','FAIL'])
+        self.assertEqual(rows[0]['replay'],16)
+        self.assertEqual([r['state'] for r in rows],['PASS','FAIL'])
         self.assertFalse(rows[1]['live_allowed'])
         self.assertTrue(rows[1]['replay_allowed'])
 

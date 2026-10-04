@@ -713,14 +713,21 @@ def _entry_candidate(feat: dict, i: int, c: np.ndarray, tf: str) -> Optional[Tup
     if entry_ok:
         mode, early_15m_continuation = get_effective_entry_mode(feat, i, c, tf=tf)
         trail_k = getattr(config, "ATR_TRAIL_K_STRONG", 2.5) if mode in ("strong_trend", "impulse_speed") else config.ATR_TRAIL_K
-        max_hold = getattr(config, "MAX_HOLD_BARS_15M", 48)
+        max_hold = (getattr(config, "MAX_HOLD_BARS_15M", 48)
+                    if tf == "15m" else config.MAX_HOLD_BARS)
         return mode, trail_k, max_hold, early_15m_continuation
     if surge_ok:
-        return "impulse_speed", getattr(config, "ATR_TRAIL_K_STRONG", 2.5), getattr(config, "MAX_HOLD_BARS_15M", 48), False
+        max_hold = (getattr(config, "MAX_HOLD_BARS_15M", 48)
+                    if tf == "15m" else getattr(config, "MAX_HOLD_BARS", 16))
+        return "impulse_speed", getattr(config, "ATR_TRAIL_K_STRONG", 2.5), max_hold, False
     if imp_ok:
-        return "impulse", getattr(config, "ATR_TRAIL_K", 2.0), getattr(config, "MAX_HOLD_BARS_15M", 48), False
+        max_hold = (getattr(config, "MAX_HOLD_BARS_15M", 48)
+                    if tf == "15m" else getattr(config, "MAX_HOLD_BARS", 16))
+        return "impulse", getattr(config, "ATR_TRAIL_K", 2.0), max_hold, False
     if aln_ok and bool(getattr(config, "ALIGNMENT_BUY_ENABLED", False)):
-        return "alignment", getattr(config, "ATR_TRAIL_K", 2.0), getattr(config, "MAX_HOLD_BARS_15M", 48), False
+        max_hold = (getattr(config, "MAX_HOLD_BARS_15M", 48)
+                    if tf == "15m" else getattr(config, "MAX_HOLD_BARS", 16))
+        return "alignment", getattr(config, "ATR_TRAIL_K", 2.0), max_hold, False
     return None
 
 
