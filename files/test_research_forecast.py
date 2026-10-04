@@ -2,6 +2,9 @@
 import json
 import tempfile
 import unittest
+import io
+import zipfile
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -28,7 +31,7 @@ class TemporalIntegrity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.cfg = replace(rf.ForecastConfig(), symbols=("BTCUSDT",), history_days=5,
-                          models=("Persistence",), bootstrap_draws=100)
+                          models=("Persistence",), bootstrap_draws=100,min_test_days=10)
         cls.rows = raw_rows(cls.cfg)
         cls.market = rf.clean_klines(cls.rows, cls.cfg)
         cls.full = rf.prepare(cls.market, cls.cfg)
@@ -83,7 +86,7 @@ class TemporalIntegrity(unittest.TestCase):
         splits,_ = rf.split_frames(self.full,self.cfg)
         model = rf.FixedRegressor("Ridge",splits["train"],splits["tune"],self.full,self.cfg)
         scaler = model.model.steps[0][1]
-        np.testing.assert_allclose(scaler.mean_,splits["train"][rf.FEATURES].mean().to_numpy())
+        np.testing.assert_allclose(scaler.mean_,rf.evaluation_grid(splits["train"],self.cfg.train_stride)[rf.FEATURES].mean().to_numpy())
         changed = self.full.copy()
         changed.loc[splits["test"].index,rf.target_columns(self.cfg)] = 100
         model2 = rf.FixedRegressor("Ridge",splits["train"],splits["tune"],changed,self.cfg)
@@ -104,6 +107,61 @@ class TemporalIntegrity(unittest.TestCase):
         second=policy.predict(changed,rows)
         np.testing.assert_allclose(first,second)
         self.assertTrue(np.isfinite(first).all())
+
+    def test_seasonal_parameters_train_only_and_forecast_prefix_invariant(self):
+        splits,_=rf.split_frames(self.full,self.cfg)
+        rows=splits['test'].iloc[[10]]
+        idx=int(rows.time_idx.iloc[0])
+        changed=self.full.copy()
+        changed.loc[idx+1:,'log_close']+=100
+        changed.loc[idx+1:,rf.STATE_EXOG]=999999
+        for name in ('SARIMA','SARIMAX'):
+            policy=rf.build_policy(name,splits['train'],splits['tune'],self.full,self.cfg)
+            before=policy.predict(self.full,rows)
+            after=policy.predict(changed,rows)
+            np.testing.assert_allclose(before,after)
+            altered=self.full.copy()
+            altered.loc[splits['tune'].index,rf.CALENDAR]=999
+            second=rf.build_policy(name,splits['train'],altered.loc[splits['tune'].index],altered,self.cfg)
+            np.testing.assert_allclose(policy.beta,second.beta)
+            self.assertAlmostEqual(policy.phi,second.phi)
+            self.assertAlmostEqual(policy.seasonal,second.seasonal)
+            self.assertTrue(policy.fit_diagnostics['success'])
+
+    def test_archive_microseconds_checksum_and_complete_grid(self):
+        cfg=replace(self.cfg,end_utc='2026-09-01T00:00:00Z',history_days=1)
+        rows=raw_rows(cfg)
+        micro=[r[:] for r in rows]
+        for row in micro:
+            row[0]*=1000
+            row[6]=row[6]*1000+999
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:
+            archive.writestr('BTCUSDT-1m-2026-08.csv','\n'.join(','.join(map(str,r)) for r in micro))
+        data=buffer.getvalue()
+        checksum=hashlib.sha256(data).hexdigest()+'  BTCUSDT-1m-2026-08.zip'
+        def opener(url,timeout):return io.BytesIO(checksum.encode() if url.endswith('CHECKSUM') else data)
+        with tempfile.TemporaryDirectory() as root:
+            actual,manifest=rf.fetch_archive_history('BTCUSDT',cfg,root,opener=opener)
+            self.assertEqual(len(actual),1440)
+            self.assertEqual(manifest['archives'][0]['sha256'],hashlib.sha256(data).hexdigest())
+            path=Path(root)/'BTCUSDT-1m-2026-08.zip'
+            path.write_bytes(b'corrupted')
+            with self.assertRaises(ValueError):rf.fetch_archive_history('BTCUSDT',cfg,root,opener=opener)
+
+    def test_direction_baseline_is_train_only_and_abstentions_are_counted(self):
+        train=self.full.iloc[100:200].copy()
+        train['target_h15']=-1
+        rows=self.full.iloc[300:320].copy()
+        rows['target_h15']=1
+        report=rf.direction_report(rows,np.ones((20,15)),train,self.cfg)
+        self.assertEqual(report['direction_baseline_correct'],0)
+        self.assertEqual(report['direction_train_majority_sign'],-1)
+        self.assertEqual(report['direction_population_correct'],20)
+        report=rf.direction_report(rows,np.zeros((20,15)),train,self.cfg)
+        self.assertEqual(report['direction_abstentions'],20)
+        self.assertEqual(report['direction_hit_rate'],0)
+        self.assertIsNone(report['direction_balanced_accuracy'])
 
     def test_selection_includes_persistence_and_sees_only_tuning(self):
         actual = np.ones((10,self.cfg.horizon))*0.001
@@ -146,7 +204,7 @@ class TemporalIntegrity(unittest.TestCase):
         rejected=rf.paired_day_bootstrap(rows,actual,-actual,self.cfg)
         self.assertEqual(supported['verdict'],'SUPPORTED_DIAGNOSTIC')
         np.testing.assert_allclose(supported['ci95_improvement_pct'],[50,50])
-        self.assertEqual(rejected['verdict'],'NOT_PROVEN')
+        self.assertEqual(rejected['verdict'],'NO_IMPROVEMENT')
         np.testing.assert_allclose(rejected['ci95_improvement_pct'],[-100,-100])
 
     def test_experiment_grid_and_calibration_cannot_change_selection(self):
@@ -185,6 +243,17 @@ class ServingContract(unittest.TestCase):
         self.assertGreater(rf.utc(row["target_close_at"][0]),rf.utc(row["issued_at"]))
         self.now+=pd.Timedelta(minutes=2)
         with self.assertRaises(ValueError):self.service.forecast("BTCUSDT")
+
+    def test_live_history_matches_declared_classical_window_and_context(self):
+        seen=[]
+        original=self.service.fetcher
+        def capture(symbol,cfg,cache):
+            seen.append(cfg.history_days)
+            return original(symbol,cfg,cache)
+        self.service.fetcher=capture
+        self.service.refresh('unused')
+        self.assertEqual(seen,[3])
+        self.assertGreaterEqual(seen[0]*1440,self.cfg.classical_window+self.cfg.context)
 
     def test_failed_refresh_does_not_publish_partial_values(self):
         self.service.refresh("unused")
@@ -267,6 +336,67 @@ class NotebookContract(unittest.TestCase):
                 self.assertTrue(source.endswith('    main()\n'))
             finally:
                 os.chdir(cwd)
+
+    def test_notebook_has_every_method_graph_and_interactive_controls(self):
+        from build_research_forecast_notebook import build
+        source='\n'.join(''.join(c['source']) for c in build()['cells'])
+        self.assertIn('plot_method_evidence(experiment,cv_traces,CFG)',source)
+        self.assertIn('plot_comparison(experiment,CFG)',source)
+        self.assertIn('interactive_comparison(experiment,CFG)',source)
+        self.assertIn('direction_ci95_familywise_gain_pp',source)
+
+
+class ProspectiveContract(unittest.TestCase):
+    def setUp(self):
+        self.cfg=replace(rf.ForecastConfig(),symbols=('BTCUSDT',),models=('Persistence',))
+        self.now=rf.utc('2026-10-04T12:00:10Z')
+        self.experiment=dict(predictions={'BTCUSDT':{'Persistence':np.zeros((1,15))}},
+                             policies={'BTCUSDT':{'Persistence':None}},
+                             widths={'BTCUSDT':{'Persistence':np.ones(15)*.01}})
+        def fetcher(symbol,cfg,cache):
+            return rf.clean_klines(raw_rows(cfg),cfg),dict(sha256='test-input')
+        self.controller=rf.ForecastComparison(self.experiment,self.cfg,fetcher=fetcher,clock=lambda:self.now)
+
+    def test_refresh_only_mature_facts_and_never_rewrites_forecast(self):
+        key=self.controller.create('BTCUSDT')
+        frozen=json.dumps(self.controller.snapshots[key],sort_keys=True)
+        initial=self.controller.metrics(key).iloc[0]
+        self.assertEqual(initial.mature_path_points,0)
+        self.assertIsNone(initial.MAE_USDT)
+        self.now+=pd.Timedelta(minutes=5)
+        actual=self.controller.refresh(key).iloc[0]
+        self.assertEqual(actual.mature_path_points,5)
+        self.assertEqual(actual.state,'PARTIAL')
+        self.now+=pd.Timedelta(minutes=10)
+        actual=self.controller.refresh(key).iloc[0]
+        self.assertEqual(actual.mature_path_points,15)
+        self.assertEqual(actual.state,'COMPLETE')
+        self.assertEqual(frozen,json.dumps(self.controller.snapshots[key],sort_keys=True))
+
+    def test_deadline_and_missing_mature_data_do_not_turn_into_success(self):
+        fetcher=self.controller.fetcher
+        def delayed(symbol,cfg,cache):
+            data=fetcher(symbol,cfg,cache)
+            self.now+=pd.Timedelta(minutes=2)
+            return data
+        self.controller.fetcher=delayed
+        with self.assertRaises(ValueError):self.controller.create('BTCUSDT')
+        self.assertFalse(self.controller.snapshots)
+        self.controller.fetcher=fetcher
+        key=self.controller.create('BTCUSDT')
+        self.now+=pd.Timedelta(days=4)
+        result=self.controller.refresh(key).iloc[0]
+        self.assertEqual(result.state,'MISSING_OBSERVATIONS')
+        self.assertEqual(result.missing_mature_points,15)
+        self.assertIsNone(result.MAE_USDT)
+
+    def test_snapshot_json_preserves_original_paths_and_timestamp(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.controller.output_dir=Path(root)
+            key=self.controller.create('BTCUSDT')
+            payload=json.loads((Path(root)/(key+'.json')).read_text(encoding='utf-8'))
+            self.assertEqual(payload,self.controller.snapshots[key])
+            self.assertGreater(rf.utc(payload['target_close_at'][0]),rf.utc(payload['issued_at']))
 
 
 if __name__ == "__main__":

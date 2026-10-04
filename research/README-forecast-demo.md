@@ -8,8 +8,19 @@ first code cell, restart the kernel and run all. Binance public data needs no ke
 The source notebook has no saved outputs. A completed run writes input hashes,
 versions, all model failures, selection decisions and final metrics into
 `forecast_demo_artifacts/benchmark.json`. Keep that folder out of Git. The frozen
-default snapshot ends exclusively at `2026-10-04T00:00:00Z`; three assets use the
-same 30-day minute grid. Optional models are explicitly enabled before a new run.
+default snapshot is [2026-05-04,2026-09-01) UTC; three assets use the same
+120-day minute grid: 60 train / 15 tune / 15 calibration / 30 test days.
+Checksum-verified monthly spot archives are normalized from microseconds.
+Persistence, Ridge, XGBoost, ARIMA, SARIMA and SARIMAX are all default models.
+Seasonal AR-only models use explicit train-only conditional least squares and
+calendar-only SARIMAX exog. DL/Prophet are optional before a new run.
+
+The notebook includes a complete comparison table, familywise uncertainty,
+per-method real-price/forecast plots for train OOF, test and frozen inference,
+and an ipywidgets panel. In an active kernel, create a timestamped immutable live
+research forecast, then manually refresh closed candles to overlay new actuals.
+Mature-point counts and metrics update; predictions and trained weights do not.
+The panel is research-only and does not override production release expiry.
 
 The original v2 notebook remains unchanged in Downloads. Its saved execution was
 partial; it cannot establish a model-quality or profitability result.
@@ -21,7 +32,7 @@ process environment. Never put it into the notebook or a command stored in Git.
 
 ```text
 python -m pip install -r research/requirements-forecast.txt
-python files/research_forecast.py --serve --end-utc 2026-10-04T00:00:00Z
+python files/research_forecast.py --serve --end-utc <preregistered-fresh-UTC-cutoff>
 ```
 
 Training runs once before serving. No automatic refitting or model selection uses
@@ -34,7 +45,7 @@ For an isolated container, build from the repository root:
 
 ```text
 docker build -f research/Dockerfile.forecast -t forecast-demo .
-docker run --rm -p 127.0.0.1:8000:8000 -e FORECAST_API_TOKEN forecast-demo
+docker run --rm -p 127.0.0.1:8000:8000 -e FORECAST_API_TOKEN forecast-demo --serve --host 0.0.0.0 --end-utc <preregistered-fresh-UTC-cutoff>
 ```
 
 The Docker recipe has not been built here because Docker is unavailable. Supply
@@ -45,8 +56,10 @@ requires an explicitly revalidated release with a new preregistered cutoff.
 ## Evidence boundary
 
 Forecast MAE and empirical intervals are research diagnostics, not net portfolio
-alpha. A 30-day run has only four complete test-days and cannot meet the minimum
-ten-day support for a paired uncertainty claim. Tests enforce causal feature
+alpha. The extended run uses 30 complete test days and familywise-corrected
+day-block intervals with three-day block sensitivity. A confidence interval
+crossing zero is INCONCLUSIVE; more rows cannot guarantee significance.
+Tests enforce causal feature
 construction and serving contracts; they do not establish exact historical
 arrival times, stable market alpha or optional DL-library compatibility.
 

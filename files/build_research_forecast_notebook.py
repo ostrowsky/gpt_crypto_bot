@@ -18,7 +18,7 @@ def build():
     md("""
 # ML Researcher: от сырых свечей до проверяемого прогноза и API
 
-**Демо для интервью · BTCUSDT / ETHUSDT / SOLUSDT · версия 3**
+**Демо для интервью · BTCUSDT / ETHUSDT / SOLUSDT · версия 3.1**
 
 Задача — прогнозировать **всю траекторию на 1…15 минут** по минутным свечам
 Binance Spot, сравнить модели с persistence и показать инженерный путь до
@@ -73,7 +73,7 @@ kernel. Дополнительные LSTM/TFT/Prophet запускаются п�
          + "\n# Для опциональных моделей (отдельный эксперимент с зафиксированными версиями):"
          + "\n# %pip install torch prophet lightning pytorch-forecasting\n"
          + "import importlib.util\n"
-         + "required = ['numpy', 'pandas', 'scipy', 'sklearn', 'xgboost', 'statsmodels', 'matplotlib']\n"
+         + "required = ['numpy', 'pandas', 'scipy', 'sklearn', 'xgboost', 'statsmodels', 'matplotlib', 'ipywidgets']\n"
          + "missing = [p for p in required if importlib.util.find_spec(p) is None]\n"
          + "if missing:\n    raise RuntimeError('Установите зависимости из команды выше: ' + ', '.join(missing))")
     source = (ROOT / "files" / "research_forecast.py").read_text(encoding="utf-8")
@@ -81,9 +81,9 @@ kernel. Дополнительные LSTM/TFT/Prophet запускаются п�
     code(source, hidden=True)
     code(f"SOURCE_SHA256 = {hashlib.sha256((ROOT/'files'/'research_forecast.py').read_text(encoding='utf-8').encode('utf-8')).hexdigest()!r}\n"
          + "CFG = ForecastConfig()\n"
-         + "# End exclusive: [2026-09-04 00:00 UTC, 2026-10-04 00:00 UTC).\n"
+         + "# End exclusive: [2026-05-04 00:00 UTC, 2026-09-01 00:00 UTC).\n"
          + "# Для НОВОГО эксперимента измените дату ДО просмотра результатов.\n"
-         + "# CFG = ForecastConfig(history_days=120, end_utc='2026-10-04T00:00:00Z')\n"
+         + "# 60 train / 15 tune / 15 calibration / 30 sealed test days.\n"
          + "# CFG = ForecastConfig(models=('Persistence','Ridge','XGBoost','ARIMA','SARIMA','SARIMAX','LSTM','TFT'), classical_window=2880)\n"
          + "CACHE = Path('forecast_demo_artifacts/cache')\n"
          + "EVIDENCE = Path('forecast_demo_artifacts/benchmark.json')\n"
@@ -94,13 +94,19 @@ kernel. Дополнительные LSTM/TFT/Prophet запускаются п�
 **Ответ:** «Мой пример — исследование краткосрочного прогноза BTC, ETH и SOL:
 минутные OHLCV Binance, горизонт 1–15 минут, цель — накопленная лог-доходность
 от последнего закрытого бара. Baseline — неизменность цены. Сравниваю Ridge,
-XGBoost и ARIMA, а сезонные и DL-модели — как отдельные явно включаемые гипотезы.
+XGBoost, ARIMA, SARIMA и SARIMAX; DL — отдельные явно включаемые гипотезы.
 Результат оцениваю по ошибке на одинаковых будущих timestamp, а не по похожести
 графиков. Числа привожу из таблицы ниже; стабильное превосходство заранее не обещаю».
 
-Тридцать дней — ограниченный демонстрационный период, не вся история биржи.
-Для утверждения об устойчивости нужен новый заранее зафиксированный длинный
-период; пример 120 дней указан выше. В этом запуске торговые правила не меняются.
+Использую **120 дней**, минимальный объём для выбранного протокола:
+60 train + 15 tune + 15 calibration + 30 test. Это не универсальная нижняя
+граница объёма данных для forecasting. Длинная test-часть нужна для проверки
+устойчивости, а не потому, что каждый прогноз должен помнить четыре месяца.
+Финальный период — август 2026; сентябрь, уже просмотренный в предыдущем
+30-дневном демо, исключён. Архивы Binance проверяются по SHA256 CHECKSUM;
+микросекунды spot-архивов явно переводятся в миллисекунды.
+[Формат и контрольные суммы Binance](https://github.com/binance/binance-public-data).
+В этом запуске торговые правила не меняются.
 """)
     code("market, input_manifest = {}, {}\nfor symbol in CFG.symbols:\n"
          + "    market[symbol], input_manifest[symbol] = fetch_history(symbol, CFG, CACHE)\n"
@@ -109,8 +115,8 @@ XGBoost и ARIMA, а сезонные и DL-модели — как отдель
     md("""
 ## 2. Честный backtest и доступность данных
 
-**Ответ:** «Разбиваю данные по времени: 60% train, 15% tune, 10% calibration,
-15% untouched test. Train обучает модель и scaler; tune выбирает модель/эпоху;
+**Ответ:** «Разбиваю данные по времени: 60 дней train, 15 tune, 15 calibration,
+30 untouched test. Train обучает модель и scaler; tune выбирает модель/эпоху;
 calibration задаёт интервалы; test оценивает уже зафиксированное решение.
 Удаляю origin, если его последняя будущая метка ещё не была доступна до начала
 следующей части. Внешние данные присоединяю по available_at, а не только event_time.
@@ -125,7 +131,7 @@ ARIMA(1,1,0) оценивает AR-коэффициент методом Юла�
 это аналитическое оценивание, а не успешная «сходимость» итерационного MLE.
 [API statsmodels](https://www.statsmodels.org/stable/generated/statsmodels.tsa.arima.model.ARIMA.fit.html).
 
-Фиксированные ML-модели и rolling refit классических моделей — разные
+Фиксированные ML/SARIMA/SARIMAX и rolling refit ARIMA — разные
 предзаданные политики обновления. Таблица сравнивает именно эти политики;
 она не доказывает превосходство одной архитектуры при равном compute budget.
 """)
@@ -150,9 +156,14 @@ ARIMA(1,1,0) оценивает AR-коэффициент методом Юла�
 В демо предусмотрены три expanding-window fold **только внутри train**, регуляризация
 Ridge/XGBoost, отдельный tune, а для LSTM — выбор checkpoint по tune и train-only
 нормализация targets. Финальный test не участвует в поиске гиперпараметров.
-Для доверительного вывода задан минимум **10 полных test-дней**; даже это
-минимальный диагностический порог, не гарантия независимости дней.
-Default 30 дней дают меньше — корректный вывод будет `UNKNOWN`.
+Задан минимум **30 полных test-дней**. Для семейства сравнений применена
+Bonferroni-поправка; показаны обычный и familywise CI и чувствительность к
+блокам из трёх последовательных дней. Интервал, пересекающий ноль, —
+`INCONCLUSIVE`, отрицательный целиком — `NO_IMPROVEMENT`, положительный
+целиком — `SUPPORTED_DIAGNOSTIC`. Больше данных устраняет прежнюю нехватку
+test-дней, но не гарантирует значимости. Число bootstrap-повторов — 10 000.
+Обучение Ridge/XGBoost идёт на фиксированном 15-минутном grid (не по результатам);
+SARIMA/SARIMAX оцениваются по последним 2880 минутам train и далее не переобучаются.
 """)
     code("experiment = run_experiment(market, CFG)\n"
          + "save_evidence(experiment, input_manifest, EVIDENCE)\n"
@@ -160,16 +171,15 @@ Default 30 дней дают меньше — корректный вывод б
          + "display(benchmark[['symbol','model','n_origins','MAE_h15_return','MAE_h15_USDT','improvement_pct','selected_before_test','n_time_blocks','verdict']])\n"
          + "display(pd.DataFrame(experiment['status']))\n"
          + "print('Параметры/версии/input hashes:', EVIDENCE.resolve())")
-    code("cv_results = expanding_window_check(experiment, CFG, model_names=('Ridge',))\n"
-         + "# Добавляйте XGBoost в fold-протокол ДО нового эксперимента, если проверяете его устойчивость.\n"
+    code("cv_results, cv_traces = expanding_window_check(experiment, CFG, model_names=tuple(n for n in CFG.models if n != 'Persistence'), return_traces=True)\n"
          + "display(pd.DataFrame(cv_results)[['symbol','model','fold','n_train','n_origins','improvement_pct']])")
     md("""
 ## 4. Простые и сложные подходы
 
 **Ответ:** «В этом проекте основной воспроизводимый benchmark включает persistence,
-линейную Ridge, boosting XGBoost и ARIMA. SARIMA/SARIMAX, Prophet, LSTM и TFT
-подготовлены как опциональные эксперименты. SARIMAX использует известный календарь
-и состояние на origin, замороженное на горизонт. Интервал 60 минут у SARIMA —
+линейную Ridge, boosting XGBoost, ARIMA, SARIMA и SARIMAX. Prophet, LSTM и TFT
+подготовлены как опциональные эксперименты. SARIMAX использует только известный
+календарь: реальные будущие объёмы и цены в exog не передаются. Период 60 минут у SARIMA —
 гипотеза, не установленный факт сезонности. Сложность принимаю только после
 устойчивого OOS-прироста. ETS или отдельную state-space разработку как свой
 подтверждённый опыт по этому ноутбуку не заявляю».
@@ -179,13 +189,43 @@ Default 30 дней дают меньше — корректный вывод б
 каждого актива: это исключает случайное несоответствие временных границ panel.
 После каждого decoder окна проверяется точный timestamp. Prophet с суточной
 сезонностью требует минимум 2880 минут истории на fit; 12 часов недостаточно.
+
+SARIMA(1,1,0)×(1,0,0,60) и SARIMAX оцениваются **conditional least squares**
+на train. Для AR-only остатков полный прогноз строится причинной рекурсией;
+успешная остановка SciPy optimizer проверяется. Это явный estimator, его
+нельзя называть успешной MLE-сходимостью statsmodels. ARIMA использует
+аналитический Юла–Уокера на последнем причинном двухдневном окне.
 """)
-    code("display(comparable_ranking(experiment['results'], CFG))\n"
-         + "import matplotlib.pyplot as plt\n"
-         + "pivot=benchmark.pivot(index='model',columns='symbol',values='improvement_pct')\n"
-         + "ax=pivot.plot.bar(figsize=(11,4))\nax.axhline(0,color='black',linewidth=1)\n"
-         + "ax.set_ylabel('Снижение MAE log return, %')\n"
-         + "ax.set_title('Одинаковые test-origin; положительное число ещё не доказывает устойчивость')\nplt.tight_layout(); plt.show()")
+    code("comparison = benchmark.copy()\n"
+         + "comparison['RMSE_h15_return'] = comparison.RMSE_by_horizon.map(lambda x:x[-1])\n"
+         + "comparison['PI90_coverage_h15'] = comparison.PI90_coverage_by_horizon.map(lambda x:x[-1])\n"
+         + "comparison['PI90_covered_h15'] = comparison.PI90_covered_by_horizon.map(lambda x:x[-1])\n"
+         + "display(comparison[['symbol','model','n_origins','MAE_h15_return','RMSE_h15_return','MAE_h15_USDT','improvement_pct','ci95_familywise_improvement_pct','verdict','direction_population_correct','direction_population_n','direction_hit_rate','direction_balanced_accuracy','direction_gain_pp','direction_ci95_familywise_gain_pp','direction_verdict','PI90_covered_h15','PI90_denominator','PI90_coverage_h15']])\n"
+         + "display(comparable_ranking(experiment['results'], CFG))\n"
+         + "display(pd.DataFrame(experiment['direction_baselines']))\n"
+         + "display(pd.DataFrame([dict(symbol=r['symbol'],model=r['model'],**p) for r in experiment['results'] for p in r['test_subperiods']]))\n"
+         + "plot_comparison(experiment,CFG)\n"
+         + "for symbol in CFG.symbols:\n"
+         + "    ranked=comparison[comparison.symbol==symbol].sort_values('MAE_h15_return')\n"
+         + "    best=ranked.iloc[0]\n"
+         + "    signs=ranked[ranked.direction_abstentions==0].sort_values('direction_hit_rate',ascending=False)\n"
+         + "    direction=signs.iloc[0] if len(signs) else None\n"
+         + "    print(symbol, 'лидер MAE:',best['model'],'; доказательство против persistence:',best['verdict'])\n"
+         + "    if direction is not None: print('Лидер направления:',direction['model'],f\"{direction['direction_population_correct']}/{direction['direction_population_n']}\",'; вывод:',direction['direction_verdict'])\n"
+         + "print('Лидер по test — описание результата; модель serving по-прежнему выбрана до test на tune.')")
+    md("""
+### Графики каждого метода: обучение → test → inference
+
+Левая колонка показывает реальные цены и OOF-прогнозы последнего expanding fold
+**внутри train**: модель обучена до показанного validation-окна. Это честная
+диагностика процесса обучения. Средняя — unseen test. Точки прогноза стоят
+на timestamp **закрытия будущей свечи h15**, а не на origin; линии между ними
+служат только визуальным ориентиром. Правая — последние 60 наблюдённых минут,
+переходящие в полный h1…h15 прогноз с эмпирическим интервалом. Факт после cutoff
+не подставляется в прогноз. Полные метрики считаются по всем origin, график
+показывает предзаданные последние шесть часов, без выбора красивого участка.
+""")
+    code("plot_method_evidence(experiment,cv_traces,CFG)")
     md("""
 ## 5. Неопределённость и калибровка
 
@@ -286,6 +326,28 @@ persistence fallback. Это критерий допуска прогноза, *
     code("# Иллюстрация на ПОСЛЕДНЕМ ЗАКРЫТОМ баре фиксированного snapshot. Это не текущий live.\n"
          + "for symbol in CFG.symbols:\n    display(illustrative_forecast(experiment,symbol,CFG))")
     md("""
+### Интерактивный inference: зафиксировать прогноз и дождаться факта
+
+В активном Jupyter kernel выберите актив и методы и нажмите **«Зафиксировать
+прогноз»**. Загружаются последние три дня закрытых свечей; все модели используют
+исходные веса, будущие 15 точек сохраняются вместе с временем фактической выдачи
+и уникальным ID в `forecast_demo_artifacts/prospective/`. Никакого переобучения.
+
+Через минуту или позже нажмите **«Новые свечи → сравнить»**: новые фактические
+цены появятся поверх исходных линий. Через 15 минут будут доступны все 15 точек.
+Таблица показывает MAE/coverage только по созревшим точкам и их число. Прогноз
+и его timestamp не изменяются при обновлении. Можно переключаться между
+зафиксированными прогнозами и методами. Обновление ручное; Run All сам не
+делает live-запросов и не ждёт 15 минут. После перезапуска kernel панель нужно
+создать заново; сохранённые JSON остаются как журнал исходных прогнозов.
+
+Это **prospective исследовательская проверка** старого релиза, не допуск к
+торговле или обход срока действия production API. Фиксированный августовский
+test не меняется. Виджеты требуют ipywidgets и активный Python kernel;
+при открытии готового файла графики/таблицы видны, кнопки оживают после Run All.
+""")
+    code("live_comparison = interactive_comparison(experiment,CFG)")
+    md("""
 ## 9. AI-инструменты последних 3–6 месяцев: Claude Code и Codex
 
 **Ответ:** «Использовал Claude Code и Codex при разработке двух проектов:
@@ -345,7 +407,7 @@ Claude Code/Codex использовались как инструменты р�
 При использовании репозитория:
 ```text
 python -m pip install -r research/requirements-forecast.txt
-python files/research_forecast.py --serve --end-utc 2026-10-04T00:00:00Z
+python files/research_forecast.py --serve --end-utc <заранее-зафиксированный-свежий-UTC-cutoff>
 ```
 Docker recipe: `research/Dockerfile.forecast` (build context — корень репозитория).
 Образ по этому recipe в текущей среде не собирался: Docker не доступен.
@@ -358,7 +420,8 @@ Docker recipe: `research/Dockerfile.forecast` (build context — корень р
     code("# Экспорт выполняется только по явному включению. Секреты в файлы не попадают.\n"
          + "EXPORT_SERVICE = False\n"
          + "if EXPORT_SERVICE:\n"
-         + "    notebook_path=Path('Binance_BTC_ETH_SOL_ML_Researcher_Demo_v3.ipynb')\n"
+         + "    notebook_path=next(iter(Path.cwd().glob('Binance_BTC_ETH_SOL_ML_Researcher_Demo*.ipynb')),None)\n"
+         + "    if notebook_path is None: raise FileNotFoundError('Поместите notebook в текущую рабочую папку kernel')\n"
          + "    nb=json.loads(notebook_path.read_text(encoding='utf-8'))\n"
          + "    engine=next(''.join(c['source']) for c in nb['cells'] if c['cell_type']=='code' and ''.join(c['source']).startswith('\\\"\\\"\\\"Isolated, causal'))\n"
          + "    Path('research_forecast.py').write_text(engine+'\\nif __name__ == \\\"__main__\\\":\\n    main()\\n',encoding='utf-8')\n"
@@ -374,8 +437,10 @@ Docker recipe: `research/Dockerfile.forecast` (build context — корень р
 6. Будущие возмущения не меняют прошлые признаки.
 7. API не выдаёт устаревший прогноз; UNKNOWN сохраняет безопасный baseline.
 
-`UNKNOWN` — полноценный исследовательский результат. Он означает, что данных
-недостаточно для заявленного вывода, и не заменяется оптимистичным формулированием.
+В основном benchmark достаточно временных блоков для расчёта CI. Если CI
+пересекает ноль, итог `INCONCLUSIVE`: превосходство не подтверждено. Это
+отличается от прежнего `UNKNOWN` из-за четырёх дней данных. Нельзя менять
+историю, метрику или seed после результата, пока не получится значимость.
 """)
     for i,cell in enumerate(cells):
         cell['id'] = f"demo-{i:03d}"

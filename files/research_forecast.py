@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.metadata
 import json
 import math
 import platform
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 import warnings
+import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -20,19 +23,20 @@ import pandas as pd
 @dataclass(frozen=True)
 class ForecastConfig:
     symbols: tuple = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
-    end_utc: str = "2026-10-04T00:00:00Z"  # exclusive, frozen before evaluation
-    history_days: int = 30
+    end_utc: str = "2026-09-01T00:00:00Z"  # excludes the previously inspected September demo
+    history_days: int = 120
     horizon: int = 15
     context: int = 60
     arrival_delay_seconds: int = 2  # assumption, NOT observed historical latency
-    fractions: tuple = (0.60, 0.15, 0.10, 0.15)
+    fractions: tuple = (0.50, 0.125, 0.125, 0.25)
     eval_stride: int = 60
     calibration_stride: int = 15
-    classical_window: int = 720
-    models: tuple = ("Persistence", "Ridge", "XGBoost", "ARIMA")
+    classical_window: int = 2880
+    models: tuple = ("Persistence", "Ridge", "XGBoost", "ARIMA", "SARIMA", "SARIMAX")
+    train_stride: int = 15
     seed: int = 42
-    bootstrap_draws: int = 2000
-    min_test_days: int = 10
+    bootstrap_draws: int = 10000
+    min_test_days: int = 30
     complete_test_days_only: bool = True
 
     def __post_init__(self):
@@ -40,7 +44,7 @@ class ForecastConfig:
                 or not np.isclose(sum(self.fractions), 1)):
             raise ValueError("Require four positive split fractions summing to one")
         if min(self.history_days, self.horizon, self.context, self.eval_stride,
-               self.calibration_stride, self.classical_window, self.bootstrap_draws) <= 0:
+               self.calibration_stride, self.classical_window, self.bootstrap_draws, self.train_stride) <= 0:
             raise ValueError("Sizes and strides must be positive")
         if min(self.eval_stride, self.calibration_stride) < self.horizon:
             raise ValueError("Use nonoverlapping label paths for evaluation/calibration")
@@ -53,6 +57,76 @@ class ForecastConfig:
             raise ValueError("Exclusive end must be on the UTC minute grid")
         if len(set(self.symbols)) != len(self.symbols):
             raise ValueError("Duplicate symbols")
+
+
+def fetch_archive_history(symbol, cfg, cache_dir, opener=None):
+    """Checksum-verified public monthly/daily ZIPs; no invented missing candles."""
+    opener = opener or urllib.request.urlopen
+    root = Path(cache_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    end, start = utc(cfg.end_utc), utc(cfg.end_utc)-pd.Timedelta(days=cfg.history_days)
+    if end + pd.Timedelta(seconds=cfg.arrival_delay_seconds) > pd.Timestamp.now(tz="UTC"):
+        raise ValueError("Snapshot not yet closed")
+    rows, manifests = [], []
+
+    def archive(period, kind):
+        filename = f"{symbol}-1m-{period}.zip"
+        url = f"https://data.binance.vision/data/spot/{kind}/klines/{symbol}/1m/{filename}"
+        path, check = root/filename, root/(filename+".CHECKSUM")
+        if path.exists() and check.exists():
+            data, checksum = path.read_bytes(), check.read_text(encoding="ascii")
+        else:
+            with opener(url+".CHECKSUM", timeout=60) as response:
+                checksum = response.read().decode("ascii")
+            with opener(url, timeout=60) as response:
+                data = response.read()
+            expected = checksum.split()[0]
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise ValueError("Binance archive checksum mismatch")
+            path.with_suffix(".tmp").write_bytes(data)
+            path.with_suffix(".tmp").replace(path)
+            check.write_text(checksum, encoding="ascii")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != checksum.split()[0]:
+            raise ValueError("Cached archive checksum mismatch")
+        with zipfile.ZipFile(io.BytesIO(data)) as zipped:
+            names = zipped.namelist()
+            if len(names) != 1 or not names[0].endswith(".csv"):
+                raise ValueError("Changed archive layout")
+            frame = pd.read_csv(zipped.open(names[0]), header=None, dtype=str)
+        if frame.shape[1] != 12:
+            raise ValueError("Changed archive candle schema")
+        # Binance changed spot archives to microseconds on 2025-01-01.
+        for col in (0, 6):
+            stamp = pd.to_numeric(frame[col], errors="raise").astype("int64")
+            micro = stamp > 100_000_000_000_000
+            stamp.loc[micro] //= 1000
+            frame[col] = stamp
+        frame = frame[(frame[0] >= start.value//1_000_000) & (frame[0] < end.value//1_000_000)]
+        rows.extend(frame.values.tolist())
+        manifests.append(dict(url=url,sha256=digest,rows=len(frame),timestamp_unit="ms normalized from archive"))
+        print(symbol, period, kind, len(frame), flush=True)
+
+    month = start.normalize().replace(day=1)
+    while month < end:
+        next_month = month + pd.offsets.MonthBegin(1)
+        if next_month <= end:
+            try:
+                archive(month.strftime("%Y-%m"), "monthly")
+                month = next_month
+                continue
+            except urllib.error.HTTPError as exc:
+                if exc.code != 404:
+                    raise
+        day = max(start.normalize(), month)
+        while day < min(next_month, end):
+            archive(day.strftime("%Y-%m-%d"), "daily")
+            day += pd.Timedelta(days=1)
+        month = next_month
+    market = clean_klines(rows, cfg)
+    digest = hashlib.sha256(json.dumps(rows,separators=(",",":")).encode()).hexdigest()
+    return market, dict(symbol=symbol,end_utc=end.isoformat(),sha256=digest,archives=manifests,
+                        source="Binance public archives",fetched_utc=pd.Timestamp.now(tz="UTC").isoformat())
 
 
 def utc(value):
@@ -126,6 +200,8 @@ def fetch_history(symbol, cfg, cache_dir, request=None):
         if payload["sha256"] != digest or payload["end_utc"] != end.isoformat():
             raise ValueError("Input cache digest/period mismatch")
     else:
+        if request is None and cfg.history_days >= 90 and cache is not None:
+            return fetch_archive_history(symbol, cfg, cache / "archives")
         end_ms = end.value // 1_000_000
         cursor = (end - pd.Timedelta(days=cfg.history_days)).value // 1_000_000
         rows = []
@@ -258,7 +334,9 @@ class FixedRegressor:
                 n_jobs=2, random_state=cfg.seed), n_jobs=1)
         else:
             raise ValueError(name)
-        self.model.fit(train[FEATURES], train[target_columns(cfg)])
+        fit_rows = evaluation_grid(train, cfg.train_stride)
+        self.n_fit = len(fit_rows)
+        self.model.fit(fit_rows[FEATURES], fit_rows[target_columns(cfg)])
 
     def predict(self, full, rows):
         return self.model.predict(rows[FEATURES])
@@ -325,6 +403,67 @@ class LSTMPolicy:
         return self.yscale.inverse_transform(pred)
 
 
+class SeasonalPolicy:
+    """Train-only conditional least squares: (1,1,0)x(1,0,0,60).
+
+    Residual recursion is AR-only; known-calendar regression in SARIMAX.
+    This is an explicit CSS estimator, not a claim of statsmodels MLE convergence.
+    """
+    def __init__(self, name, train, tune, full, cfg):
+        from scipy.optimize import least_squares
+        self.name, self.cfg, self.warnings = name, cfg, []
+        hist = train.tail(cfg.classical_window)
+        if len(hist) < 240 or not np.isfinite(hist[FEATURES].to_numpy()).all():
+            raise ValueError("Seasonal fitting requires >=240 finite causal train bars")
+        difference = np.diff(hist.log_close.to_numpy())
+        self.scale = max(float(difference.std()), 1e-8)
+        y = difference/self.scale
+        x = np.diff(hist[CALENDAR].to_numpy(), axis=0) if name == "SARIMAX" else np.empty((len(y),0))
+        self.exog_scale = np.maximum(x.std(axis=0),1e-10)
+        x = x/self.exog_scale
+        p = x.shape[1]
+        def residual(theta):
+            phi, seasonal = theta[:2]
+            z = y-x@theta[2:]
+            return z[61:]-phi*z[60:-1]-seasonal*z[1:-60]+phi*seasonal*z[:-61]
+        fit = least_squares(residual,np.zeros(2+p),
+                            bounds=([-0.98,-0.98]+[-np.inf]*p,[0.98,0.98]+[np.inf]*p),
+                            max_nfev=2000,ftol=1e-10,xtol=1e-10,gtol=1e-10)
+        if not fit.success or not np.isfinite(fit.x).all():
+            raise ValueError(f"{name} conditional least squares did not converge: {fit.message}")
+        self.phi,self.seasonal = fit.x[:2]
+        self.beta = fit.x[2:]
+        self.n_fit, self.train_end = len(hist),hist.available_at.max()
+        self.fit_diagnostics = dict(estimator="conditional_least_squares",success=bool(fit.success),
+                                    nfev=fit.nfev,optimality=float(fit.optimality),cost=float(fit.cost))
+
+    def predict(self, full, rows):
+        output=[]
+        for _,row in rows.iterrows():
+            idx=int(row.time_idx)
+            hist=full.iloc[idx-61:idx+1]
+            if len(hist)!=62 or hist.available_at.max()>row.available_at:
+                raise ValueError("Noncausal or insufficient seasonal history")
+            recent=np.diff(hist.log_close.to_numpy())/self.scale
+            future_times=pd.date_range(row.open_time+pd.Timedelta(minutes=1),periods=self.cfg.horizon,freq="min")
+            if self.name=="SARIMAX":
+                recent-=np.diff(hist[CALENDAR].to_numpy(),axis=0)/self.exog_scale@self.beta
+                future_calendar=calendar_features(pd.DatetimeIndex([row.open_time]).append(future_times))[CALENDAR].to_numpy()
+                exog_changes=np.diff(future_calendar,axis=0)/self.exog_scale@self.beta
+            else:
+                exog_changes=np.zeros(self.cfg.horizon)
+            state=recent.tolist()
+            forecasts=[]
+            total=0.0
+            for h in range(self.cfg.horizon):
+                residual=self.phi*state[-1]+self.seasonal*state[-60]-self.phi*self.seasonal*state[-61]
+                state.append(residual)
+                total+=self.scale*(residual+exog_changes[h])
+                forecasts.append(total)
+            output.append(forecasts)
+        return np.asarray(output)
+
+
 class ClassicalPolicy:
     def __init__(self, name, train, tune, full, cfg):
         if name == "Prophet":
@@ -336,6 +475,24 @@ class ClassicalPolicy:
         self.warning_counts = {}
 
     def predict(self, full, rows):
+        if self.name == "ARIMA":
+            from statsmodels.regression.linear_model import yule_walker
+            log = full.log_close.to_numpy()
+            output=[]
+            for _,row in rows.iterrows():
+                idx=int(row.time_idx)
+                history=log[max(60,idx-self.cfg.classical_window+1):idx+1]
+                if len(history)<120 or full.available_at.iloc[idx]>row.available_at:
+                    raise ValueError("Insufficient/noncausal ARIMA history")
+                delta=np.diff(history)
+                if delta.std()<1e-12:
+                    output.append(np.zeros(self.cfg.horizon))
+                    continue
+                phi=float(yule_walker(delta,order=1,method="adjusted")[0][0])
+                if not np.isfinite(phi) or abs(phi)>=1:
+                    raise ValueError("Invalid/nonstationary ARIMA coefficient")
+                output.append(np.cumsum(delta[-1]*phi**np.arange(1,self.cfg.horizon+1)))
+            return np.asarray(output)
         from statsmodels.tsa.arima.model import ARIMA
         from statsmodels.tsa.statespace.sarimax import SARIMAX
         cfg = self.cfg
@@ -432,8 +589,61 @@ def paired_day_bootstrap(rows, actual, predictions, cfg):
     if (denom <= 0).any():
         return out
     lo, hi = np.quantile(100*delta/denom, [0.025, 0.975])
-    out.update(ci95_improvement_pct=[float(lo), float(hi)],
-               verdict="SUPPORTED_DIAGNOSTIC" if lo > 0 else "NOT_PROVEN")
+    family = max(1,len(cfg.symbols)*(2*sum(m!='Persistence' for m in cfg.models)+2))
+    alpha = 0.05/family
+    adjusted = np.quantile(100*delta/denom,[alpha/2,1-alpha/2])
+    starts=rng.integers(0,len(days),size=(cfg.bootstrap_draws,math.ceil(len(days)/3)))
+    blocks=(starts[:,:,None]+np.arange(3)[None,None,:])%len(days)
+    blocks=blocks.reshape(cfg.bootstrap_draws,-1)[:,:len(days)]
+    block_delta=days.delta.to_numpy()[blocks].sum(axis=1)
+    block_base=days.base.to_numpy()[blocks].sum(axis=1)
+    sensitivity=np.quantile(100*block_delta/block_base,[alpha/2,1-alpha/2])
+    lower,upper=min(adjusted[0],sensitivity[0]),max(adjusted[1],sensitivity[1])
+    verdict="SUPPORTED_DIAGNOSTIC" if lower>0 else "NO_IMPROVEMENT" if upper<0 else "INCONCLUSIVE"
+    if np.array_equal(predictions,np.zeros_like(predictions)):
+        verdict="BASELINE"
+    out.update(ci95_improvement_pct=[float(lo), float(hi)],familywise_comparisons=family,
+               ci95_familywise_improvement_pct=[float(lower),float(upper)],
+               moving_block_days=3,verdict=verdict)
+    return out
+
+
+def direction_report(rows, predictions, train, cfg):
+    """Full-population sign hit rate; abstentions are counted, never cherry-picked."""
+    actual=rows[target_columns(cfg)].to_numpy()[:,-1]
+    prediction=np.asarray(predictions)[:,-1]
+    sign=np.sign(actual)
+    train_sign=1 if int((train.target_h15>0).sum())>=int((train.target_h15<0).sum()) else -1
+    baseline_correct=(sign==train_sign).astype(float)
+    correct=((np.sign(prediction)==sign)&(prediction!=0)).astype(float)
+    n=len(rows)
+    positives,negatives=int((sign>0).sum()),int((sign<0).sum())
+    balanced=(float(correct[sign>0].mean())+float(correct[sign<0].mean()))/2 if positives and negatives else None
+    out=dict(direction_hit_rate=float(correct.sum()/n),direction_population_correct=int(correct.sum()),
+             direction_population_n=n,direction_abstentions=int((prediction==0).sum()),
+             direction_balanced_accuracy=balanced,direction_train_majority_sign=train_sign,
+             direction_baseline_correct=int(baseline_correct.sum()),direction_baseline_n=n,
+             direction_baseline_hit_rate=float(baseline_correct.mean()),
+             direction_gain_pp=100*float((correct-baseline_correct).mean()),
+             direction_ci95_familywise_gain_pp=None,direction_verdict="UNKNOWN")
+    days=pd.DataFrame(dict(day=rows.open_time.dt.floor('D').to_numpy(),
+                           delta=correct-baseline_correct,n=np.ones(n))).groupby('day').sum()
+    if len(days)<cfg.min_test_days:
+        return out
+    family=max(1,len(cfg.symbols)*(2*sum(m!='Persistence' for m in cfg.models)+2))
+    alpha=0.05/family
+    rng=np.random.default_rng(cfg.seed)
+    intervals=[]
+    for length in (1,3):
+        starts=rng.integers(0,len(days),size=(cfg.bootstrap_draws,math.ceil(len(days)/length)))
+        sample=((starts[:,:,None]+np.arange(length)[None,None,:])%len(days)).reshape(cfg.bootstrap_draws,-1)[:,:len(days)]
+        gain=100*days.delta.to_numpy()[sample].sum(axis=1)/days.n.to_numpy()[sample].sum(axis=1)
+        intervals.append(np.quantile(gain,[alpha/2,1-alpha/2]))
+    lo,hi=min(i[0] for i in intervals),max(i[1] for i in intervals)
+    out.update(direction_ci95_familywise_gain_pp=[float(lo),float(hi)],
+               direction_verdict='SUPPORTED_DIAGNOSTIC' if lo>0 else 'NO_IMPROVEMENT' if hi<0 else 'INCONCLUSIVE')
+    if not np.any(prediction):
+        out['direction_verdict']='ABSTAINS'
     return out
 
 
@@ -481,7 +691,9 @@ def build_policy(name, train, tune, full, cfg):
         return FixedRegressor(name, train, tune, full, cfg)
     if name == "LSTM":
         return LSTMPolicy(name, train, tune, full, cfg)
-    if name in ("ARIMA", "SARIMA", "SARIMAX", "Prophet"):
+    if name in ("SARIMA", "SARIMAX"):
+        return SeasonalPolicy(name, train, tune, full, cfg)
+    if name in ("ARIMA", "Prophet"):
         return ClassicalPolicy(name, train, tune, full, cfg)
     if name == "TFT":
         return TFTPolicy(name, train, tune, full, cfg)
@@ -525,6 +737,7 @@ def run_experiment(market, cfg):
                 policies[s][name], tuning[s][name] = policy, tune_pred
                 status.append(dict(symbol=s, model=name, stage="fit_tune", status="COMPLETE",
                                    n_train=len(sp["train"]), n_tune=len(grid["tune"]),
+                                   n_fit=getattr(policy,"n_fit",None),fit_diagnostics=getattr(policy,"fit_diagnostics",None),
                                    warnings=getattr(policy, "warnings", [])))
             except Exception as exc:
                 status.append(dict(symbol=s, model=name, stage="fit_tune", status="UNAVAILABLE" if
@@ -542,6 +755,18 @@ def run_experiment(market, cfg):
                 widths[s][name] = finite_sample_widths(grid["calibration"][target_columns(cfg)].to_numpy(), cal_pred)
                 pred = np.zeros((len(grid["test"]), cfg.horizon)) if policy is None else policy.predict(full, grid["test"])
                 row = score(s, name, grid["test"], pred, widths[s][name], cfg)
+                row.update(direction_report(grid['test'],pred,split_map[s]['train'],cfg))
+                row['test_subperiods']=[]
+                for part,positions in enumerate(np.array_split(np.arange(len(pred)),3),1):
+                    subset=grid['test'].iloc[positions]
+                    actual=subset[target_columns(cfg)].to_numpy()[:,-1]
+                    loss=np.abs(actual-pred[positions,-1])
+                    denominator=float(np.abs(actual).sum())
+                    row['test_subperiods'].append(dict(part=part,n=len(positions),
+                        start=subset.open_time.iloc[0].isoformat(),end=subset.open_time.iloc[-1].isoformat(),
+                        MAE_h15_return=float(loss.mean()),
+                        improvement_pct=100*(denominator-float(loss.sum()))/denominator if denominator else None,
+                        direction_correct=int(((np.sign(pred[positions,-1])==np.sign(actual))&(pred[positions,-1]!=0)).sum())))
                 row["selected_before_test"] = choices[s] == name
                 row["n_calibration"] = len(grid["calibration"])
                 results.append(row)
@@ -561,11 +786,20 @@ def run_experiment(market, cfg):
     metadata = dict(config=asdict(cfg), versions=versions, python=platform.python_version(),
                     source_sha256=globals().get("SOURCE_SHA256") or (hashlib.sha256(Path(__file__).read_bytes()).hexdigest() if "__file__" in globals() else None),
                     status="research_only", actual_arrival_times="UNKNOWN: assumed close+delay",
-                    policy_comparison="fixed supervised fit vs causal rolling classical refit",
+                    policy_comparison="fixed supervised/CSS seasonal fit vs causal rolling Yule-Walker ARIMA",
+                    seasonal_estimator="conditional least squares on train tail; calendar-only exog; fixed AR recurrences",
                     ARIMA_estimator="ARIMA(1,1,0), train-origin scaling, Yule-Walker on differences",
                     split_counts={s: {k:len(v) for k,v in sp.items()} for s,sp in split_map.items()},
                     optional_models_not_requested=[m for m in ("SARIMA", "SARIMAX", "Prophet", "LSTM", "TFT") if m not in cfg.models])
-    return dict(results=results, status=status, metadata=metadata, choices=choices,
+    direction_baselines=[]
+    for s in cfg.symbols:
+        rows,train=grids[s]['test'],split_map[s]['train']
+        majority=1 if (train.target_h15>0).sum()>=(train.target_h15<0).sum() else -1
+        for name,signal in [('AlwaysUp',np.ones(len(rows))),('TrainMajority',np.full(len(rows),majority)),('Momentum15',rows.ret_15.to_numpy())]:
+            report=direction_report(rows,np.repeat(signal[:,None],cfg.horizon,axis=1),train,cfg)
+            report.update(symbol=s,model=name)
+            direction_baselines.append(report)
+    return dict(results=results, status=status, metadata=metadata, choices=choices,direction_baselines=direction_baselines,
                 prepared=prepared, grids=grids, policies=policies, predictions=predictions, widths=widths)
 
 
@@ -582,13 +816,13 @@ def comparable_ranking(results, cfg):
     return pd.DataFrame(rows).sort_values("mean_MAE_h15_return")
 
 
-def expanding_window_check(experiment, cfg, model_names=("Ridge",)):
+def expanding_window_check(experiment, cfg, model_names=("Ridge",), return_traces=False):
     """Three expanding folds inside TRAIN only; final test stays sealed.
 
     This diagnostic is preregistered, not used to tune the final test results.
     Add XGBoost explicitly before a fresh run if a boosting stability claim is needed.
     """
-    output = []
+    output, traces = [], []
     for symbol in cfg.symbols:
         full = experiment["prepared"][symbol]
         train = split_frames(full, cfg)[0]["train"]
@@ -606,9 +840,10 @@ def expanding_window_check(experiment, cfg, model_names=("Ridge",)):
                     result = score(symbol,name,rows,pred,None,cfg)
                     result.update(fold=fold+1, n_train=len(past), stage="train_only_expanding_cv")
                     output.append(result)
+                    traces.append(dict(symbol=symbol,model=name,fold=fold+1,rows=rows,predictions=pred))
                 except Exception as exc:
                     output.append(dict(symbol=symbol,model=name,fold=fold+1,status="FAIL",reason=str(exc)))
-    return output
+    return (output,traces) if return_traces else output
 
 
 def illustrative_forecast(experiment, symbol, cfg):
@@ -631,6 +866,219 @@ def illustrative_forecast(experiment, symbol, cfg):
                              predicted_close=close*np.exp(pred[0]), PI90_lower=close*np.exp(pred[0]-q),
                              PI90_upper=close*np.exp(pred[0]+q), model=name,
                              issued_at=latest.available_at.iloc[0], status="illustrative_frozen_snapshot"))
+
+
+def plot_method_evidence(experiment, cv_traces, cfg):
+    """Each completed method: train OOF, sealed test and full future path."""
+    import matplotlib.pyplot as plt
+    for symbol in cfg.symbols:
+        full=experiment['prepared'][symbol]
+        methods=list(experiment['predictions'][symbol])
+        fig,axes=plt.subplots(len(methods),3,figsize=(18,3.1*len(methods)),squeeze=False)
+        for i,name in enumerate(methods):
+            traces=[t for t in cv_traces if t['symbol']==symbol and t['model']==name and t['fold']==3]
+            for column,trace,title in [(0,traces[-1] if traces else None,'TRAIN: last expanding fold (out-of-fold)'),
+                                       (1,dict(rows=experiment['grids'][symbol]['test'],predictions=experiment['predictions'][symbol][name]),'TEST: real price and h15 forecasts')]:
+                ax=axes[i,column]
+                if trace is None:
+                    ax.text(.05,.5,'No completed fold; see failure table',transform=ax.transAxes)
+                    continue
+                rows=trace['rows']
+                last=rows.open_time.iloc[-1]+pd.Timedelta(minutes=16)
+                first=last-pd.Timedelta(hours=6)
+                observed=full.loc[(full.open_time+pd.Timedelta(minutes=1)>=first)&(full.open_time+pd.Timedelta(minutes=1)<=last)]
+                ax.plot(observed.open_time+pd.Timedelta(minutes=1),observed.close,label='Actual price',color='black',lw=1)
+                keep=rows.open_time>=first
+                forecast=rows.close.to_numpy()[keep]*np.exp(trace['predictions'][keep.to_numpy(),-1])
+                ax.plot(rows.loc[keep,'open_time']+pd.Timedelta(minutes=16),forecast,'o--',label='Frozen h15 forecast',color='tab:orange',ms=4)
+                ax.set_title(f'{name} | {title}',fontsize=9)
+                ax.legend(fontsize=7)
+            latest=full.iloc[[-1]]
+            policy=experiment['policies'][symbol][name]
+            pred=np.zeros((1,cfg.horizon)) if policy is None else policy.predict(full,latest)
+            q=experiment['widths'][symbol][name]
+            origin=latest.open_time.iloc[0]+pd.Timedelta(minutes=1)
+            times=pd.date_range(origin+pd.Timedelta(minutes=1),periods=cfg.horizon,freq='min')
+            close=float(latest.close.iloc[0])
+            ax=axes[i,2]
+            history=full.tail(60)
+            ax.plot(history.open_time+pd.Timedelta(minutes=1),history.close,color='black',label='Observed history')
+            ax.plot(pd.DatetimeIndex([origin]).append(times),np.r_[close,close*np.exp(pred[0])],'--',color='tab:orange',label='Forecast h1..h15')
+            ax.fill_between(times,close*np.exp(pred[0]-q),close*np.exp(pred[0]+q),alpha=.12,color='tab:orange',label='Empirical PI90')
+            ax.axvline(origin,color='gray',ls=':')
+            ax.set_title(f'{name} | FROZEN SNAPSHOT: future unobserved',fontsize=9)
+            ax.legend(fontsize=7)
+            for ax in axes[i]:
+                ax.set_ylabel('USDT')
+                ax.tick_params(axis='x',rotation=25,labelsize=7)
+                ax.grid(alpha=.2)
+        fig.suptitle(f'{symbol}: predictions fixed before target candle closes',fontsize=13)
+        fig.tight_layout(rect=(0,0,1,.98))
+        plt.show()
+
+
+def plot_comparison(experiment,cfg):
+    import matplotlib.pyplot as plt
+    table=pd.DataFrame(experiment['results'])
+    fig,axes=plt.subplots(2,len(cfg.symbols),figsize=(6*len(cfg.symbols),9),squeeze=False)
+    for column,symbol in enumerate(cfg.symbols):
+        group=table.loc[table.symbol==symbol].sort_values('MAE_h15_return')
+        names=group.model.tolist()
+        axes[0,column].barh(names,group.MAE_h15_return*10000,color=['tab:blue' if n=='Persistence' else 'tab:orange' for n in names])
+        axes[0,column].invert_yaxis()
+        axes[0,column].set_title(f'{symbol}: h15 MAE (lower is better)')
+        axes[0,column].set_xlabel('log-return error, basis points')
+        for i,row in enumerate(group.to_dict('records')):
+            ci=row.get('ci95_familywise_improvement_pct')
+            axes[1,column].plot(row['improvement_pct'],i,'o',color='tab:orange')
+            if ci:
+                axes[1,column].hlines(i,*ci,color='tab:blue',lw=2)
+        axes[1,column].set_yticks(range(len(names)),names)
+        axes[1,column].invert_yaxis()
+        axes[1,column].axvline(0,color='black',ls=':')
+        axes[1,column].set_xlabel('MAE reduction vs persistence, %; familywise CI')
+        axes[1,column].set_title('Positive estimate needs CI entirely above zero')
+        for ax in axes[:,column]:ax.grid(axis='x',alpha=.2)
+    fig.tight_layout()
+    plt.show()
+
+
+class ForecastComparison:
+    """Manual prospective research comparison, separate from production gates."""
+    def __init__(self,experiment,cfg,fetcher=fetch_history,clock=None,output_dir=None):
+        self.experiment,self.cfg,self.fetcher=experiment,cfg,fetcher
+        self.clock=clock or (lambda:pd.Timestamp.now(tz='UTC'))
+        self.output_dir=Path(output_dir) if output_dir else None
+        self.snapshots,self.observed={},{}
+
+    def _fetch(self,symbol):
+        from dataclasses import replace
+        end=(utc(self.clock())-pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)).floor('min')
+        live_cfg=replace(self.cfg,symbols=(symbol,),end_utc=end.isoformat(),history_days=3)
+        market,manifest=self.fetcher(symbol,live_cfg,None)
+        return prepare(market,live_cfg),manifest,end
+
+    def create(self,symbol):
+        import uuid
+        if symbol not in self.cfg.symbols:raise KeyError(symbol)
+        full,manifest,end=self._fetch(symbol)
+        latest=full.iloc[[-1]]
+        origin=float(latest.close.iloc[0])
+        paths={}
+        for name in self.experiment['predictions'][symbol]:
+            policy=self.experiment['policies'][symbol][name]
+            pred=np.zeros((1,self.cfg.horizon)) if policy is None else policy.predict(full,latest)
+            q=self.experiment['widths'][symbol][name]
+            if pred.shape!=(1,self.cfg.horizon) or not np.isfinite(pred).all():
+                raise ValueError('Incomplete forecast path')
+            paths[name]=dict(price=(origin*np.exp(pred[0])).tolist(),
+                             lower=(origin*np.exp(pred[0]-q)).tolist(),upper=(origin*np.exp(pred[0]+q)).tolist())
+        issued=utc(self.clock())
+        if issued>=end+pd.Timedelta(minutes=1) or issued<latest.available_at.iloc[0]:
+            raise ValueError('First-target issuance deadline missed; retry on fresh candles')
+        snapshot_id=uuid.uuid4().hex
+        payload=dict(snapshot_id=snapshot_id,symbol=symbol,issued_at=issued.isoformat(),
+                     origin_close_at=end.isoformat(),origin_price=origin,release_end_utc=self.cfg.end_utc,
+                     target_close_at=[t.isoformat() for t in pd.date_range(end+pd.Timedelta(minutes=1),periods=self.cfg.horizon,freq='min')],
+                     paths=paths,input_sha256=manifest['sha256'],status='prospective_research_unapproved_release',
+                     history=[dict(close_at=(r.open_time+pd.Timedelta(minutes=1)).isoformat(),price=float(r.close)) for r in full.tail(120).itertuples()])
+        self.snapshots[snapshot_id]=json.loads(json.dumps(payload))
+        self.observed[snapshot_id]=full
+        if self.output_dir:
+            self.output_dir.mkdir(parents=True,exist_ok=True)
+            (self.output_dir/f'{snapshot_id}.json').write_text(json.dumps(payload,indent=2),encoding='utf-8')
+        return snapshot_id
+
+    def refresh(self,snapshot_id):
+        snapshot=self.snapshots[snapshot_id]
+        full,_,_=self._fetch(snapshot['symbol'])
+        self.observed[snapshot_id]=full
+        return self.metrics(snapshot_id)
+
+    def metrics(self,snapshot_id):
+        snapshot=self.snapshots[snapshot_id]
+        full=self.observed[snapshot_id]
+        actual=pd.Series(full.close.to_numpy(),index=full.open_time+pd.Timedelta(minutes=1))
+        targets=pd.DatetimeIndex(snapshot['target_close_at'])
+        values=actual.reindex(targets)
+        expected=targets+pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)<=utc(self.clock())
+        mature=values.notna() & expected
+        result=[]
+        for name,path in snapshot['paths'].items():
+            pred=np.asarray(path['price'])
+            n=int(mature.sum())
+            observed=values.to_numpy()[mature]
+            covered=int(((observed>=np.asarray(path['lower'])[mature])&(observed<=np.asarray(path['upper'])[mature])).sum()) if n else 0
+            missing=int((expected & values.isna()).sum())
+            result.append(dict(model=name,mature_path_points=n,total_path_points=self.cfg.horizon,
+                               expected_mature_points=int(expected.sum()),missing_mature_points=missing,
+                               MAE_USDT=float(np.abs(observed-pred[mature]).mean()) if n else None,
+                               PI90_covered=covered,PI90_n=n,PI90_coverage=covered/n if n else None,
+                               state='MISSING_OBSERVATIONS' if missing else 'COMPLETE' if n==self.cfg.horizon else 'PENDING' if n==0 else 'PARTIAL'))
+        return pd.DataFrame(result)
+
+    def plot(self,snapshot_id,methods=None):
+        import matplotlib.pyplot as plt
+        snapshot=self.snapshots[snapshot_id]
+        methods=methods or list(snapshot['paths'])
+        fig,ax=plt.subplots(figsize=(12,5))
+        full=self.observed[snapshot_id]
+        origin=utc(snapshot['origin_close_at'])
+        end=utc(snapshot['target_close_at'][-1])
+        observed=full.loc[(full.open_time+pd.Timedelta(minutes=1)>=origin-pd.Timedelta(minutes=90))&(full.open_time+pd.Timedelta(minutes=1)<=end)]
+        ax.plot(observed.open_time+pd.Timedelta(minutes=1),observed.close,color='black',lw=2,label='Actual closed candles')
+        targets=pd.DatetimeIndex(snapshot['target_close_at'])
+        for name in methods:
+            path=snapshot['paths'][name]
+            line,=ax.plot(pd.DatetimeIndex([origin]).append(targets),[snapshot['origin_price']]+path['price'],'--',label=name)
+            if len(methods)==1:ax.fill_between(targets,path['lower'],path['upper'],color=line.get_color(),alpha=.12,label='PI90')
+        ax.axvline(origin,color='gray',ls=':',label='Forecast fixed here')
+        ax.set(title=f"{snapshot['symbol']} | issued {snapshot['issued_at']} | immutable {snapshot_id[:8]}",ylabel='USDT',xlabel='UTC target candle close')
+        ax.legend();ax.grid(alpha=.2);fig.tight_layout();plt.show()
+
+
+def interactive_comparison(experiment,cfg,output_dir='forecast_demo_artifacts/prospective'):
+    import ipywidgets as widgets
+    from IPython.display import display,clear_output
+    controller=ForecastComparison(experiment,cfg,output_dir=output_dir)
+    symbol=widgets.Dropdown(options=cfg.symbols,description='Актив:')
+    snapshots=widgets.Dropdown(options=[],description='Прогноз:')
+    methods=widgets.SelectMultiple(options=list(cfg.models),value=tuple(cfg.models),description='Методы:')
+    create=widgets.Button(description='Зафиксировать прогноз',layout=widgets.Layout(width='220px'))
+    refresh=widgets.Button(description='Новые свечи → сравнить',layout=widgets.Layout(width='220px'))
+    output=widgets.Output()
+    def render(*_):
+        with output:
+            clear_output(wait=True)
+            if snapshots.value:
+                chosen=[n for n in methods.value if n in controller.snapshots[snapshots.value]['paths']]
+                if not chosen:
+                    print('Выберите хотя бы один завершившийся метод.');return
+                controller.plot(snapshots.value,chosen)
+                display(controller.metrics(snapshots.value))
+            else:print('Создайте прогноз. Через 1–15 минут обновите факт; прогноз останется неизменным.')
+    def on_create(_):
+        create.disabled=refresh.disabled=True
+        try:
+            snapshot_id=controller.create(symbol.value)
+            snapshots.options=[(f"{s['symbol']} {s['issued_at']} ({key[:8]})",key) for key,s in controller.snapshots.items()]
+            snapshots.value=snapshot_id
+            render()
+        except Exception as exc:
+            with output:print(f'{type(exc).__name__}: {exc}')
+        finally:create.disabled=refresh.disabled=False
+    def on_refresh(_):
+        if not snapshots.value:return
+        create.disabled=refresh.disabled=True
+        try:controller.refresh(snapshots.value);render()
+        except Exception as exc:
+            with output:print(f'{type(exc).__name__}: {exc}')
+        finally:create.disabled=refresh.disabled=False
+    create.on_click(on_create);refresh.on_click(on_refresh)
+    methods.observe(render,names='value');snapshots.observe(render,names='value')
+    panel=widgets.VBox([widgets.HTML('<b>Исследовательский live: без переобучения и без разрешения торговать.</b>'),symbol,methods,snapshots,widgets.HBox([create,refresh]),output])
+    display(panel);render()
+    return controller
 
 
 class TFTPolicy:
@@ -712,6 +1160,7 @@ class TFTPolicy:
 def save_evidence(experiment, manifest, path):
     payload = {key: experiment[key] for key in ("results", "status", "metadata", "choices")}
     payload["inputs"] = manifest
+    payload['direction_baselines'] = experiment.get('direction_baselines',[])
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
@@ -750,7 +1199,8 @@ class ForecastService:
             self.last_error = "release_expired_or_clock_invalid"
             raise ValueError(self.last_error)
         end = (now-pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)).floor("min")
-        live_cfg = replace(self.cfg, end_utc=end.isoformat(), history_days=1)
+        live_days = max(1, math.ceil((self.cfg.classical_window+self.cfg.context)/1440))
+        live_cfg = replace(self.cfg, end_utc=end.isoformat(), history_days=live_days)
         if not self.lock.acquire(blocking=False):
             return False
         try:
@@ -903,10 +1353,10 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--end-utc", default=ForecastConfig.end_utc)
-    parser.add_argument("--history-days", type=int, default=30)
+    parser.add_argument("--history-days", type=int, default=ForecastConfig.history_days)
     parser.add_argument("--cache", default=".runtime/forecast_review/cache")
     parser.add_argument("--output", default=".runtime/forecast_review/benchmark.json")
-    parser.add_argument("--models", default="Persistence,Ridge,XGBoost,ARIMA")
+    parser.add_argument("--models", default=','.join(ForecastConfig.models))
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()

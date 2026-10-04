@@ -13,3 +13,4 @@ files/*.jsonl
 
 .runtime/
 files/.runtime/
+forecast_demo_artifacts/
