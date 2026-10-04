@@ -312,11 +312,28 @@ def run_tick(deployment, role):
                 verify_trainer_isolation(deployment)
             from training_snapshot import resolve, digest
             training_path, snapshot = resolve(Path(deployment['training_input']))
-            report = train_and_evaluate(training_path)
+            search_enabled = deployment.get('prediction_error_search', True)
+            from prediction_error_optimizer import fingerprint
+            optimizer_fingerprint = fingerprint() if search_enabled else None
+            previous_path = Path(deployment['trainer_status'])
+            candidate_path = Path(deployment['candidate_output'])
+            if previous_path.exists() and candidate_path.exists():
+                previous = json.loads(previous_path.read_bytes())
+                if (previous.get('state') == 'CANDIDATE_ONLY'
+                        and previous.get('training_snapshot') == snapshot
+                        and previous.get('prediction_error_search') == search_enabled
+                        and previous.get('optimizer_fingerprint') == optimizer_fingerprint
+                        and previous.get('candidate_sha256') == digest(candidate_path)):
+                    return dict(previous, unchanged_snapshot=True)
+            report = train_and_evaluate(training_path, optimize_prediction_error=search_enabled)
             if digest(training_path) != snapshot['sha256']:
                 raise ValueError('training snapshot changed during fit')
             atomic(Path(deployment['candidate_output']), build_live_model_payload(report))
             result = {'state': 'CANDIDATE_ONLY', 'runtime_eligible': False,
+                      'prediction_error_search': search_enabled,
+                      'optimizer_fingerprint': optimizer_fingerprint,
+                      'prediction_error_optimization': report.get('prediction_error_optimization'),
+                      'candidate_sha256': digest(Path(deployment['candidate_output'])),
                       'training_snapshot': snapshot,
                       'dataset_quality': (report.get('model_payload') or {}).get('dataset_quality'),
                       'split_rows': {k:report.get(k) for k in ('train_rows','val_rows','test_rows')}}

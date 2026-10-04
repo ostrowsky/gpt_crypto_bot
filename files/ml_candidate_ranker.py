@@ -1012,16 +1012,20 @@ class ConstantScoreModel:
 
 
 class CatBoostBinaryClassifier:
-    def __init__(self) -> None:
+    def __init__(self, parameters: Optional[dict] = None) -> None:
         if not CATBOOST_AVAILABLE:
             raise RuntimeError(f"CatBoost is not available: {CATBOOST_IMPORT_ERROR}")
+        parameters = parameters or {}
+        if set(parameters) - {'iterations','depth','learning_rate','l2_leaf_reg'}:
+            raise ValueError('unsupported quality search parameter')
         self.model = CatBoostClassifier(
             loss_function="Logloss",
             eval_metric="Logloss",
-            iterations=CATBOOST_ITERATIONS,
-            depth=CATBOOST_DEPTH,
-            learning_rate=CATBOOST_LEARNING_RATE,
-            l2_leaf_reg=CATBOOST_L2_LEAF_REG,
+            iterations=parameters.get('iterations', CATBOOST_ITERATIONS),
+            depth=parameters.get('depth', CATBOOST_DEPTH),
+            learning_rate=parameters.get('learning_rate', CATBOOST_LEARNING_RATE),
+            l2_leaf_reg=parameters.get('l2_leaf_reg', CATBOOST_L2_LEAF_REG),
+            thread_count=1,
             random_seed=CATBOOST_RANDOM_SEED,
             verbose=False,
             allow_writing_files=False,
@@ -1044,6 +1048,7 @@ class CatBoostValueRegressor:
         if not CATBOOST_AVAILABLE:
             raise RuntimeError(f"CatBoost is not available: {CATBOOST_IMPORT_ERROR}")
         self.model = CatBoostRegressor(
+            thread_count=1,
             loss_function="RMSE",
             eval_metric="RMSE",
             iterations=CATBOOST_ITERATIONS,
@@ -1072,6 +1077,7 @@ class CatBoostGroupRanker:
         if not CATBOOST_AVAILABLE:
             raise RuntimeError(f"CatBoost is not available: {CATBOOST_IMPORT_ERROR}")
         self.model = CatBoostRanker(
+            thread_count=1,
             loss_function="YetiRankPairwise",
             eval_metric="NDCG:top=3",
             iterations=CATBOOST_ITERATIONS,
@@ -1413,6 +1419,7 @@ def train_and_evaluate(
     min_rows: int = 500,
     ev_lambda: float = DEFAULT_EV_LAMBDA,
     require_catboost: bool = True,
+    optimize_prediction_error: bool = False,
 ) -> dict:
     if require_catboost and not CATBOOST_AVAILABLE:
         detail = CATBOOST_IMPORT_ERROR or "unknown import error"
@@ -1463,7 +1470,16 @@ def train_and_evaluate(
     rank_score_std = max(1e-8, float(np.std(rank_train_scores)) if rank_train_scores.size else 1.0)
 
     models: Dict[str, Any] = {}
-    if require_catboost:
+    optimization = None
+    reference_model = None
+    if optimize_prediction_error:
+        if not require_catboost:
+            raise ValueError('prediction search requires the fixed CatBoost family')
+        from prediction_error_optimizer import search
+        chosen, reference_model, optimization = search(
+            CatBoostBinaryClassifier, X_train, bundle.y_train, X_val, bundle.y_val)
+        models['catboost'] = chosen
+    elif require_catboost:
         models["catboost"] = CatBoostBinaryClassifier().fit(X_train, bundle.y_train, X_val, bundle.y_val)
     else:
         models = {
@@ -1523,6 +1539,12 @@ def train_and_evaluate(
     best_model = models[best_name]
     assert best_calibrator is not None
     test_raw_score = best_model.predict_proba(X_test)
+    if optimization is not None:
+        from prediction_error_optimizer import holdout
+        optimization['holdout'] = holdout(
+            bundle.y_test, test_raw_score, reference_model.predict_proba(X_test),
+            [_row_feature_time(row).date().isoformat() for row in bundle.meta_test],
+            float(bundle.y_train.mean()))
     test_score = best_calibrator.predict(test_raw_score)
     baseline = rule_baseline_metrics(bundle.r_test, bundle.y_test)
     filtered = evaluate_predictions(bundle.y_test, test_score, bundle.r_test, best_threshold)
@@ -1562,6 +1584,7 @@ def train_and_evaluate(
         "payload_version": 4,
         "runtime_eligible": False,
         "evidence_status": "shadow_online_training",
+        "prediction_error_optimization": optimization,
         "dataset_quality": quality,
         "evaluation_provenance": evaluation_provenance,
         "model_name": best_name,
@@ -1603,6 +1626,7 @@ def train_and_evaluate(
     ]
     return {
         "dataset_file": str(dataset_path),
+        "prediction_error_optimization": optimization,
         "rows_total": len(rows),
         "train_rows": int(bundle.X_train.shape[0]),
         "val_rows": int(bundle.X_val.shape[0]),
@@ -1827,6 +1851,7 @@ def main() -> None:
     parser.add_argument("--positive-ret-threshold", type=float, default=0.0)
     parser.add_argument("--ev-lambda", type=float, default=DEFAULT_EV_LAMBDA)
     parser.add_argument("--min-date", type=str, default="")
+    parser.add_argument("--optimize-prediction-error", action="store_true")
     parser.add_argument("--model-out", type=Path, default=DEFAULT_MODEL_FILE)
     parser.add_argument("--report-out", type=Path, default=DEFAULT_REPORT_FILE)
     parser.add_argument("--readiness-only", action="store_true")
@@ -1856,12 +1881,16 @@ def main() -> None:
         return
 
     min_ts = _parse_ts(args.min_date) if args.min_date else None
+    if args.optimize_prediction_error:
+        from prediction_error_optimizer import limit_cpu
+        limit_cpu()
     report = train_and_evaluate(
         args.dataset,
         positive_ret_threshold=args.positive_ret_threshold,
         min_ts=min_ts,
         ev_lambda=args.ev_lambda,
         require_catboost=args.require_catboost,
+        optimize_prediction_error=args.optimize_prediction_error,
     )
     save_json(args.model_out, build_live_model_payload(report))
     save_json(args.report_out, {k: v for k, v in report.items() if k != "model_payload"})

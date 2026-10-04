@@ -61,6 +61,7 @@ def role_environment(role, source=None):
     names = {'systemroot', 'windir', 'path', 'pathext', 'temp', 'tmp', 'userprofile',
              'localappdata', 'appdata', 'programdata', 'os', 'systemdrive'}
     env = {k: v for k, v in source.items() if k.lower() in names}
+    env.update(OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
     if role == 'controller' and source.get('RANKER_EVALUATOR_KEY'):
         env['RANKER_EVALUATOR_KEY'] = source['RANKER_EVALUATOR_KEY']
     return env
@@ -94,6 +95,9 @@ def worker(path, role):
                    'at': time.time(), 'isolation_mode': MODE})
             try:
                 deployment = json.loads(path.read_bytes())
+                if role == 'trainer' and deployment.get('prediction_error_search', True):
+                    from prediction_error_optimizer import limit_cpu
+                    limit_cpu()
                 if role == 'portfolio':
                     import asyncio
                     from prospective_policy_portfolios import tick
@@ -129,6 +133,68 @@ def worker(path, role):
             deadline = time.monotonic()+max(1, interval-(time.monotonic()-started))
             while time.monotonic() < deadline and not (base/'stop.request').exists():
                 time.sleep(min(1, max(0.01, deadline-time.monotonic())))
+
+
+def serial_cycle(path, due, now=None):
+    """One synchronous role at a time, with no subprocesses or catch-up burst."""
+    now = time.monotonic() if now is None else now
+    results = {}
+    for role in ('exporter','trainer','evaluator','portfolio','controller'):
+        if (path.parent/'stop.request').exists(): break
+        if due.get(role, 0) > now: continue
+        deployment = json.loads(path.read_bytes())
+        atomic(path.parent/(role+'.lifecycle.json'),
+               {'state':'RUNNING','pid':os.getpid(),'at':time.time(),
+                'isolation_mode':MODE,'scheduler':'serial'})
+        try:
+            if role == 'portfolio':
+                import asyncio
+                from prospective_policy_portfolios import tick
+                result = asyncio.run(tick(deployment))
+                atomic(path.parent/'evaluator/portfolio_producer_latest.json',result)
+            else:
+                if role == 'controller':
+                    from learning_certificate_issuer import tick as certificate_tick
+                    from portfolio_evidence_intake import tick as intake_tick
+                    certificate_tick(deployment)
+                    intake_tick(deployment)
+                result = run_tick(deployment,role)
+                if role == 'controller':
+                    from learning_cohort_controller import tick as cohort_tick
+                    from actual_canary_outcomes import tick as canary_tick
+                    cohort_tick(deployment)
+                    canary_tick(deployment)
+        except Exception as exc:
+            result = {'state':'BLOCKED','reason':str(exc),'runtime_eligible':False}
+            atomic(path.parent/(role+'.error.json'),result)
+        due[role] = max(now,time.monotonic())+INTERVALS[role]
+        results[role] = result.get('state','UNKNOWN')
+        atomic(path.parent/(role+'.lifecycle.json'),
+               {'state':'WAITING','pid':os.getpid(),'at':time.time(),
+                'last_result':results[role],'isolation_mode':MODE,'scheduler':'serial'})
+    return results
+
+
+def supervise_serial(path):
+    from prediction_error_optimizer import limit_cpu
+    # Same supervisor lock as the multiprocess mode prevents competing schedulers.
+    with process_lock(path.parent/'supervisor.lock'):
+        limit_cpu()
+        (path.parent/'stop.request').unlink(missing_ok=True)
+        due={}
+        try:
+            while not (path.parent/'stop.request').exists():
+                atomic(path.parent/'supervisor.json',{'state':'RUNNING','pid':os.getpid(),
+                    'at':time.time(),'scheduler':'serial','isolation_mode':MODE,
+                    'os_access_isolation':False,'closed_loop':False})
+                results=serial_cycle(path,due)
+                atomic(path.parent/'supervisor.json',{'state':'RUNNING','pid':os.getpid(),
+                    'at':time.time(),'scheduler':'serial','last_results':results,
+                    'isolation_mode':MODE,'os_access_isolation':False,'closed_loop':False})
+                time.sleep(1)
+        finally:
+            atomic(path.parent/'supervisor.json',{'state':'STOPPED','pid':os.getpid(),
+                'at':time.time(),'scheduler':'serial','closed_loop':False})
 
 
 def supervise(path):
@@ -168,6 +234,7 @@ if __name__ == '__main__':
     parser.add_argument('--worker', choices=tuple(INTERVALS))
     parser.add_argument('--stop', action='store_true')
     parser.add_argument('--adopt-current-user', action='store_true')
+    parser.add_argument('--serial', action='store_true', help='one CPU, sequential learning roles')
     args = parser.parse_args()
     path = adopt_current_user() if args.adopt_current_user else args.deployment or initialize()
     if args.adopt_current_user:
@@ -176,5 +243,7 @@ if __name__ == '__main__':
         (path.parent/'stop.request').touch()
     elif args.worker:
         worker(path, args.worker)
+    elif args.serial:
+        supervise_serial(path)
     else:
         supervise(path)

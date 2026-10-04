@@ -39,7 +39,8 @@ class LocalRuntimeTests(unittest.TestCase):
                   'BINANCE_SECRET': 'secret', 'PYTHONPATH': 'injected'}
         for role in local.INTERVALS:
             env = local.role_environment(role, source)
-            self.assertEqual(set(env), {'PATH', 'TEMP'} | (
+            self.assertEqual(set(env), {'PATH', 'TEMP', 'OPENBLAS_NUM_THREADS',
+                                       'OMP_NUM_THREADS', 'MKL_NUM_THREADS'} | (
                 {'RANKER_EVALUATOR_KEY'} if role == 'controller' else set()))
 
     def test_identity_adoption_requires_stop_and_preserves_backup(self):
@@ -82,7 +83,7 @@ class LocalRuntimeTests(unittest.TestCase):
              patch.object(ranker, 'build_live_model_payload', return_value={'candidate':True}):
             result = service.run_tick(self.deployment, 'trainer')
         probe.assert_not_called()
-        train.assert_called_once_with(self.root/'eligible')
+        train.assert_called_once_with(self.root/'eligible', optimize_prediction_error=True)
         self.assertEqual(result['state'], 'CANDIDATE_ONLY')
         self.assertFalse(result['runtime_eligible'])
         self.assertFalse(result['os_access_isolation'])
