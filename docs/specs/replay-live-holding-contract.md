@@ -28,6 +28,9 @@ No production relaxation until full live-path and independent portfolio/forward
 gates pass. Do not reuse old forward certificates after source drift.
 
 One heavy task at a time, one logical CPU, BelowNormal, library threads=1.
+The paired runner emits flushed phase/arm/symbol progress to its redirected
+stdout, including before each expensive series build and completed counts.
+RUNNING logs and completed series are not a final result or approval.
 Pause the owned learning scheduler gracefully during maintenance/replay; do not
 stop Telegram or unrelated Python workers. A process exit without result and
 receipt is UNKNOWN, not completion. Resume the scheduler only after the replay

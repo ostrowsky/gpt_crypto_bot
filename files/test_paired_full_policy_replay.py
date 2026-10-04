@@ -78,6 +78,31 @@ class PairedPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.authorize({},b'a'*32,b'e'*32,b'{}',b'{}',now=NOW)
 
+    def test_progress_does_not_replace_or_modify_series_builder(self):
+        cache = {('BTCUSDT',tf):(None,{}) for tf in ('15m','1h','4h')}
+        series = AsyncMock(return_value=[])
+        async def build(*args, **kwargs):
+            await paired.rb._build_candidates_for_symbol('BTCUSDT','1h','data',
+                'features', variant='score_replace_cluster')
+            return {}, set(), 0
+        with patch.object(paired,'bounded_cache',return_value=cache), \
+             patch.object(paired.rb,'_build_bull_day_context',return_value=None), \
+             patch.object(paired.rb,'_build_candidates_for_symbol',series), \
+             patch.object(paired.rb,'build_replay_candidate_snapshot',build), \
+             patch.object(paired.rb,'simulate_portfolio',
+                AsyncMock(return_value=([],paired.rb.ReplayRunStats()))), \
+             patch('builtins.print') as log:
+            asyncio.run(paired.run_arms(cache,['BTCUSDT'],0,900000,self.root))
+            self.assertIs(paired.rb._build_candidates_for_symbol,series)
+        self.assertEqual(series.await_count,2)
+        for call in series.call_args_list:
+            self.assertEqual(call.args,('BTCUSDT','1h','data','features'))
+            self.assertEqual(call.kwargs,{'variant':'score_replace_cluster'})
+        rows = [json.loads(call.args[0]) for call in log.call_args_list]
+        self.assertEqual([row['arm'] for row in rows
+            if row['phase']=='ARM_COMPLETE'],['champion','candidate'])
+        self.assertTrue(all(call.kwargs['flush'] for call in log.call_args_list))
+
     def test_frozen_preflight_and_receipt_no_overwrite(self):
         archive = self.root/'archive'
         archive.mkdir()

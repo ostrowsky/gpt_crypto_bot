@@ -80,10 +80,26 @@ async def run_arms(cache, symbols, start, end, directory):
     ctx = rb._build_bull_day_context(local['BTCUSDT', '1h'][0])
     result = {}
     for arm in ('champion', 'candidate'):
+        completed = 0
+        original_builder = rb._build_candidates_for_symbol
+        async def logged_builder(sym, tf, *args, **kwargs):
+            nonlocal completed
+            print(json.dumps({'phase':'BUILDING_CANDIDATES', 'arm':arm,
+                'symbol':sym, 'tf':tf, 'completed_series':completed,
+                'total_series':2*len(symbols)}), flush=True)
+            built = await original_builder(sym, tf, *args, **kwargs)
+            completed += 1
+            print(json.dumps({'phase':'SERIES_COMPLETE', 'arm':arm,
+                'symbol':sym, 'tf':tf, 'completed_series':completed,
+                'total_series':2*len(symbols)}), flush=True)
+            return built
         with frozen_arm(directory, arm):
-            raw, times, _ = await rb.build_replay_candidate_snapshot(
-                symbols, ['15m','1h'], local, c15, c4, ctx, variant='score_replace_cluster')
+            with patch.object(rb, '_build_candidates_for_symbol', logged_builder):
+                raw, times, _ = await rb.build_replay_candidate_snapshot(
+                    symbols, ['15m','1h'], local, c15, c4, ctx, variant='score_replace_cluster')
             snapshot = event_clock(raw, times, start, end)
+            print(json.dumps({'phase':'SIMULATING_PORTFOLIO', 'arm':arm,
+                'frames':len(snapshot[1]), 'candidates':snapshot[2]}), flush=True)
             trades, stats = await rb.simulate_portfolio(
                 symbols, ['15m','1h'], local, c15, c4, ctx, max_open_positions=10,
                 enable_replacement=bool(getattr(config, 'PORTFOLIO_REPLACE_ENABLED', True)),
@@ -94,6 +110,7 @@ async def run_arms(cache, symbols, start, end, directory):
             finalize_at_boundary(trades, local, end)
             result[arm] = {'trades': [asdict(t) for t in trades],
                            'stats': asdict(stats), 'candidates': snapshot[2]}
+            print(json.dumps({'phase':'ARM_COMPLETE', 'arm':arm}), flush=True)
     return result
 
 
@@ -148,6 +165,8 @@ async def run(archive, champion_path, candidate_path, output, *, policy_family='
         cache, symbols = {}, manifest['eligible_symbols']
         index = rb._build_market_cache_index(archive/'market')
         for sym in symbols:
+            print(json.dumps({'phase':'LOADING_MARKET', 'symbol':sym,
+                'total_symbols':len(symbols)}), flush=True)
             for tf in ('15m','1h'):
                 data = rb._load_cached_klines(archive/'market', sym, tf,
                     manifest['archive_start_ms'], end, cache_index=index)
