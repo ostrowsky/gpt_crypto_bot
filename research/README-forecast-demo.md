@@ -1,4 +1,41 @@
-# ML Researcher interview demo
+# ML Researcher interview demo v3.2
+
+Default inference displays ARIMA, ETS, SARIMA, SARIMAX, Prophet, Ridge, XGBoost,
+LSTM and actual pytorch-forecasting TFT. Persistence is removed from displayed
+forecasts; the last-price error remains an internal statistical control and
+production fallback. This does not relax trading/serving gates.
+
+The delivered executed notebook embeds a checksummed native model release. Run
+All loads frozen weights, then publishes one common current 15-minute UTC window
+for ALL methods/assets. USDT and percentage plots share identical bounds. Manual
+refresh adds matured actuals without changing predictions or their target times.
+Near-zero means are labeled weak, never cosmetically changed to wavy trajectories.
+
+The clean Git notebook has no trained states. To create its release, install the
+pinned requirements and run:
+
+```text
+python files/prepare_research_forecast_release.py --output forecast_demo_artifacts
+```
+
+This performs the nine-model retrospective August benchmark, train-only OOF,
+fresh 42-day release preparation (35 train / 4 tune / 3 calibration), and actual
+future-mutation, closed-prefix and serialization-equivalence assertions on all
+27 model/asset pairs. The full CPU benchmark and OOF preparation can take over
+an hour; the delivered notebook loads prepared weights for current inference.
+New weights do NOT
+inherit historical benchmark scores. Added-model August results are retrospective
+because the period had already been viewed; independent confirmation needs future
+data. Live inference only needs three days of input context.
+
+Historical price plots now show ONE origin and all 15 horizons, never a line
+connecting successive h15 forecasts anchored to already known market prices.
+Set SHOW_HISTORICAL=True to view these separately from the current UTC comparison.
+TFT predicts minute-return quantiles and has test pinball/crossing diagnostics;
+point paths sum minute medians. Marginal quantiles are not summed into alleged
+price quantiles. All price-path intervals use separate residual calibration.
+
+The following describes the original v3.1 protocol retained as historical context.
 
 Open `Binance_BTC_ETH_SOL_ML_Researcher_Demo_v3.ipynb` with a dedicated Python
 3.11 kernel. It embeds the reviewed research module and contains Russian answers
@@ -61,7 +98,8 @@ day-block intervals with three-day block sensitivity. A confidence interval
 crossing zero is INCONCLUSIVE; more rows cannot guarantee significance.
 Tests enforce causal feature
 construction and serving contracts; they do not establish exact historical
-arrival times, stable market alpha or optional DL-library compatibility.
+arrival times or stable market alpha. The v3.2 release verifies both DL libraries
+and numeric/native model export/import, without pickle in the distributed release.
 
 The bot's full Truth Harness independently returned FAIL TH-11 on 2026-10-04:
 the existing portfolio artifact did not match the current replay source hash.

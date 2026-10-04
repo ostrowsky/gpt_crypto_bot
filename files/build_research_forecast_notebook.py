@@ -1,13 +1,14 @@
 """Build a standalone, clean-output interview demo from reviewed research code."""
 import hashlib
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "research" / "Binance_BTC_ETH_SOL_ML_Researcher_Demo_v3.ipynb"
 
 
-def build():
+def build_research():
     cells = []
     def md(text):
         cells.append(dict(cell_type="markdown", metadata={}, source=text.strip().splitlines(keepends=True)))
@@ -447,6 +448,189 @@ Docker recipe: `research/Dockerfile.forecast` (build context — корень р
     return dict(nbformat=4, nbformat_minor=5, cells=cells,
                 metadata=dict(kernelspec=dict(display_name="Python 3.11",language="python",name="python3"),
                               language_info=dict(name="python",version="3.11")))
+
+
+def build(release=None):
+    """Default current inference; delivered artifact supplies the frozen release."""
+    old=build_research()
+    cells=[]
+    def md(text):cells.append(dict(cell_type='markdown',metadata={},source=text.strip().splitlines(keepends=True)))
+    def code(text,hidden=False):cells.append(dict(cell_type='code',metadata={'jupyter':{'source_hidden':True}} if hidden else {},execution_count=None,outputs=[],source=text.strip().splitlines(keepends=True)))
+    md('''# ML Researcher · BTC / ETH / SOL · версия 3.2
+
+**Текущий прогноз h1…h15 из одного момента, одинаковое UTC-окно у всех методов.**
+ARIMA, ETS (Gaussian state-space), SARIMA, SARIMAX, Prophet, Ridge, XGBoost,
+LSTM и настоящий Temporal Fusion Transformer (PyTorch Forecasting).
+Вероятностная часть: отдельные эмпирические 90% prediction intervals на каждом горизонте.
+Persistence удалена из прогнозов, графиков и выбора методов; ошибка последней
+известной цены остаётся внутренним контролем пользы модели.
+
+**Запуск:** Python 3.11, зависимости из следующей ячейки → Restart Kernel → Run All.
+В готовом файле обученные веса встроены. Повторный запуск загружает веса и получает
+текущие закрытые свечи; обучение не тратит будущие 15 минут. Все активы используют
+одну исходную минуту, фактическое время выдачи записывается отдельно. Горизонты —
+следующие 15 закрытий минутных свечей, а не переименованные timestamps с секундами.
+Через 1–15 минут кнопка «Новые свечи → сравнить» добавляет факт к исходному прогнозу.
+Будущего факта до закрытия свечей нет: метрики помечены PENDING/PARTIAL и имеют знаменатели.
+
+**Исправление вводящей в заблуждение картинки:** исторические h15-точки из разных
+моментов больше не соединяются в «траекторию». Даже нулевой прогноз доходности
+повторял бы цену при таком построении. Теперь исторический пример — одна полная
+15-минутная траектория, как в live. Близкий к константе результат модели сохраняется
+как сырой выход и отмечается NO_INFORMATIVE_SIGNAL; случайные изгибы не добавляются.
+Кандидат с заметным движением также не считается доказанно полезным.
+''')
+    requirements=(ROOT/'research/requirements-forecast.txt').read_text(encoding='utf-8')
+    packages=[x for x in requirements.splitlines() if x and not x.startswith('#')]
+    code('# Выполнить один раз в отдельном kernel, затем перезапустить:\n# %pip install '+' '.join(packages)+"\nimport importlib.util\nrequired=['numpy','pandas','scipy','sklearn','xgboost','statsmodels','matplotlib','ipywidgets','prophet','torch','lightning','pytorch_forecasting','safetensors']\nmissing=[p for p in required if importlib.util.find_spec(p) is None]\nif missing: raise RuntimeError('Установите зависимости: '+', '.join(missing))")
+    source=(ROOT/'files/research_forecast.py').read_text(encoding='utf-8').rsplit('\nif __name__ == "__main__":',1)[0]
+    source+='\n\n'+(ROOT/'files/research_forecast_release.py').read_text(encoding='utf-8')
+    preparation=(ROOT/'files/prepare_research_forecast_release.py').read_text(encoding='utf-8')
+    body=preparation.split('    args=parser.parse_args()\n',1)[1].rsplit('\n\nif __name__',1)[0]
+    aliases=sorted(set(re.findall(r'\brf\.([A-Za-z_]\w*)',body)))
+    source+='\n\ndef rebuild_demo_release(output_dir="forecast_demo_artifacts", historical_end="2026-09-01T00:00:00Z", release_end=None):\n'
+    source+='    import types\n    rf=types.SimpleNamespace(**{name:globals()[name] for name in '+repr(aliases)+'})\n'
+    source+='    args=types.SimpleNamespace(output=output_dir,historical_end=historical_end,release_end=release_end or pd.Timestamp.now(tz="UTC").floor("D").isoformat())\n'
+    source+=body+'\n    return envelope\n'
+    code(source,hidden=True)
+    code("SOURCE_SHA256 = "+repr(hashlib.sha256(source.encode()).hexdigest())+'\nEMBEDDED_RELEASE = '+repr(release)+'''\nRELEASE_PATH=Path('forecast_demo_artifacts/release_v32.json')
+REBUILD_RELEASE=False  # отдельное, длительное обучение; текущий forecast создаётся ПОСЛЕ него
+if REBUILD_RELEASE:
+    EMBEDDED_RELEASE=rebuild_demo_release()
+if EMBEDDED_RELEASE is None:
+    if not RELEASE_PATH.exists():
+        raise FileNotFoundError('Это чистая исходная версия. Включите REBUILD_RELEASE=True для подготовки весов либо откройте выполненный v3_2 notebook со встроенными весами.')
+    EMBEDDED_RELEASE=json.loads(RELEASE_PATH.read_text(encoding='utf-8'))
+experiment,CFG,release_provenance=unpack_release(EMBEDDED_RELEASE)
+from IPython.display import display
+display(pd.DataFrame([dict(model=n,kind={'ETS':'state-space ETS(A,Ad,N)','SARIMAX':'calendar state-space recurrence','XGBoost':'boosting','LSTM':'DL','TFT':'DL + attention'}.get(n,n)) for n in CFG.models]))
+print('Обучение:',release_provenance['train_start'],'→',release_provenance['train_cutoff'])
+print('Tune до:',release_provenance['tune_cutoff'],'; calibration до:',release_provenance['calibration_cutoff'])
+print('Кандидат для prospective проверки; старый benchmark не подтверждает новые веса.')
+''',hidden=True)
+    md('''## Общий текущий прогноз — все девять методов
+
+Сначала фиксируется один origin для всех активов. Если расчёт/загрузка пропустили
+первое закрытие, batch отклоняется целиком: его нельзя задним числом назвать прогнозом.
+В таком случае повторите эту ячейку для явно нового общего момента.
+Цены показаны в USDT и в процентах от origin, без подмены модельного выхода.
+Диагностический порог слабого сигнала задан заранее: максимальное движение <0.01%
+или отношение движения к h15 полуширине интервала <0.1. Это критерий отображения,
+не статистический тест преимущества и не торговый сигнал.
+''')
+    code("live_comparison=ForecastComparison(experiment,CFG,output_dir='forecast_demo_artifacts/prospective')\nCURRENT_BATCH=live_comparison.create_batch()\nprint(json.dumps(live_comparison.batches[CURRENT_BATCH],ensure_ascii=False,indent=2))\ndisplay(live_comparison.batch_table(CURRENT_BATCH))\nlive_comparison.plot_batch(CURRENT_BATCH)")
+    code("horizon_rows=[]\nfor key in live_comparison.batches[CURRENT_BATCH]['snapshot_ids']:\n    snap=live_comparison.snapshots[key]\n    for name,path in snap['paths'].items():\n        for h,target in enumerate(snap['target_close_at']):\n            horizon_rows.append(dict(symbol=snap['symbol'],model=name,horizon=h+1,target_close_at=target,predicted_close=path['price'][h],PI90_lower=path['lower'][h],PI90_upper=path['upper'][h]))\ndisplay(pd.DataFrame(horizon_rows))\nfor key in live_comparison.batches[CURRENT_BATCH]['snapshot_ids']:\n    snap=live_comparison.snapshots[key];path=snap['paths']['TFT']\n    print(snap['symbol'],'TFT: native one-minute log-return quantiles, % (not cumulative price quantiles)')\n    display(pd.DataFrame(100*np.asarray(path['native_minute_return_quantiles']),index=snap['target_close_at'],columns=[str(q) for q in path['native_quantile_levels']]))")
+    code("interactive_comparison(experiment,CFG,controller=live_comparison)")
+    md('''## Проверка отсутствия подглядывания и воспроизводимости
+
+При подготовке каждого из 27 model/asset сочетаний все будущие OHLCV после origin
+заменены и повторно рассчитаны признаки. Прогноз сравнивается также с расчётом
+только на закрытом префиксе. Оба результата должны совпасть. Отдельно проверяется
+совпадение прогнозов до/после переноса весов. Ни test, ни факт после выдачи не меняют
+scaler, веса или параметры. TFT decoder получает будущий календарь и замороженные
+значения origin; будущие рыночные данные не передаются даже как «заглушка».
+Веса хранятся как численные состояния, native XGBoost/Prophet JSON и safetensors.
+''')
+    code("display(pd.DataFrame(release_provenance['causality']))\ndisplay(pd.DataFrame(release_provenance['roundtrip']))\nassert len(release_provenance['causality'])==len(CFG.models)*len(CFG.symbols)\nassert all(r['future_mutation']=='PASS' and r['closed_prefix']=='PASS' for r in release_provenance['causality'])")
+    md('''## Историческая сравнительная таблица и качество моделей
+
+Эта таблица относится к августу 2026, **не к текущим новым весам**.
+120 дней: 60 train / 15 tune / 15 calibration / 30 полных test-дней.
+Добавленные модели проверяются на уже просмотренном периоде; их результат —
+ретроспективный benchmark, не новый независимый sealed holdout.
+Новые веса подготовлены отдельно на 42 днях: 35 train / 4 tune / 3 calibration.
+Для live требуется лишь 3 дня контекста. Сроки выбраны для этого демо, не доказаны
+как универсально минимальные. Данные и параметры не добавляются до получения
+желаемой значимости. Дальнейшее подтверждение — только новый forward период.
+
+Сравниваются ошибка h15 log-return, USDT MAE, RMSE, direction correct/N,
+абстенция, coverage и interval score. Самая малая MAE — описательный победитель;
+доказательство устойчивого преимущества требует положительного corrected CI.
+''')
+    code("benchmark=pd.DataFrame([r for r in experiment['results'] if r['model'] in CFG.models])\nbenchmark['RMSE_h15_return']=benchmark.RMSE_by_horizon.map(lambda x:x[-1])\nbenchmark['PI90_covered_h15']=benchmark.PI90_covered_by_horizon.map(lambda x:x[-1])\nbenchmark['PI90_coverage_h15']=benchmark.PI90_coverage_by_horizon.map(lambda x:x[-1])\nbenchmark['PI90_interval_score_h15']=benchmark.PI90_interval_score_by_horizon.map(lambda x:x[-1])\ncolumns=['symbol','model','n_origins','MAE_h15_return','MAE_h15_USDT','baseline_MAE_h15_return','RMSE_h15_return','improvement_pct','n_time_blocks','verdict']\ndisplay(benchmark[columns].sort_values(['symbol','MAE_h15_return']))\nplot_comparison(experiment,CFG)\nfor symbol in CFG.symbols:\n    group=benchmark.loc[benchmark.symbol==symbol]\n    winner=group.sort_values('MAE_h15_return').iloc[0]\n    direction=group.sort_values('direction_hit_rate',ascending=False).iloc[0]\n    print(symbol,'минимальная MAE:',winner.model,'; verdict:',winner.verdict)\n    print('Направление:',direction.model,str(direction.direction_population_correct)+'/'+str(direction.direction_population_n),'вывод:',direction.direction_verdict)\nprint('Ошибка без модели — только внутренний контроль; Persistence отсутствует в списке прогнозов.')")
+    code("details=['symbol','model','direction_population_correct','direction_population_n','direction_abstentions','direction_balanced_accuracy','direction_ci95_familywise_gain_pp','direction_verdict','n_calibration','PI90_covered_h15','PI90_denominator','PI90_coverage_h15','PI90_interval_score_h15','native_quantile_pinball','native_quantile_crossings','native_quantile_comparisons']\ndisplay(benchmark[[c for c in details if c in benchmark]])\ndisplay(pd.DataFrame(experiment['direction_baselines']))\ndisplay(pd.DataFrame([r for r in release_provenance['cv_results'] if r['model'] in CFG.models]))")
+    md('''### Исторические price-графики: один origin вместо соединённых h15
+
+Отдельная архивная диагностика (по умолчанию скрыта, чтобы не смешивать её с общим
+текущим окном). Включите SHOW_HISTORICAL=True: TRAIN OOF и TEST используют все
+15 горизонтов одного origin, одинакового у всех методов внутри каждого этапа.
+Исходная точка выбрана по времени до просмотра ошибок, а не по удачной картинке.
+''')
+    code('''SHOW_HISTORICAL=False
+if SHOW_HISTORICAL:
+    import matplotlib.pyplot as plt
+    for symbol in CFG.symbols:
+        fig,axes=plt.subplots(len(CFG.models),2,figsize=(14,3*len(CFG.models)),squeeze=False)
+        for i,name in enumerate(CFG.models):
+            for col,stage in enumerate(('train_oof','test')):
+                ex=release_provenance['examples'][symbol][name][stage]
+                origin=utc(ex['origin']);end=origin+pd.Timedelta(minutes=15)
+                ax=axes[i,col]
+                ax.plot(pd.DatetimeIndex(ex['actual_times']),ex['actual'],color='black',label='Actual')
+                ax.plot(pd.date_range(origin,periods=16,freq='min'),[ex['price']]+ex['prediction'],'o--',ms=2,label='One origin: h1..h15')
+                ax.axvline(origin,color='gray',ls=':');ax.set_xlim(origin-pd.Timedelta(minutes=15),end)
+                ax.set_title(name+' | '+stage+' | '+origin.isoformat(),fontsize=9);ax.legend();ax.grid(alpha=.2)
+        fig.suptitle(symbol+' | archived single-origin forecasts');fig.tight_layout();plt.show()
+''')
+    md('''## Ответы на 10 вопросов
+
+Примеры ниже относятся к воспроизводимому демо и документированным проектам.
+Числа берутся из таблицы выше. Наличие кода не означает подтверждённый прирост,
+а статистическая метрика не означает доходность торгового портфеля.
+''')
+    # Preserve interview answers and provenance, updated for the actual model set.
+    for cell in old['cells']:
+        text=''.join(cell['source'])
+        if cell['cell_type']=='markdown' and any(text.startswith(f'## {i}.') for i in range(1,11)):
+            text=text.replace('Prophet, LSTM и TFT\nподготовлены как опциональные эксперименты.', 'Prophet, LSTM и TFT включены в основной сравнительный эксперимент, добавлен ETS(A,Ad,N).')
+            text=text.replace('DL — отдельные явно включаемые гипотезы.', 'ETS, Prophet, LSTM и TFT включены в сравнение.')
+            text=text.replace('SARIMAX использует только известный\nкалендарь: реальные будущие объёмы и цены в exog не передаются.',
+                              'SARIMAX получает будущий календарь и замороженные рыночные признаки origin; реальные будущие объёмы и цены в exog не передаются.')
+            text=text.replace('Финальный период — август 2026;', 'Период ретроспективного benchmark — август 2026;')
+            text=text.replace('30 untouched test.', '30 test-дней (период уже просмотрен; новый независимый holdout нужен отдельно).')
+            text=text.replace('Финальный test не участвует в поиске гиперпараметров.', 'Августовский test не используется для настройки; для добавленных моделей это ретроспективное сравнение.')
+            text=text.replace('по новой таблице.', 'по новой исторической таблице; текущие новые веса оцениваются отдельно.')
+            text=text.replace('benchmark включает persistence,\n', 'benchmark включает\n')
+            text=text.replace('ETS или отдельную state-space разработку как свой\nподтверждённый опыт по этому ноутбуку не заявляю',
+                              'ETS(A,Ad,N) реализован через Gaussian state-space в statsmodels; параметры обучаются только на train, затем фильтр обновляет состояние по наблюдаемой истории')
+            text=text.replace('Опциональные DL-адаптеры не считаются проверенными только потому, что код написан.',
+                              'LSTM и TFT реально обучены и рассчитаны; для обоих проверены будущие возмущения и перенос весов.')
+            text=text.replace('На untouched test', 'На отложенном ретроспективном test')
+            text=text.replace('перед persistence', 'перед контрольной ошибкой последней цены')
+            text=text.replace('persistence fallback', 'fallback последней известной цены')
+            text=text.replace('нет TFT/LSTM/Prophet-результатов', 'результаты TFT/LSTM/Prophet/ETS показаны в общей таблице')
+            text=text.replace('финальный test не участвует', 'ретроспективный test не участвует')
+            if text.startswith('## 2.'):
+                text+='\n\nProphet: фиксированная train-only модель, прогнозирует изменение своего log-price тренда/сезонности относительно origin; уровень привязан только к наблюдённой цене origin. ETS: параметры Gaussian state-space MLE на train, causal Holt filter на доступном контексте. TFT: train-only scalers, fixed 15-minute grid и последние 7 train-дней для ограничения CPU, checkpoint по tune.\n'
+            if text.startswith('## 7.'):
+                text+='\n\nСтарые h15-картинки были исправлены: сходство ряда точечных прогнозов с уровнем цены не подтверждает прогнозирование будущего движения. Нулевая доходность тоже создаёт такое сходство.\n'
+            if text.startswith('## 5.'):
+                text+='\n\nTFT дополнительно прогнозирует семь нативных квантилей минутной доходности, обучаясь с QuantileLoss. Оцениваю pinball loss и crossing count/число пар. Квантили минутных доходностей не складываю в якобы квантили цены; интервалы накопленной траектории калибрую отдельно.\n'
+            md(text)
+    md('''## Повторение обучения и отдельный production API
+
+В репозитории `python files/prepare_research_forecast_release.py` пересоздаёт
+исторический benchmark, train OOF, свежий research release и проверки причинности.
+Подготовка весов — отдельный процесс, Run All готового файла не переобучает модели.
+Этот же pipeline встроен в ноутбук: явное REBUILD_RELEASE=True запускает подготовку
+с нуля без репозитория. Это длительный исследовательский режим; текущий 15-минутный
+forecast начинается после подготовки. Обычный запуск использует готовые веса.
+Production архитектура FastAPI сохранена во встроенном коде: readiness, auth,
+freshness, дедлайн первого горизонта, expiry, атомарное обновление и mature-label
+monitoring. Неизвестное преимущество сохраняет внутренний безопасный fallback;
+удаление Persistence из исследовательской панели не ослабляет serving gates.
+Для полноценного допуска этих девяти методов нужен новый независимый forward test.
+Docker/нагрузочный rollout в этой работе не подтверждены.
+''')
+    # Preserve the standalone module export contract (second-to-last cell).
+    export=next(''.join(c['source']) for c in old['cells'] if c['cell_type']=='code' and 'EXPORT_SERVICE = False' in ''.join(c['source']))
+    code(export)
+    md('''Полный аудит бота: **FAIL TH-11** (существующий portfolio replay hash).
+Это независимая от демо проблема; она не превращается в PASS благодаря новым графикам.
+Вывод о forecasting определяется численными ошибками и forward-проверкой, а не формой линии.
+''')
+    for i,c in enumerate(cells):c['id']=f'demo-v32-{i:03d}'
+    return dict(nbformat=4,nbformat_minor=5,cells=cells,metadata=old['metadata'])
 
 
 def main():

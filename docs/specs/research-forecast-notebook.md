@@ -4,6 +4,87 @@
 
 ## Contract
 
+### Common current inference window, 2026-10-04
+
+Supersedes the old visual/default-method contract below. Default displayed
+models: ARIMA, ETS, SARIMA, SARIMAX, Prophet, Ridge, XGBoost, LSTM and TFT.
+Remove Persistence from forecast paths, plotted methods and displayed rankings;
+retain only its internal error control/production fallback, without relaxing
+serving or trading gates. All nine methods must actually complete on all assets.
+An unavailable optional library is not a completed model result.
+
+Historical price evidence MUST show all 15 horizons from ONE fixed origin. Do
+not connect h15 estimates issued from successive observed prices: even zero
+return would visually track the realized market. Select examples by time alone,
+use the same historical origin for all methods in each stage. TRAIN is OOF,
+not fitted predictions. Historical plots remain explicitly separate/opt-in.
+Keep raw means unaltered; label weak paths NO_INFORMATIVE_SIGNAL when maximum
+absolute displacement <0.01% OR displacement/h15 calibrated interval half-width
+<0.1. These fixed diagnostic thresholds do not prove forecast skill; never
+invent oscillation, hide failed methods or improve scores by rejecting weak rows.
+
+ETS(A,Ad,N) uses Gaussian state-space train-tail MLE and a causal innovations
+filter, whose forecast is tested against statsmodels with identical initial
+state. Prophet fits the last 2880 TRAIN bars once; its future trend/seasonal
+increments are reanchored to the observed origin level, identically in historical
+and current inference. LSTM is a direct 15-horizon return model with train-only
+scalers and fixed 15-minute train grid. Real pytorch-forecasting TFT fits the last
+7 TRAIN days on that grid, checkpoint selected on tune only; target is minute
+return, point path is the cumulative sum of minute medians. Future decoder market
+inputs are origin-frozen, deterministic calendar is known. Native minute-return
+quantiles receive test pinball/crossing diagnostics; they are NOT summed into
+claimed price quantiles. Price intervals are separately calibrated per horizon.
+
+Prepare the inference candidate on 42 predeclared days before release cutoff:
+35 train / 4 tune / 3 calibration, purged by label availability, no test-driven
+selection. This is a research candidate, not a newly certified production model.
+Nine-method August benchmark is retrospective because that period was already
+viewed; new weights do not inherit its metrics. Include input receipts and exact
+versions. Every model/asset must pass actual future-OHLCV replacement, truncated
+closed-prefix prediction and native export/import equivalence checks. An
+unsuccessful check fails preparation. Source notebook has no outputs or weights;
+requested delivered runtime notebook embeds its checksummed release and evidence.
+
+The default delivered demo loads a portable, checksummed frozen research release
+before creating a current forecast; it never spends the future forecast window
+training models. Historical training/backtest remain a separate opt-in workflow.
+Capture one run timestamp and one common latest-closed-candle UTC origin for
+ALL three assets and ALL methods. Forecast exactly the next 15 one-minute candle
+closes on a shared grid, with actual issuance time recorded separately. Minute
+close targets are not relabeled to arbitrary seconds after the launch timestamp.
+Reject the batch atomically if any symbol/model fails or the first target has
+already closed before issuance. Refresh actuals atomically on one shared cutoff,
+without changing the batch origin, target grid, weights or prediction paths.
+
+All DEFAULT price plots use the same batch and the same explicit x-limits:
+observed context through the common origin, then the shared 15-minute window.
+Move archived train/test price plots and the previous frozen prospective example
+out of the default comparison. Historical error tables retain their dated scope.
+Show both USDT price and percent-change panels, horizon-by-horizon predictions,
+maximum displacement, endpoint displacement, and an explicit constant/near-zero
+forecast diagnosis. A low-displacement output
+must not be replaced by random noise or a cosmetically wavy curve.
+
+Portable releases use native XGBoost JSON model IO and numeric Ridge/CSS state,
+Prophet JSON and native DL safetensors, not pickle. Include the config, train/calibration timing, input hashes, dependency
+versions, feature schema, frozen backtest results and calibrated widths. Validate
+integrity, finite state and prediction equivalence on export/import. Only the
+requested delivered runtime notebook embeds weights; never commit trained states.
+An old research release remains visibly dated, never silently called a current
+approved production model. Production gates and the full Harness failure remain
+separate from research plotting. Tests must verify shared origins under delayed
+multi-asset fetches, matching target/x grids, atomic failure/refresh, no inference
+fit, serialization equivalence and exact flat-forecast diagnostics.
+
+TFT inference may directly construct fixed-length identity-scaled tensor windows
+instead of recreating TimeSeriesDataSet at every origin, only after its point and
+quantile outputs match the reference dataset path within fixed numeric tolerance.
+Reference prediction must override the historical minimum step when the live
+context is reindexed from zero; test native releases on this rebased context.
+Late actual refresh backfills the original target window (cutoff capped at h15),
+including when the user returns days later, rather than losing labels to a rolling
+three-day current input window. Prediction ID/time/path remain immutable.
+
 ### Extended confirmation protocol, 2026-10-04
 
 The 30-day exploratory run remains a rejected/underpowered historical result.

@@ -340,10 +340,16 @@ class NotebookContract(unittest.TestCase):
     def test_notebook_has_every_method_graph_and_interactive_controls(self):
         from build_research_forecast_notebook import build
         source='\n'.join(''.join(c['source']) for c in build()['cells'])
-        self.assertIn('plot_method_evidence(experiment,cv_traces,CFG)',source)
+        self.assertIn('SHOW_HISTORICAL=False',source)
+        self.assertIn("[ex['price']]+ex['prediction']",source)
         self.assertIn('plot_comparison(experiment,CFG)',source)
-        self.assertIn('interactive_comparison(experiment,CFG)',source)
+        self.assertIn('interactive_comparison(experiment,CFG,controller=live_comparison)',source)
         self.assertIn('direction_ci95_familywise_gain_pp',source)
+        self.assertIn('CURRENT_BATCH=live_comparison.create_batch()',source)
+        self.assertIn('def rebuild_demo_release(',source)
+        self.assertIn('REBUILD_RELEASE=False',source)
+        self.assertIn("[r for r in release_provenance['cv_results'] if r['model'] in CFG.models]",source)
+        self.assertEqual(set(rf.ForecastConfig().models),{'Ridge','XGBoost','ARIMA','ETS','SARIMA','SARIMAX','Prophet','LSTM','TFT'})
 
 
 class ProspectiveContract(unittest.TestCase):
@@ -397,6 +403,168 @@ class ProspectiveContract(unittest.TestCase):
             payload=json.loads((Path(root)/(key+'.json')).read_text(encoding='utf-8'))
             self.assertEqual(payload,self.controller.snapshots[key])
             self.assertGreater(rf.utc(payload['target_close_at'][0]),rf.utc(payload['issued_at']))
+
+    def test_batch_uses_one_origin_and_refresh_preserves_every_path(self):
+        self.controller.cfg=replace(self.cfg,symbols=('BTCUSDT','ETHUSDT','SOLUSDT'))
+        for symbol in self.controller.cfg.symbols:
+            for key in ('predictions','policies','widths'):
+                self.experiment[key][symbol]=self.experiment[key]['BTCUSDT']
+        fetch=self.controller.fetcher;cutoffs=[]
+        def advancing(symbol,cfg,cache):
+            cutoffs.append(cfg.end_utc)
+            result=fetch(symbol,cfg,cache)
+            self.now+=pd.Timedelta(seconds=1)
+            return result
+        self.controller.fetcher=advancing
+        key=self.controller.create_batch()
+        batch=self.controller.batches[key]
+        snaps=list(self.controller.snapshots.values())
+        self.assertEqual(len(set(cutoffs)),1)
+        self.assertEqual(len(snaps),3)
+        self.assertEqual(len({r['origin_close_at'] for r in snaps}),1)
+        self.assertTrue(all(r['target_close_at']==batch['target_close_at'] for r in snaps))
+        self.assertEqual(len({r['issued_at'] for r in snaps}),1)
+        frozen=json.dumps(self.controller.snapshots,sort_keys=True)
+        self.now+=pd.Timedelta(minutes=5)
+        table=self.controller.refresh_batch(key)
+        self.assertEqual(set(table.mature_path_points),{5})
+        self.assertEqual(frozen,json.dumps(self.controller.snapshots,sort_keys=True))
+        self.now+=pd.Timedelta(days=7)
+        table=self.controller.refresh_batch(key)
+        self.assertEqual(set(table.mature_path_points),{15})
+        self.assertEqual(set(table.state),{'COMPLETE'})
+        self.assertEqual(frozen,json.dumps(self.controller.snapshots,sort_keys=True))
+        observed=dict(self.controller.observed)
+        previous=json.dumps(self.controller.batches[key],sort_keys=True)
+        def broken(symbol,cfg,cache):raise ValueError('refresh outage')
+        self.controller.fetcher=broken
+        with self.assertRaises(ValueError):self.controller.refresh_batch(key)
+        self.assertEqual(previous,json.dumps(self.controller.batches[key],sort_keys=True))
+        self.assertTrue(all(self.controller.observed[k] is v for k,v in observed.items()))
+
+    def test_batch_fails_atomically_on_asset_error_and_deadline(self):
+        self.controller.cfg=replace(self.cfg,symbols=('BTCUSDT','ETHUSDT'))
+        fetch=self.controller.fetcher
+        def failure(symbol,cfg,cache):
+            if symbol=='ETHUSDT':raise ValueError('network')
+            return fetch(symbol,cfg,cache)
+        self.controller.fetcher=failure
+        with self.assertRaises(ValueError):self.controller.create_batch()
+        self.assertFalse(self.controller.snapshots);self.assertFalse(self.controller.batches)
+        for key in ('predictions','policies','widths'):
+            self.experiment[key]['ETHUSDT']=self.experiment[key]['BTCUSDT']
+        def late(symbol,cfg,cache):
+            data=fetch(symbol,cfg,cache);self.now+=pd.Timedelta(minutes=1);return data
+        self.controller.fetcher=late
+        with self.assertRaises(ValueError):self.controller.create_batch()
+        self.assertFalse(self.controller.snapshots);self.assertFalse(self.controller.batches)
+
+    def test_flat_diagnostic_preserves_raw_output(self):
+        path=dict(price=[100.0]*15,lower=[99.0]*15,upper=[101.0]*15)
+        frozen=json.dumps(path)
+        result=rf.path_diagnostics(100,path,'ARIMA')
+        self.assertEqual(result['signal_status'],'NO_INFORMATIVE_SIGNAL')
+        self.assertEqual(result['max_abs_change_pct'],0)
+        self.assertEqual(json.dumps(path),frozen)
+        with self.assertRaises(ValueError):rf.path_diagnostics(0,path,'Ridge')
+        with self.assertRaises(ValueError):rf.path_diagnostics(100,dict(path,price=[float('nan')]*15),'Ridge')
+
+    def test_price_overflow_never_publishes_a_partial_batch(self):
+        class BadPolicy:
+            def predict(self,full,rows):return np.full((len(rows),15),1000.0)
+        self.controller.cfg=replace(self.cfg,models=('Ridge',))
+        self.experiment['policies']['BTCUSDT']['Ridge']=BadPolicy()
+        self.experiment['widths']['BTCUSDT']['Ridge']=np.ones(15)*.01
+        with np.errstate(over='ignore'):
+            with self.assertRaises(ValueError):self.controller.create_batch()
+        self.assertFalse(self.controller.snapshots);self.assertFalse(self.controller.batches)
+
+    def test_batch_price_and_percent_plots_have_same_window(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        key=self.controller.create_batch();figures=[]
+        with patch.object(plt,'show',side_effect=lambda:figures.extend([plt.figure(i) for i in plt.get_fignums() if plt.figure(i) not in figures])):
+            self.controller.plot_batch(key)
+        self.assertTrue(figures)
+        expected=figures[0].axes[0].get_xlim()
+        self.assertTrue(all(ax.get_xlim()==expected for fig in figures for ax in fig.axes))
+        plt.close('all')
+
+
+class NewModelAndReleaseContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg=replace(rf.ForecastConfig(),symbols=('BTCUSDT',),history_days=5)
+        cls.market=rf.clean_klines(raw_rows(cls.cfg),cls.cfg)
+        cls.full=rf.prepare(cls.market,cls.cfg)
+        cls.sp=rf.split_frames(cls.full,cls.cfg)[0]
+
+    def test_ets_filter_matches_statsmodels_known_initial_state(self):
+        from statsmodels.tsa.statespace.exponential_smoothing import ExponentialSmoothing
+        cfg=self.cfg;model=rf.ETSPolicy('ETS',self.sp['train'],self.sp['tune'],self.full,cfg)
+        row=self.sp['test'].iloc[[-1]];idx=int(row.time_idx.iloc[0])
+        hist=self.full.iloc[idx-cfg.classical_window+1:idx+1]
+        y=(hist.log_close.to_numpy()-float(row.log_close.iloc[0]))/model.scale
+        system=ExponentialSmoothing(y[1:],trend=True,damped_trend=True,initialization_method='known',initial_level=y[0],initial_trend=0)
+        fitted=system.filter([model.alpha,model.beta,model.phi])
+        np.testing.assert_allclose(model.predict(self.full,row)[0],np.asarray(fitted.forecast(15))*model.scale,rtol=1e-6,atol=1e-8)
+
+    def test_new_models_ignore_all_future_values_and_train_only_parameters(self):
+        cfg=self.cfg;row=self.sp['test'].iloc[[-20]];idx=int(row.time_idx.iloc[0])
+        changed=self.full.copy()
+        changed.loc[changed.time_idx>idx,['close','log_close']+rf.FEATURES]=123456
+        for name in ('ETS','Prophet'):
+            with self.subTest(model=name):
+                policy=rf.build_policy(name,self.sp['train'],self.sp['tune'],self.full,cfg)
+                before=policy.predict(self.full,row)
+                np.testing.assert_allclose(before,policy.predict(changed,row),rtol=1e-6,atol=1e-8)
+                np.testing.assert_allclose(before,policy.predict(self.full.iloc[:idx+1],row),rtol=1e-6,atol=1e-8)
+
+    def test_native_release_roundtrip_and_corruption_rejection(self):
+        from research_forecast_release import pack_release,unpack_release
+        cfg=replace(self.cfg,models=('Ridge','XGBoost','ETS','SARIMA','SARIMAX','Prophet','ARIMA'))
+        policies={name:rf.build_policy(name,self.sp['train'],self.sp['tune'],self.full,cfg) for name in cfg.models}
+        experiment=dict(policies={'BTCUSDT':policies},widths={'BTCUSDT':{n:np.ones(15)*.01 for n in cfg.models}})
+        release=pack_release(experiment,cfg,dict(status='test'))
+        restored,config,provenance=unpack_release(release)
+        self.assertEqual(config,cfg)
+        row=self.sp['test'].tail(1)
+        for name in cfg.models:
+            np.testing.assert_allclose(policies[name].predict(self.full,row),restored['policies']['BTCUSDT'][name].predict(self.full,row),rtol=1e-6,atol=1e-8)
+        with self.assertRaises(ValueError):unpack_release(dict(release,sha256='0'*64))
+
+    def test_lstm_and_tft_portable_states_and_closed_prefix_match(self):
+        from research_forecast_release import pack_release,unpack_release
+        cfg=replace(self.cfg,models=('LSTM','TFT'))
+        row=self.sp['test'].iloc[[-20]];idx=int(row.time_idx.iloc[0])
+        changed=self.full.copy()
+        changed.loc[changed.time_idx>idx,['close','log_close']+rf.FEATURES]=123456
+        policies={n:rf.build_policy(n,self.sp['train'],self.sp['tune'],self.full,cfg) for n in cfg.models}
+        experiment=dict(policies={'BTCUSDT':policies},widths={'BTCUSDT':{n:np.ones(15)*.01 for n in cfg.models}})
+        restored,_,_=unpack_release(pack_release(experiment,cfg,dict(status='test')))
+        for name in cfg.models:
+            with self.subTest(model=name):
+                before=policies[name].predict(self.full,row)
+                np.testing.assert_allclose(before,policies[name].predict(changed,row),rtol=1e-6,atol=1e-8)
+                np.testing.assert_allclose(before,policies[name].predict(self.full.iloc[:idx+1],row),rtol=1e-6,atol=1e-8)
+                np.testing.assert_allclose(before,restored['policies']['BTCUSDT'][name].predict(self.full,row),rtol=1e-6,atol=1e-8)
+                if name=='TFT':
+                    self.assertEqual(policies[name].last_quantiles.shape,(1,15,7))
+                    raw=policies[name].last_quantiles.copy()
+                    np.testing.assert_allclose(before,policies[name].predict(self.full,row,reference=True),rtol=1e-6,atol=1e-8)
+                    np.testing.assert_allclose(raw,policies[name].last_quantiles,rtol=1e-6,atol=1e-8)
+                    # The portable template uses historical absolute indices.
+                    # A live rolling context starts from zero and must also
+                    # match the reference dataset, not be filtered to emptiness.
+                    live=self.full.iloc[idx-cfg.context+1:idx+1].copy().reset_index(drop=True)
+                    live['time_idx']=np.arange(len(live))
+                    latest=live.iloc[[-1]]
+                    fast=restored['policies']['BTCUSDT'][name].predict(live,latest)
+                    quantiles=restored['policies']['BTCUSDT'][name].last_quantiles.copy()
+                    reference=restored['policies']['BTCUSDT'][name].predict(live,latest,reference=True)
+                    np.testing.assert_allclose(fast,reference,rtol=1e-6,atol=1e-8)
+                    np.testing.assert_allclose(quantiles,restored['policies']['BTCUSDT'][name].last_quantiles,rtol=1e-6,atol=1e-8)
 
 
 if __name__ == "__main__":

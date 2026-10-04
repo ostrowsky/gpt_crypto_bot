@@ -32,7 +32,7 @@ class ForecastConfig:
     eval_stride: int = 60
     calibration_stride: int = 15
     classical_window: int = 2880
-    models: tuple = ("Persistence", "Ridge", "XGBoost", "ARIMA", "SARIMA", "SARIMAX")
+    models: tuple = ("Ridge", "XGBoost", "ARIMA", "ETS", "SARIMA", "SARIMAX", "Prophet", "LSTM", "TFT")
     train_stride: int = 15
     seed: int = 42
     bootstrap_draws: int = 10000
@@ -360,6 +360,9 @@ class LSTMPolicy:
             y = self.yscale.transform(rows[target_columns(cfg)])
             return TensorDataset(torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32))
         train = train.loc[train.time_idx >= 60 + cfg.context - 1]
+        train = evaluation_grid(train, cfg.train_stride)
+        tune = evaluation_grid(tune, cfg.eval_stride)
+        self.n_fit = len(train)
         training = DataLoader(data(train), batch_size=256, shuffle=False)
         validation = DataLoader(data(tune), batch_size=256, shuffle=False)
         class Net(nn.Module):
@@ -464,90 +467,108 @@ class SeasonalPolicy:
         return np.asarray(output)
 
 
-class ClassicalPolicy:
+class ProphetPolicy:
+    """Train-only Prophet; level anchored to the observed origin, not a future price.
+
+    Fixed trend/seasonal increments are identical in backtest and serving. No
+    rolling fit on validation/test. Anchoring removes the stale absolute level,
+    not the learned trend; calibrated residuals assess this exact policy.
+    """
     def __init__(self, name, train, tune, full, cfg):
-        if name == "Prophet":
-            import prophet  # fail before scoring if unavailable
-        else:
-            import statsmodels
-        self.name, self.cfg = name, cfg
-        self.warnings = []
-        self.warning_counts = {}
+        from prophet import Prophet
+        self.cfg, self.name = cfg, name
+        hist = train.tail(cfg.classical_window)
+        if len(hist) < 2880:
+            raise ValueError('Prophet requires two complete train days')
+        self.center = float(hist.log_close.iloc[-1])
+        self.scale = max(float(hist.log_close.std()), 1e-6)
+        self.model = Prophet(daily_seasonality=True, weekly_seasonality=False,
+                             yearly_seasonality=False, uncertainty_samples=0,
+                             changepoint_prior_scale=0.05)
+        self.model.fit(pd.DataFrame(dict(ds=hist.open_time.dt.tz_localize(None),
+                                        y=(hist.log_close-self.center)/self.scale)), seed=cfg.seed)
+        self.n_fit, self.train_end = len(hist), hist.available_at.max()
 
     def predict(self, full, rows):
-        if self.name == "ARIMA":
-            from statsmodels.regression.linear_model import yule_walker
-            log = full.log_close.to_numpy()
-            output=[]
-            for _,row in rows.iterrows():
-                idx=int(row.time_idx)
-                history=log[max(60,idx-self.cfg.classical_window+1):idx+1]
-                if len(history)<120 or full.available_at.iloc[idx]>row.available_at:
-                    raise ValueError("Insufficient/noncausal ARIMA history")
-                delta=np.diff(history)
-                if delta.std()<1e-12:
-                    output.append(np.zeros(self.cfg.horizon))
-                    continue
-                phi=float(yule_walker(delta,order=1,method="adjusted")[0][0])
-                if not np.isfinite(phi) or abs(phi)>=1:
-                    raise ValueError("Invalid/nonstationary ARIMA coefficient")
-                output.append(np.cumsum(delta[-1]*phi**np.arange(1,self.cfg.horizon+1)))
-            return np.asarray(output)
-        from statsmodels.tsa.arima.model import ARIMA
-        from statsmodels.tsa.statespace.sarimax import SARIMAX
-        cfg = self.cfg
-        preds = []
-        for _, row in rows.iterrows():
-            idx = int(row.time_idx)
-            hist = full.iloc[max(60, idx-cfg.classical_window+1):idx+1].copy()
-            if len(hist) < 120 or hist.available_at.max() > row.available_at:
-                raise ValueError("Insufficient/noncausal classical history")
-            # Tiny minute-return variance makes raw-log MLE poorly conditioned.
-            # Center/scale only from the causal history of THIS origin.
-            scale = max(float(hist.log_close.std()), 1e-6)
-            y = (hist.log_close.to_numpy()-float(row.log_close))/scale
-            with warnings.catch_warnings(record=True) as observed:
-                warnings.simplefilter("always")
-                if self.name == "ARIMA":
-                    fitted = ARIMA(y, order=(1, 1, 0), trend="n").fit(method="yule_walker")
-                    forecast = np.asarray(fitted.get_forecast(cfg.horizon).predicted_mean)
-                elif self.name in ("SARIMA", "SARIMAX"):
-                    exog, future_exog = None, None
-                    if self.name == "SARIMAX":
-                        exog = hist[CALENDAR + STATE_EXOG]
-                        future_exog = calendar_features(pd.date_range(
-                            row.open_time + pd.Timedelta(minutes=1), periods=cfg.horizon, freq="min"))
-                        for col in STATE_EXOG:
-                            future_exog[col] = float(row[col])
-                    fitted = SARIMAX(y, exog=exog, order=(1, 1, 0),
-                        seasonal_order=(1, 0, 0, 60), trend="n").fit(disp=False, maxiter=100)
-                    forecast = np.asarray(fitted.get_forecast(cfg.horizon, exog=future_exog).predicted_mean)
-                elif self.name == "Prophet":
-                    from prophet import Prophet
-                    # Two complete daily periods minimum; 12h cannot identify daily seasonality.
-                    if cfg.classical_window < 2880:
-                        raise ValueError("Prophet daily seasonality requires window >= 2880 minutes")
-                    model = Prophet(daily_seasonality=True, weekly_seasonality=False,
-                                    yearly_seasonality=False, uncertainty_samples=0)
-                    model.fit(pd.DataFrame(dict(ds=hist.open_time.dt.tz_localize(None), y=y)))
-                    forecast = model.predict(pd.DataFrame(dict(ds=pd.date_range(
-                        row.open_time.tz_localize(None) + pd.Timedelta(minutes=1),
-                        periods=cfg.horizon, freq="min")))).yhat.to_numpy()
-                    fitted = None
-                else:
-                    raise ValueError(self.name)
-            for warning in observed:
-                message = str(warning.message)
-                self.warning_counts[message] = self.warning_counts.get(message,0)+1
-                if message not in self.warnings:
-                    self.warnings.append(message)
-            # Yule-Walker estimates AR(1) directly, without iterative MLE.
-            if fitted is not None and self.name != "ARIMA" and not fitted.mle_retvals.get("converged", False):
-                raise ValueError(f"{self.name} did not converge at {row.open_time}")
-            if fitted is not None and not np.isfinite(fitted.params).all():
-                raise ValueError(f"{self.name} returned nonfinite parameters")
-            preds.append(forecast*scale)
-        return np.asarray(preds)
+        if rows.empty:
+            return np.empty((0,self.cfg.horizon))
+        origins = rows.open_time.dt.tz_localize(None).to_numpy()
+        times = origins[:,None]+np.arange(self.cfg.horizon+1)[None,:]*np.timedelta64(1,'m')
+        unique = np.unique(times)
+        prediction = self.model.predict(pd.DataFrame(dict(ds=unique)))
+        values = pd.Series(prediction.yhat.to_numpy(),index=prediction.ds)
+        path = values.reindex(times.reshape(-1)).to_numpy().reshape(times.shape)
+        return (path[:,1:]-path[:,[0]])*self.scale
+
+
+class ETSPolicy:
+    """ETS(A,Ad,N): train-only Gaussian state-space MLE, causal Holt filtering.
+
+    Innovations form has level += alpha*error, trend += beta*error; beta is
+    the state-space gain, not the beta-star convention used by Holt-Winters.
+    Initial state uses the first observed historical close and zero trend.
+    """
+    def __init__(self,name,train,tune,full,cfg):
+        from statsmodels.tsa.statespace.exponential_smoothing import ExponentialSmoothing
+        self.cfg,self.name=cfg,name
+        hist=train.tail(cfg.classical_window)
+        self.scale=max(float(hist.log_close.diff().std()),1e-8)
+        y=(hist.log_close.to_numpy()-float(hist.log_close.iloc[0]))/self.scale
+        fit=ExponentialSmoothing(y,trend=True,damped_trend=True,
+                                initialization_method='estimated').fit(disp=False,maxiter=500)
+        if not fit.mle_retvals.get('converged') or not np.isfinite(fit.params).all():
+            raise ValueError('ETS state-space MLE did not converge')
+        params=dict(zip(fit.param_names,fit.params))
+        self.alpha=float(params['smoothing_level']);self.beta=float(params['smoothing_trend'])
+        self.phi=float(params['damping_trend'])
+        self.n_fit=len(hist)
+        self.fit_diagnostics=dict(estimator='statsmodels Gaussian state-space MLE',converged=True)
+
+    def predict(self,full,rows):
+        output=[]
+        for _,row in rows.iterrows():
+            idx=int(row.time_idx)
+            hist=full.iloc[max(60,idx-self.cfg.classical_window+1):idx+1]
+            if len(hist)<120 or hist.available_at.max()>row.available_at:
+                raise ValueError('Insufficient/noncausal ETS history')
+            values=(hist.log_close.to_numpy()-float(row.log_close))/self.scale
+            level,trend=float(values[0]),0.0
+            for value in values[1:]:
+                mean=level+self.phi*trend
+                error=value-mean
+                level=mean+self.alpha*error
+                trend=self.phi*trend+self.beta*error
+            horizon=np.arange(1,self.cfg.horizon+1)
+            damping=np.cumsum(self.phi**horizon)
+            output.append((level+damping*trend)*self.scale)
+        return np.asarray(output)
+
+
+class ClassicalPolicy:
+    """Causal rolling ARIMA(1,1,0), no drift and no future returns."""
+    def __init__(self,name,train,tune,full,cfg):
+        if name!='ARIMA':raise ValueError('Use the explicit ETS/seasonal/Prophet policy')
+        self.name,self.cfg=name,cfg
+        self.warnings,self.warning_counts=[],{}
+
+    def predict(self,full,rows):
+        from statsmodels.regression.linear_model import yule_walker
+        log = full.log_close.to_numpy()
+        output=[]
+        for _,row in rows.iterrows():
+            idx=int(row.time_idx)
+            history=log[max(60,idx-self.cfg.classical_window+1):idx+1]
+            if len(history)<120 or full.available_at.iloc[idx]>row.available_at:
+                raise ValueError("Insufficient/noncausal ARIMA history")
+            delta=np.diff(history)
+            if delta.std()<1e-12:
+                output.append(np.zeros(self.cfg.horizon))
+                continue
+            phi=float(np.asarray(yule_walker(delta,order=1,method="adjusted")[0]).item())
+            if not np.isfinite(phi) or abs(phi)>=1:
+                raise ValueError("Invalid/nonstationary ARIMA coefficient")
+            output.append(np.cumsum(delta[-1]*phi**np.arange(1,self.cfg.horizon+1)))
+        return np.asarray(output)
 
 
 def finite_sample_widths(actual, predictions, nominal=0.90):
@@ -693,7 +714,11 @@ def build_policy(name, train, tune, full, cfg):
         return LSTMPolicy(name, train, tune, full, cfg)
     if name in ("SARIMA", "SARIMAX"):
         return SeasonalPolicy(name, train, tune, full, cfg)
-    if name in ("ARIMA", "Prophet"):
+    if name == "Prophet":
+        return ProphetPolicy(name, train, tune, full, cfg)
+    if name == "ETS":
+        return ETSPolicy(name, train, tune, full, cfg)
+    if name == "ARIMA":
         return ClassicalPolicy(name, train, tune, full, cfg)
     if name == "TFT":
         return TFTPolicy(name, train, tune, full, cfg)
@@ -727,6 +752,7 @@ def run_experiment(market, cfg):
         for name in dict.fromkeys(("Persistence",)+cfg.models):
             policy = None
             try:
+                print(s,name,'fit/tune',flush=True)
                 if name == "Persistence":
                     tune_pred = np.zeros((len(grid["tune"]), cfg.horizon))
                 else:
@@ -756,6 +782,16 @@ def run_experiment(market, cfg):
                 pred = np.zeros((len(grid["test"]), cfg.horizon)) if policy is None else policy.predict(full, grid["test"])
                 row = score(s, name, grid["test"], pred, widths[s][name], cfg)
                 row.update(direction_report(grid['test'],pred,split_map[s]['train'],cfg))
+                if name=='TFT':
+                    quantiles=policy.last_quantiles
+                    levels=np.asarray(policy.model.loss.quantiles)
+                    cumulative=grid['test'][target_columns(cfg)].to_numpy()
+                    actual=np.diff(np.column_stack([np.zeros(len(cumulative)),cumulative]),axis=1)[:,:,None]
+                    error=actual-quantiles
+                    row['native_quantile_pinball']=float(np.maximum(levels*error,(levels-1)*error).mean())
+                    row['native_quantile_crossings']=int((np.diff(quantiles,axis=2)<0).sum())
+                    row['native_quantile_comparisons']=int(np.prod(np.diff(quantiles,axis=2).shape))
+                    row['native_quantile_levels']=levels.tolist()
                 row['test_subperiods']=[]
                 for part,positions in enumerate(np.array_split(np.arange(len(pred)),3),1):
                     subset=grid['test'].iloc[positions]
@@ -869,58 +905,42 @@ def illustrative_forecast(experiment, symbol, cfg):
 
 
 def plot_method_evidence(experiment, cv_traces, cfg):
-    """Each completed method: train OOF, sealed test and full future path."""
+    """One origin, all 15 horizons. Never connect predictions from different origins."""
     import matplotlib.pyplot as plt
+    import matplotlib.dates as dates
     for symbol in cfg.symbols:
         full=experiment['prepared'][symbol]
-        methods=list(experiment['predictions'][symbol])
-        fig,axes=plt.subplots(len(methods),3,figsize=(18,3.1*len(methods)),squeeze=False)
+        methods=[n for n in cfg.models if n in experiment['predictions'][symbol] and n!='Persistence']
+        fig,axes=plt.subplots(len(methods),2,figsize=(14,3*len(methods)),squeeze=False)
         for i,name in enumerate(methods):
             traces=[t for t in cv_traces if t['symbol']==symbol and t['model']==name and t['fold']==3]
-            for column,trace,title in [(0,traces[-1] if traces else None,'TRAIN: last expanding fold (out-of-fold)'),
-                                       (1,dict(rows=experiment['grids'][symbol]['test'],predictions=experiment['predictions'][symbol][name]),'TEST: real price and h15 forecasts')]:
-                ax=axes[i,column]
+            test=dict(rows=experiment['grids'][symbol]['test'],predictions=experiment['predictions'][symbol][name])
+            for col,trace,title in [(0,traces[-1] if traces else None,'TRAIN OOF'),(1,test,'TEST')]:
+                ax=axes[i,col]
                 if trace is None:
-                    ax.text(.05,.5,'No completed fold; see failure table',transform=ax.transAxes)
-                    continue
-                rows=trace['rows']
-                last=rows.open_time.iloc[-1]+pd.Timedelta(minutes=16)
-                first=last-pd.Timedelta(hours=6)
-                observed=full.loc[(full.open_time+pd.Timedelta(minutes=1)>=first)&(full.open_time+pd.Timedelta(minutes=1)<=last)]
-                ax.plot(observed.open_time+pd.Timedelta(minutes=1),observed.close,label='Actual price',color='black',lw=1)
-                keep=rows.open_time>=first
-                forecast=rows.close.to_numpy()[keep]*np.exp(trace['predictions'][keep.to_numpy(),-1])
-                ax.plot(rows.loc[keep,'open_time']+pd.Timedelta(minutes=16),forecast,'o--',label='Frozen h15 forecast',color='tab:orange',ms=4)
-                ax.set_title(f'{name} | {title}',fontsize=9)
-                ax.legend(fontsize=7)
-            latest=full.iloc[[-1]]
-            policy=experiment['policies'][symbol][name]
-            pred=np.zeros((1,cfg.horizon)) if policy is None else policy.predict(full,latest)
-            q=experiment['widths'][symbol][name]
-            origin=latest.open_time.iloc[0]+pd.Timedelta(minutes=1)
-            times=pd.date_range(origin+pd.Timedelta(minutes=1),periods=cfg.horizon,freq='min')
-            close=float(latest.close.iloc[0])
-            ax=axes[i,2]
-            history=full.tail(60)
-            ax.plot(history.open_time+pd.Timedelta(minutes=1),history.close,color='black',label='Observed history')
-            ax.plot(pd.DatetimeIndex([origin]).append(times),np.r_[close,close*np.exp(pred[0])],'--',color='tab:orange',label='Forecast h1..h15')
-            ax.fill_between(times,close*np.exp(pred[0]-q),close*np.exp(pred[0]+q),alpha=.12,color='tab:orange',label='Empirical PI90')
-            ax.axvline(origin,color='gray',ls=':')
-            ax.set_title(f'{name} | FROZEN SNAPSHOT: future unobserved',fontsize=9)
-            ax.legend(fontsize=7)
-            for ax in axes[i]:
-                ax.set_ylabel('USDT')
-                ax.tick_params(axis='x',rotation=25,labelsize=7)
-                ax.grid(alpha=.2)
-        fig.suptitle(f'{symbol}: predictions fixed before target candle closes',fontsize=13)
-        fig.tight_layout(rect=(0,0,1,.98))
-        plt.show()
+                    ax.text(.1,.5,'No completed fold',transform=ax.transAxes);continue
+                rows=trace['rows'];row=rows.iloc[-1];pred=trace['predictions'][-1]
+                origin=row.open_time+pd.Timedelta(minutes=1)
+                end=origin+pd.Timedelta(minutes=cfg.horizon)
+                targets=pd.date_range(origin+pd.Timedelta(minutes=1),periods=cfg.horizon,freq='min')
+                observed=full.loc[(full.open_time+pd.Timedelta(minutes=1)>=origin-pd.Timedelta(minutes=15)) &
+                                  (full.open_time+pd.Timedelta(minutes=1)<=end)]
+                ax.plot(observed.open_time+pd.Timedelta(minutes=1),observed.close,color='black',label='Actual price')
+                ax.plot(pd.DatetimeIndex([origin]).append(targets),np.r_[row.close,row.close*np.exp(pred)],
+                        'o--',ms=3,color='tab:orange',label='ONE origin: h1..h15')
+                ax.axvline(origin,color='gray',ls=':')
+                ax.set_xlim(origin-pd.Timedelta(minutes=15),end)
+                ax.set_title(f'{name} | {title} | origin {origin.isoformat()}',fontsize=9)
+                ax.xaxis.set_major_formatter(dates.DateFormatter('%H:%M',tz=origin.tzinfo))
+                ax.set_ylabel('USDT');ax.legend(fontsize=7);ax.grid(alpha=.2)
+        fig.suptitle(symbol+' | retrospective single-origin examples, NOT current inference')
+        fig.tight_layout();plt.show()
 
 
 def plot_comparison(experiment,cfg):
     import matplotlib.pyplot as plt
-    table=pd.DataFrame(experiment['results'])
-    fig,axes=plt.subplots(2,len(cfg.symbols),figsize=(6*len(cfg.symbols),9),squeeze=False)
+    table=pd.DataFrame([r for r in experiment['results'] if r['model'] in cfg.models and r['model']!='Persistence'])
+    fig,axes=plt.subplots(3,len(cfg.symbols),figsize=(6*len(cfg.symbols),13),squeeze=False)
     for column,symbol in enumerate(cfg.symbols):
         group=table.loc[table.symbol==symbol].sort_values('MAE_h15_return')
         names=group.model.tolist()
@@ -936,11 +956,38 @@ def plot_comparison(experiment,cfg):
         axes[1,column].set_yticks(range(len(names)),names)
         axes[1,column].invert_yaxis()
         axes[1,column].axvline(0,color='black',ls=':')
-        axes[1,column].set_xlabel('MAE reduction vs persistence, %; familywise CI')
+        axes[1,column].set_xlabel('MAE reduction vs last-price error, %; familywise CI')
         axes[1,column].set_title('Positive estimate needs CI entirely above zero')
+        axes[2,column].barh(names,group.direction_hit_rate*100,color='tab:orange')
+        axes[2,column].invert_yaxis();axes[2,column].set_xlim(0,100)
+        first=group.iloc[0]
+        axes[2,column].axvline(first.direction_baseline_hit_rate*100,color='gray',ls=':',label='Train-majority control')
+        axes[2,column].axvline(100*first.up_base_count/first.n_origins,color='black',ls='--',label='Always-up control')
+        axes[2,column].set_title('Direction: correct / all origins (abstentions counted)')
+        axes[2,column].set_xlabel('Correct direction, %');axes[2,column].legend(fontsize=7)
         for ax in axes[:,column]:ax.grid(axis='x',alpha=.2)
     fig.tight_layout()
     plt.show()
+
+
+def path_diagnostics(origin_price,path,name):
+    values=np.asarray([path[k] for k in ('price','lower','upper')],dtype=float)
+    if (not np.isfinite(origin_price) or origin_price<=0 or values.shape!=(3,15)
+            or not np.isfinite(values).all() or (values<=0).any()
+            or (values[1]>values[0]).any() or (values[0]>values[2]).any()):
+        raise ValueError('Invalid diagnostic price path')
+    change=100*(np.asarray(path['price'],dtype=float)/origin_price-1)
+    half_width=50*(np.asarray(path['upper'])-np.asarray(path['lower']))/origin_price
+    if not np.isfinite(change).all() or not np.isfinite(half_width).all():
+        raise ValueError('Nonfinite relative forecast scale')
+    amplitude=float(np.max(np.abs(change)))
+    snr=amplitude/float(half_width[-1]) if half_width[-1]>0 else None
+    # Fixed display threshold, preregistered before fresh live observations.
+    informative=amplitude>=0.01 and snr is not None and snr>=0.1
+    return dict(endpoint_change_pct=float(change[-1]),max_abs_change_pct=amplitude,
+                path_range_pct=float(np.ptp(change)),signal_to_interval=snr,
+                signal_status='BASELINE' if name=='Persistence' else 'CANDIDATE_SIGNAL' if informative else 'NO_INFORMATIVE_SIGNAL',
+                quality_status='UNPROVEN_FORWARD_CANDIDATE')
 
 
 class ForecastComparison:
@@ -949,14 +996,123 @@ class ForecastComparison:
         self.experiment,self.cfg,self.fetcher=experiment,cfg,fetcher
         self.clock=clock or (lambda:pd.Timestamp.now(tz='UTC'))
         self.output_dir=Path(output_dir) if output_dir else None
-        self.snapshots,self.observed={},{}
+        self.snapshots,self.observed,self.batches={},{},{}
 
-    def _fetch(self,symbol):
+    def _fetch(self,symbol,end=None):
         from dataclasses import replace
-        end=(utc(self.clock())-pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)).floor('min')
+        end=end if end is not None else (utc(self.clock())-pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)).floor('min')
         live_cfg=replace(self.cfg,symbols=(symbol,),end_utc=end.isoformat(),history_days=3)
         market,manifest=self.fetcher(symbol,live_cfg,None)
         return prepare(market,live_cfg),manifest,end
+
+    def create_batch(self):
+        """One shared origin; concurrent fetch; atomic all-asset/all-method publication."""
+        import uuid
+        from concurrent.futures import ThreadPoolExecutor
+        requested=utc(self.clock())
+        origin=(requested-pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)).floor('min')
+        with ThreadPoolExecutor(max_workers=len(self.cfg.symbols)) as pool:
+            fetched=list(pool.map(lambda s:self._fetch(s,origin),self.cfg.symbols))
+        batch_id=uuid.uuid4().hex
+        pending,observed={},{}
+        targets=[t.isoformat() for t in pd.date_range(origin+pd.Timedelta(minutes=1),periods=self.cfg.horizon,freq='min')]
+        for symbol,(full,manifest,end) in zip(self.cfg.symbols,fetched):
+            latest=full.iloc[[-1]]
+            if end!=origin or latest.open_time.iloc[0]+pd.Timedelta(minutes=1)!=origin:
+                raise ValueError('Asset origin mismatch')
+            close=float(latest.close.iloc[0]);paths={}
+            for name in self.cfg.models:
+                policy=self.experiment['policies'][symbol][name]
+                pred=np.zeros((1,self.cfg.horizon)) if policy is None else policy.predict(full,latest)
+                q=self.experiment['widths'][symbol][name]
+                if pred.shape!=(1,self.cfg.horizon) or not np.isfinite(pred).all():
+                    raise ValueError('Partial/nonfinite common-batch prediction')
+                paths[name]=dict(price=(close*np.exp(pred[0])).tolist(),lower=(close*np.exp(pred[0]-q)).tolist(),upper=(close*np.exp(pred[0]+q)).tolist())
+                path_diagnostics(close,paths[name],name)  # validate exponentiated prices BEFORE publication
+                if name=='TFT':
+                    paths[name]['native_quantile_levels']=list(policy.model.loss.quantiles)
+                    paths[name]['native_minute_return_quantiles']=policy.last_quantiles[0].tolist()
+            key=f'{batch_id}_{symbol}'
+            pending[key]=dict(snapshot_id=key,batch_id=batch_id,symbol=symbol,origin_close_at=origin.isoformat(),
+                origin_price=close,release_end_utc=self.cfg.end_utc,target_close_at=targets.copy(),paths=paths,
+                requested_at=requested.isoformat(),input_sha256=manifest['sha256'],status='prospective_research_unapproved_release',
+                history=[dict(close_at=(r.open_time+pd.Timedelta(minutes=1)).isoformat(),price=float(r.close)) for r in full.tail(120).itertuples()])
+            observed[key]=full
+        issued=utc(self.clock())
+        if issued>=origin+pd.Timedelta(minutes=1) or issued<origin+pd.Timedelta(seconds=self.cfg.arrival_delay_seconds):
+            raise ValueError('First-target deadline missed; start a NEW common batch')
+        for row in pending.values():row['issued_at']=issued.isoformat()
+        batch=dict(batch_id=batch_id,origin_close_at=origin.isoformat(),issued_at=issued.isoformat(),
+                   requested_at=requested.isoformat(),observed_through=origin.isoformat(),target_close_at=targets,snapshot_ids=list(pending))
+        self.snapshots.update(json.loads(json.dumps(pending)));self.observed.update(observed);self.batches[batch_id]=batch
+        if self.output_dir:
+            self.output_dir.mkdir(parents=True,exist_ok=True)
+            (self.output_dir/f'{batch_id}.json').write_text(json.dumps(dict(batch=batch,snapshots=pending),indent=2),encoding='utf-8')
+        return batch_id
+
+    def refresh_batch(self,batch_id):
+        from concurrent.futures import ThreadPoolExecutor
+        batch=self.batches[batch_id]
+        cutoff=min((utc(self.clock())-pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)).floor('min'),
+                   utc(batch['target_close_at'][-1]))
+        symbols=[self.snapshots[k]['symbol'] for k in batch['snapshot_ids']]
+        with ThreadPoolExecutor(max_workers=len(symbols)) as pool:
+            fulls=list(pool.map(lambda s:self._fetch(s,cutoff)[0],symbols))
+        self.observed.update(dict(zip(batch['snapshot_ids'],fulls)))
+        batch['observed_through']=cutoff.isoformat()
+        return self.batch_table(batch_id)
+
+    def batch_table(self,batch_id):
+        rows=[]
+        for key in self.batches[batch_id]['snapshot_ids']:
+            snapshot=self.snapshots[key]
+            as_of=utc(self.batches[batch_id]['observed_through'])+pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)
+            metrics=self.metrics(key,as_of=as_of).set_index('model').to_dict('index')
+            for name,path in snapshot['paths'].items():
+                rows.append(dict(symbol=snapshot['symbol'],model=name,**path_diagnostics(snapshot['origin_price'],path,name),**metrics[name]))
+        return pd.DataFrame(rows)
+
+    def plot_batch(self,batch_id,methods=None):
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as dates
+        batch=self.batches[batch_id];origin=utc(batch['origin_close_at']);end=utc(batch['target_close_at'][-1])
+        methods=list(methods) if methods else list(self.cfg.models)
+        fig,axes=plt.subplots(len(methods),len(batch['snapshot_ids']),figsize=(6*len(batch['snapshot_ids']),2.8*len(methods)),squeeze=False,sharex=True)
+        for column,key in enumerate(batch['snapshot_ids']):
+            snapshot=self.snapshots[key];full=self.observed[key]
+            context=origin-pd.Timedelta(minutes=30)
+            actual=full.loc[(full.open_time+pd.Timedelta(minutes=1)>=context)&(full.open_time+pd.Timedelta(minutes=1)<=end)]
+            for i,name in enumerate(methods):
+                ax=axes[i,column];path=snapshot['paths'].get(name)
+                ax.plot(actual.open_time+pd.Timedelta(minutes=1),actual.close,color='black',label='Actual closed prices',lw=1.5)
+                if path:
+                    diag=path_diagnostics(snapshot['origin_price'],path,name)
+                    times=pd.DatetimeIndex([origin]+snapshot['target_close_at'])
+                    weak=diag['signal_status']=='NO_INFORMATIVE_SIGNAL'
+                    color='gray' if weak else 'tab:orange'
+                    label=name+(' | weak raw point' if weak else ' | candidate point')
+                    targets=pd.DatetimeIndex(snapshot['target_close_at'])
+                    ax.plot(pd.DatetimeIndex([origin]).append(targets),[snapshot['origin_price']]+path['price'],'--',color=color,label=label)
+                    ax.fill_between(targets,path['lower'],path['upper'],color=color,alpha=.10,label='Empirical PI90')
+                    ax.text(.02,.03,f"Δ15={diag['endpoint_change_pct']:.4f}%; max |Δ|={diag['max_abs_change_pct']:.4f}%",transform=ax.transAxes,fontsize=8)
+                    ax.set_title(f"{snapshot['symbol']} | {name} | {diag['signal_status']}",fontsize=9)
+                else:ax.set_title(f"{snapshot['symbol']} | {name}: unavailable")
+                ax.axvline(origin,color='gray',ls=':');ax.axvspan(origin,end,alpha=.04,color='tab:blue')
+                ax.set_xlim(context,end);ax.xaxis.set_major_formatter(dates.DateFormatter('%H:%M',tz=origin.tzinfo))
+                ax.set_ylabel('USDT');ax.grid(alpha=.2);ax.legend(fontsize=7)
+        fig.suptitle(f"ONE UTC WINDOW: {origin.isoformat()} → {end.isoformat()} | issued {batch['issued_at']}",fontsize=11)
+        fig.tight_layout(rect=(0,0,1,.97));plt.show()
+        fig,axes=plt.subplots(1,len(batch['snapshot_ids']),figsize=(6*len(batch['snapshot_ids']),4),squeeze=False,sharex=True)
+        for column,key in enumerate(batch['snapshot_ids']):
+            snapshot=self.snapshots[key];ax=axes[0,column];full=self.observed[key]
+            actual=full.loc[(full.open_time+pd.Timedelta(minutes=1)>=origin-pd.Timedelta(minutes=30))&(full.open_time+pd.Timedelta(minutes=1)<=end)]
+            ax.plot(actual.open_time+pd.Timedelta(minutes=1),100*(actual.close/snapshot['origin_price']-1),color='black',label='Observed change')
+            for name in methods:
+                path=snapshot['paths'].get(name)
+                if path:ax.plot(pd.DatetimeIndex([origin]+snapshot['target_close_at']),np.r_[0,100*(np.asarray(path['price'])/snapshot['origin_price']-1)],'--',label=name)
+            ax.set_xlim(origin-pd.Timedelta(minutes=30),end);ax.axhline(0,color='gray',ls=':');ax.set_title(snapshot['symbol']+' | raw forecasts (diagnostic)');ax.set_ylabel('Change from origin, %');ax.grid(alpha=.2);ax.legend(fontsize=7)
+            ax.xaxis.set_major_formatter(dates.DateFormatter('%H:%M',tz=origin.tzinfo))
+        fig.tight_layout();plt.show()
 
     def create(self,symbol):
         import uuid
@@ -965,7 +1121,7 @@ class ForecastComparison:
         latest=full.iloc[[-1]]
         origin=float(latest.close.iloc[0])
         paths={}
-        for name in self.experiment['predictions'][symbol]:
+        for name in self.cfg.models:
             policy=self.experiment['policies'][symbol][name]
             pred=np.zeros((1,self.cfg.horizon)) if policy is None else policy.predict(full,latest)
             q=self.experiment['widths'][symbol][name]
@@ -973,6 +1129,7 @@ class ForecastComparison:
                 raise ValueError('Incomplete forecast path')
             paths[name]=dict(price=(origin*np.exp(pred[0])).tolist(),
                              lower=(origin*np.exp(pred[0]-q)).tolist(),upper=(origin*np.exp(pred[0]+q)).tolist())
+            path_diagnostics(origin,paths[name],name)
         issued=utc(self.clock())
         if issued>=end+pd.Timedelta(minutes=1) or issued<latest.available_at.iloc[0]:
             raise ValueError('First-target issuance deadline missed; retry on fresh candles')
@@ -995,13 +1152,13 @@ class ForecastComparison:
         self.observed[snapshot_id]=full
         return self.metrics(snapshot_id)
 
-    def metrics(self,snapshot_id):
+    def metrics(self,snapshot_id,as_of=None):
         snapshot=self.snapshots[snapshot_id]
         full=self.observed[snapshot_id]
         actual=pd.Series(full.close.to_numpy(),index=full.open_time+pd.Timedelta(minutes=1))
         targets=pd.DatetimeIndex(snapshot['target_close_at'])
         values=actual.reindex(targets)
-        expected=targets+pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)<=utc(self.clock())
+        expected=targets+pd.Timedelta(seconds=self.cfg.arrival_delay_seconds)<=utc(as_of if as_of is not None else self.clock())
         mature=values.notna() & expected
         result=[]
         for name,path in snapshot['paths'].items():
@@ -1037,124 +1194,185 @@ class ForecastComparison:
         ax.legend();ax.grid(alpha=.2);fig.tight_layout();plt.show()
 
 
-def interactive_comparison(experiment,cfg,output_dir='forecast_demo_artifacts/prospective'):
+def interactive_comparison(experiment,cfg,output_dir='forecast_demo_artifacts/prospective',controller=None):
     import ipywidgets as widgets
     from IPython.display import display,clear_output
-    controller=ForecastComparison(experiment,cfg,output_dir=output_dir)
-    symbol=widgets.Dropdown(options=cfg.symbols,description='Актив:')
-    snapshots=widgets.Dropdown(options=[],description='Прогноз:')
-    methods=widgets.SelectMultiple(options=list(cfg.models),value=tuple(cfg.models),description='Методы:')
-    create=widgets.Button(description='Зафиксировать прогноз',layout=widgets.Layout(width='220px'))
+    controller=controller or ForecastComparison(experiment,cfg,output_dir=output_dir)
+    batches=widgets.Dropdown(options=[],description='UTC batch:')
+    visible=tuple(n for n in cfg.models if n!='Persistence')
+    methods=widgets.SelectMultiple(options=visible,value=visible,description='Методы:')
+    create=widgets.Button(description='Новый общий прогноз',layout=widgets.Layout(width='220px'))
     refresh=widgets.Button(description='Новые свечи → сравнить',layout=widgets.Layout(width='220px'))
     output=widgets.Output()
     def render(*_):
         with output:
             clear_output(wait=True)
-            if snapshots.value:
-                chosen=[n for n in methods.value if n in controller.snapshots[snapshots.value]['paths']]
-                if not chosen:
-                    print('Выберите хотя бы один завершившийся метод.');return
-                controller.plot(snapshots.value,chosen)
-                display(controller.metrics(snapshots.value))
-            else:print('Создайте прогноз. Через 1–15 минут обновите факт; прогноз останется неизменным.')
+            if batches.value and methods.value:
+                controller.plot_batch(batches.value,list(methods.value))
+                table=controller.batch_table(batches.value)
+                display(table.loc[table.model.isin(methods.value)])
+            else:print('Нет общего прогноза. Создайте новый batch.')
+    def select_batch(key):
+        batches.options=[(f"{v['origin_close_at']} ({k[:8]})",k) for k,v in controller.batches.items()]
+        batches.value=key
     def on_create(_):
         create.disabled=refresh.disabled=True
-        try:
-            snapshot_id=controller.create(symbol.value)
-            snapshots.options=[(f"{s['symbol']} {s['issued_at']} ({key[:8]})",key) for key,s in controller.snapshots.items()]
-            snapshots.value=snapshot_id
-            render()
+        try:select_batch(controller.create_batch())
         except Exception as exc:
             with output:print(f'{type(exc).__name__}: {exc}')
         finally:create.disabled=refresh.disabled=False
     def on_refresh(_):
-        if not snapshots.value:return
+        if not batches.value:return
         create.disabled=refresh.disabled=True
-        try:controller.refresh(snapshots.value);render()
+        try:controller.refresh_batch(batches.value);render()
         except Exception as exc:
             with output:print(f'{type(exc).__name__}: {exc}')
         finally:create.disabled=refresh.disabled=False
     create.on_click(on_create);refresh.on_click(on_refresh)
-    methods.observe(render,names='value');snapshots.observe(render,names='value')
-    panel=widgets.VBox([widgets.HTML('<b>Исследовательский live: без переобучения и без разрешения торговать.</b>'),symbol,methods,snapshots,widgets.HBox([create,refresh]),output])
-    display(panel);render()
+    methods.observe(render,names='value');batches.observe(render,names='value')
+    panel=widgets.VBox([widgets.HTML('<b>Общий текущий 15-минутный прогноз. Слабый сигнал — явная диагностика, а не доказанная модель.</b>'),
+                        methods,batches,widgets.HBox([create,refresh]),output])
+    display(panel)
+    if controller.batches:select_batch(next(reversed(controller.batches)))
+    else:render()
     return controller
 
 
 class TFTPolicy:
-    """Optional single-asset TFT; decoder contains calendar + origin-frozen state only.
+    """Actual pytorch-forecasting TFT, train-only numeric scaling and checkpoint.
 
-    Train/tune decoder labels obey the same UTC cutoffs as the other models.
-    Inference supplies no realized future unknown variables, even as dummy input.
-    Its interval is calibrated on the separate calibration split like all models.
+    Decoder market variables are copied from origin; future calendar is known.
+    Grid sampling and a seven-day training tail bound CPU cost, declared before
+    scoring. Identity dataset scalers make native tensor-state releases portable.
     """
-    def __init__(self, name, train, tune, full, cfg):
+    def _init_runtime(self):
         import torch
+        from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
+        from pytorch_forecasting.data import TorchNormalizer
+        from pytorch_forecasting.metrics import QuantileLoss
+        self.torch,self.dataset_type=torch,TimeSeriesDataSet
+        torch.set_num_threads(2)
+        self.normalizer_type,self.network_type,self.loss_type=TorchNormalizer,TemporalFusionTransformer,QuantileLoss
+
+    def _frame(self,frame):
+        d=frame[['open_time','time_idx']+FEATURES].copy()
+        d[FEATURES]=(d[FEATURES].to_numpy()-self.xmean)/self.xscale
+        d['step_return']=(frame.ret_1-self.ymean)/self.yscale
+        d['series']='asset';d['step']=d.time_idx.astype(int)
+        return d
+
+    def _dataset(self,frame):
+        return self.dataset_type(frame,time_idx='step',target='step_return',group_ids=['series'],
+            max_encoder_length=self.cfg.context,min_encoder_length=self.cfg.context,
+            max_prediction_length=self.cfg.horizon,min_prediction_length=self.cfg.horizon,
+            time_varying_known_reals=CALENDAR,
+            time_varying_unknown_reals=['step_return']+[f for f in FEATURES if f not in CALENDAR],
+            target_normalizer=self.normalizer_type(method='identity'),
+            scalers={f:None for f in FEATURES},allow_missing_timesteps=False)
+
+    def _network(self):
+        return self.network_type.from_dataset(self.training,learning_rate=1e-3,hidden_size=16,
+            attention_head_size=2,dropout=0.15,hidden_continuous_size=8,loss=self.loss_type(),
+            reduce_on_plateau_patience=2)
+
+    def __init__(self,name,train,tune,full,cfg):
         import lightning.pytorch as pl
         from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-        from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
-        from pytorch_forecasting.data import GroupNormalizer
-        from pytorch_forecasting.metrics import QuantileLoss
         import tempfile
-        self.cfg, self.torch, self.dataset_type = cfg, torch, TimeSeriesDataSet
-        torch.set_num_threads(2)
-        pl.seed_everything(cfg.seed, workers=True)
-        d = full.loc[np.isfinite(full[FEATURES].to_numpy()).all(axis=1)].copy()
-        d["series"] = "asset"
-        d["step"] = d.time_idx.astype(int)
-        # Last close used as a decoder target is before next split's first origin.
-        train_end = int(train.time_idx.max()) + cfg.horizon
-        tune_start, tune_end = int(tune.time_idx.min())+1, int(tune.time_idx.max())+cfg.horizon
-        training_frame = d.loc[d.step <= train_end]
-        training = TimeSeriesDataSet(training_frame, time_idx="step", target="close", group_ids=["series"],
-            max_encoder_length=cfg.context, min_encoder_length=cfg.context,
-            max_prediction_length=cfg.horizon, min_prediction_length=cfg.horizon,
-            time_varying_known_reals=CALENDAR,
-            time_varying_unknown_reals=["close"] + [f for f in FEATURES if f not in CALENDAR],
-            target_normalizer=GroupNormalizer(groups=["series"]), allow_missing_timesteps=False)
-        tuning_frame = d.loc[(d.step >= tune_start-cfg.context) & (d.step <= tune_end)]
-        validation = TimeSeriesDataSet.from_dataset(training, tuning_frame,
-            min_prediction_idx=tune_start, stop_randomization=True, predict=False)
-        model = TemporalFusionTransformer.from_dataset(training, learning_rate=1e-3, hidden_size=16,
-            attention_head_size=2, dropout=0.15, hidden_continuous_size=8, loss=QuantileLoss(),
-            reduce_on_plateau_patience=2)
-        with tempfile.TemporaryDirectory(prefix="forecast-tft-") as root:
-            checkpoint = ModelCheckpoint(dirpath=root, monitor="val_loss", mode="min", save_top_k=1)
-            trainer = pl.Trainer(max_epochs=5, accelerator="cpu", devices=1, deterministic=True,
-                gradient_clip_val=0.1, logger=False, enable_progress_bar=False,
-                callbacks=[checkpoint, EarlyStopping(monitor="val_loss", patience=2, mode="min")])
-            trainer.fit(model, training.to_dataloader(train=True, batch_size=128, num_workers=0),
-                         validation.to_dataloader(train=False, batch_size=128, num_workers=0))
-            if not checkpoint.best_model_path:
-                raise ValueError("No validated TFT checkpoint")
-            self.model = TemporalFusionTransformer.load_from_checkpoint(checkpoint.best_model_path)
-        self.training = training
+        self.cfg,self.name=cfg,name;self._init_runtime()
+        pl.seed_everything(cfg.seed,workers=True)
+        # All normalization is train-only; target labels are before tune cutoff.
+        self.xmean=train[FEATURES].mean().to_numpy()
+        self.xscale=np.maximum(train[FEATURES].std(ddof=0).to_numpy(),1e-8)
+        self.ymean=float(train.ret_1.mean());self.yscale=max(float(train.ret_1.std(ddof=0)),1e-8)
+        train_end=int(train.time_idx.max())+cfg.horizon
+        start=max(60,train_end-7*1440)
+        training=self._dataset(self._frame(full.iloc[start:train_end+1]))
+        # Match label availability at the declared boundary and fixed origin grid.
+        def admissible(index,allowed,stride):
+            origin=index.time_idx_first_prediction-1
+            return origin.isin(allowed)&((origin%stride)==0)
+        training=training.filter(lambda index:admissible(index,train.time_idx,cfg.train_stride))
+        tune_start,tune_end=int(tune.time_idx.min())+1,int(tune.time_idx.max())+cfg.horizon
+        frame=self._frame(full.iloc[tune_start-cfg.context:tune_end+1])
+        validation=self.dataset_type.from_dataset(training,frame,min_prediction_idx=tune_start,
+                                                  stop_randomization=True,predict=False)
+        validation=validation.filter(lambda index:admissible(index,tune.time_idx,cfg.eval_stride))
+        self.training=training;self.n_fit=len(training)
+        self.template=self._frame(full.iloc[start:start+cfg.context+cfg.horizon+1])[['step','series','step_return']+FEATURES].to_dict('list')
+        model=self._network()
+        with tempfile.TemporaryDirectory(prefix='forecast-tft-') as root:
+            checkpoint=ModelCheckpoint(dirpath=root,monitor='val_loss',mode='min',save_top_k=1)
+            trainer=pl.Trainer(max_epochs=5,accelerator='cpu',devices=1,deterministic=True,
+                gradient_clip_val=0.1,logger=False,enable_progress_bar=False,enable_model_summary=False,
+                callbacks=[checkpoint,EarlyStopping(monitor='val_loss',patience=2,mode='min')])
+            trainer.fit(model,training.to_dataloader(train=True,batch_size=64,num_workers=0),
+                         validation.to_dataloader(train=False,batch_size=64,num_workers=0))
+            if not checkpoint.best_model_path:raise ValueError('No validated TFT checkpoint')
+            # Local checkpoint generated here only; release never loads arbitrary pickle.
+            self.model=self.network_type.load_from_checkpoint(checkpoint.best_model_path)
+        self.model.eval()
 
-    def predict(self, full, rows):
-        out = []
-        for _, row in rows.iterrows():
-            idx = int(row.time_idx)
-            hist = full.iloc[idx-self.cfg.context+1:idx+1].copy()
-            if len(hist) != self.cfg.context or not np.isfinite(hist[FEATURES].to_numpy()).all():
-                raise ValueError("TFT missing contiguous encoder context")
-            # Create future rows from the origin, NEVER slice actual future market rows.
-            future = pd.DataFrame([row.to_dict() for _ in range(self.cfg.horizon)])
-            future["open_time"] = pd.date_range(row.open_time+pd.Timedelta(minutes=1), periods=self.cfg.horizon, freq="min")
-            future["time_idx"] = np.arange(idx+1, idx+self.cfg.horizon+1)
-            future[CALENDAR] = calendar_features(future.open_time).to_numpy()
-            frame = pd.concat([hist, future], ignore_index=True)
-            frame = frame[["open_time", "close", "time_idx"]+FEATURES].copy()
-            frame["series"], frame["step"] = "asset", frame.time_idx.astype(int)
-            dataset = self.dataset_type.from_dataset(self.training, frame, predict=True, stop_randomization=True)
-            result = self.model.predict(dataset.to_dataloader(train=False, batch_size=1, num_workers=0),
-                                        mode="prediction", return_index=True)
-            if int(result.index.step.iloc[0]) != idx+1:
-                raise ValueError("TFT decoder timestamp mismatch")
-            price = result.output.detach().cpu().numpy().reshape(-1)
-            if price.shape != (self.cfg.horizon,) or (price <= 0).any():
-                raise ValueError("Invalid TFT prediction path")
-            out.append(np.log(price/row.close))
-        return np.stack(out)
+    def _prediction_sample(self,frame,reference=False):
+        if reference:
+            # Live input reindexes its short context from zero; the training
+            # dataset's absolute minimum step must not discard a live window.
+            dataset=self.dataset_type.from_dataset(self.training,frame,predict=True,stop_randomization=True,
+                min_prediction_idx=int(frame.step.iloc[self.cfg.context]))
+            return dataset[0]
+        # Exact fixed-length identity-scaler sample contract, independently
+        # compared against TimeSeriesDataSet. Avoid rebuilding a dataset per origin.
+        training=self.training
+        if (training.categoricals or training.add_relative_time_idx or training.add_target_scales
+                or training.add_encoder_length or training.target_normalizer.method!='identity'):
+            raise ValueError('Unsupported optimized TFT sample schema')
+        torch=self.torch;target=torch.tensor(frame.step_return.to_numpy(),dtype=torch.float32)
+        groups=training.data['groups'][0].clone()
+        sample=dict(x_cat=torch.empty((len(frame),0),dtype=torch.long),
+                    x_cont=torch.tensor(frame[training.reals].to_numpy(),dtype=torch.float32),
+                    encoder_length=self.cfg.context,decoder_length=self.cfg.horizon,
+                    encoder_target=target[:self.cfg.context],
+                    encoder_time_idx_start=torch.tensor(int(frame.step.iloc[0]),dtype=torch.long),
+                    groups=groups,target_scale=training.target_normalizer.get_parameters(groups,training.group_ids))
+        return sample,(target[self.cfg.context:],None)
+
+    def predict(self,full,rows,reference=False):
+        samples=[];out=[];all_quantiles=[]
+        def flush():
+            if not samples:return
+            batch=self.dataset_type._collate_fn(samples)[0]
+            with self.torch.no_grad():
+                result=self.model(batch)
+                prediction=self.model.to_prediction(result).cpu().numpy()
+                quantiles=result['prediction'].cpu().numpy()
+            if (prediction.shape!=(len(samples),self.cfg.horizon) or not np.isfinite(prediction).all()
+                    or quantiles.shape!=(len(samples),self.cfg.horizon,len(self.model.loss.quantiles))
+                    or not np.isfinite(quantiles).all()):
+                raise ValueError('Invalid TFT prediction path')
+            out.extend(np.cumsum(prediction*self.yscale+self.ymean,axis=1).tolist())
+            # Marginal minute-return quantiles are not quantiles of a sum.
+            # Cumulative-price intervals are independently calibrated on the point path.
+            all_quantiles.extend((quantiles*self.yscale+self.ymean).tolist())
+            samples.clear()
+        for _,row in rows.iterrows():
+            idx=int(row.time_idx)
+            hist=full.iloc[idx-self.cfg.context+1:idx+1].copy()
+            if len(hist)!=self.cfg.context or not np.isfinite(hist[FEATURES].to_numpy()).all():
+                raise ValueError('Missing TFT context')
+            future=pd.DataFrame([row.to_dict() for _ in range(self.cfg.horizon)])
+            future['open_time']=pd.date_range(row.open_time+pd.Timedelta(minutes=1),periods=self.cfg.horizon,freq='min')
+            future['time_idx']=np.arange(idx+1,idx+self.cfg.horizon+1)
+            future[CALENDAR]=calendar_features(future.open_time).to_numpy()
+            # No full[idx+1:] slice, even for dummy decoder market inputs.
+            frame=self._frame(pd.concat([hist,future],ignore_index=True))
+            sample=self._prediction_sample(frame,reference=reference)
+            if int(sample[0]['encoder_time_idx_start'])+self.cfg.context!=idx+1:
+                raise ValueError('TFT decoder timestamp mismatch')
+            samples.append(sample)
+            if len(samples)==64:flush()
+        flush()
+        self.last_quantiles=np.asarray(all_quantiles)
+        return np.asarray(out).reshape(len(rows),self.cfg.horizon)
 
 
 def save_evidence(experiment, manifest, path):
@@ -1232,6 +1450,8 @@ class ForecastService:
                     interval_kind="historical_empirical_90_not_guaranteed_under_drift",
                     release_end_utc=self.release_time.isoformat(), actual_arrival_times="not_measured")
                 pending[s]["origin_close"] = float(latest.close.iloc[0])
+                path_diagnostics(pending[s]['origin_close'],dict(price=pending[s]['predicted_close'],
+                    lower=pending[s]['PI90_lower'],upper=pending[s]['PI90_upper']),name)
             # Atomic replacement: no mixed-time snapshots after a partial network failure.
             published = utc(self.clock())
             if any(utc(row["target_close_at"][0]) <= published for row in pending.values()):
