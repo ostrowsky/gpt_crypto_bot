@@ -60,10 +60,12 @@ class ReportTests(unittest.TestCase):
                 labels=np.tile(y[:,None],(1,3)),returns=np.tile(actual[:,None],(1,3)),scored=np.ones(4,dtype=bool),
                 **{name:np.tile(p[:,None,:],(1,3,1)) for name in METHODS})
             (folder/'price_forecasts.html').write_text('existing frozen chart view',encoding='utf-8')
-            render(folder,folder)
+            (folder/'price_paths.html').write_text('existing regression chart view',encoding='utf-8')
+            render(folder,folder,folder/'price_paths.html')
             document=(folder/'comparison.html').read_text(encoding='utf-8')
             self.assertIn('Daily source coverage',document)
             self.assertIn('href="price_forecasts.html"',document)
+            self.assertIn('href="price_paths.html"',document)
             self.assertTrue((folder/'comparison.png').exists());self.assertTrue((folder/'coverage_daily.csv').exists())
 
 if __name__=='__main__':unittest.main()

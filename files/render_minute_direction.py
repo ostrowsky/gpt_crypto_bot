@@ -1,6 +1,6 @@
 """Evidence tables and common-period plots for the frozen minute benchmark."""
 from __future__ import annotations
-import argparse,html,json
+import argparse,html,json,os
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -53,7 +53,7 @@ def daily_coverage(books,expected):
                 valid_states=int(v['sum']),missing_states=int(v['size']-v['sum']),valid_pct=100*v['sum']/v['size']))
     return pd.DataFrame(records)
 
-def render(folder,books=None):
+def render(folder,books=None,price_paths=None):
     result=json.loads((folder/'result.json').read_text(encoding='utf-8'))
     if result['status']!='COMPLETED_RETROSPECTIVE_L2_DIAGNOSTIC':raise ValueError('Incomplete experiment')
     pooled,assets,paired=tables(result)
@@ -142,6 +142,10 @@ def render(folder,books=None):
     plot.suptitle('CatBoost / compact DeepLOB — frozen BTC/ETH/SOL perpetual TEST');plot.tight_layout()
     plot.savefig(folder/'comparison.png',dpi=140);plt.close(plot)
     body=f'<h1>CatBoost / DeepLOB: 1, 3, 5 minutes</h1><p>{html.escape(context)}</p>'
+    price_link=None
+    if price_paths is not None and price_paths.is_file():
+        price_link=html.escape(os.path.relpath(price_paths,folder).replace(os.sep,'/'),quote=True)
+        body+=f'<p><a href="{price_link}"><strong>Прогнозный график ЦЕНЫ: Ridge / CatBoost / DeepLOB regression</strong></a></p>'
     if (folder/'price_forecasts.html').exists():
         body+='<p><a href="price_forecasts.html"><strong>История цены, прогноз и факт для каждой модели — интерактивные графики</strong></a></p>'
     body+='<ul>'+''.join('<li>'+html.escape(s)+'</li>' for s in summary)+'</ul>'
@@ -157,6 +161,8 @@ def render(folder,books=None):
     report='# CatBoost / DeepLOB: 1, 3, 5 minutes\n\n'+context+'\n\n'+'\n'.join('- '+s for s in summary)
     if (folder/'price_forecasts.html').exists():
         report+='\n\n[История цены, прогноз и факт по каждой модели](price_forecasts.html)\n'
+    if price_link is not None:
+        report+=f'\n\n[Прогнозные цены регрессионных моделей]({price_link})\n'
     report+='\n\n'+table+'\n\n## Per asset\n\n'+assettable+'\n\n## Paired daily blocks\n\n'+paired.to_markdown(index=False,floatfmt='.6f')
     report+='\n\n## Coverage\n\n'+covtable.to_markdown(index=False)+'\n\n## Interpretation\n\n'+'\n'.join('- '+s for s in notes)+'\n'
     if len(days):report+='\n\n## Daily source coverage\n\n'+days.to_markdown(index=False,floatfmt='.2f')+'\n'
@@ -165,4 +171,5 @@ def render(folder,books=None):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('folder',type=Path);parser.add_argument('--books',type=Path)
-    a=parser.parse_args();render(a.folder,a.books)
+    parser.add_argument('--price-paths',type=Path)
+    a=parser.parse_args();render(a.folder,a.books,a.price_paths)
