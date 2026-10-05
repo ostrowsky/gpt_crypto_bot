@@ -158,6 +158,40 @@ live config, credentials, positions and alerts are not modified.
 
 ## Reproduction
 
+### Frozen single-origin price views
+
+Add an offline `price_forecasts.html` view for Prior, Momentum, Logistic,
+CatBoost and DeepLOB, with synchronized asset/origin selectors. Every model
+shows the same 20-minute observed mid-price history, issuance cutoff and five
+minutes of subsequently observed mid-price. These are categorical classifiers:
+render their frozen DOWN/NEUTRAL/UP probabilities at exact +1/+3/+5 minutes,
+with directional color bands and separate probability bars, never an invented
+predicted price or interpolated forecast trajectory. The neutral class is the
+registered +/-2bp log-return band relative to the issuance mid-price; it is
+neither an uncertainty interval nor a transaction-cost break-even threshold.
+
+Choose example origins from the intersection of all assets' inference clocks,
+using the test start and fixed six-hour clock anchors, accepting only a valid
+past 20-minute prefix. Do not consult future prices, labels, scored flags,
+correctness or model confidence to select examples. Keep unknown future states
+as gaps and unavailable endpoint facts as unknown; do not forward-fill, connect
+gaps, or remove unfavorable cases. Display all five methods on every selected
+origin and permit browsing every registered six-hour example. Export a
+default-origin PNG per method/asset and an auditable JSON of selected views,
+clocks, probabilities, source hashes and facts. Verify prepared book hashes and
+the frozen result/prediction hashes against the native-verification receipt.
+Generation changes no model, metrics, split, weights or trading behavior.
+
+Acceptance tests: shared-clock and future-independent example selection,
+future-mutation invariance of the forecast, exact target alignment, unknown
+future/gap preservation, receipt/source drift rejection and actual offline
+HTML/PNG generation. Rollback: remove the optional visual view/link; frozen
+benchmark and production behavior remain unchanged.
+
+```powershell
+python files/plot_minute_direction_prices.py .runtime/minute_direction_benchmark_20261005_converged --books .runtime/minute_direction_partial_books_v4
+```
+
 Use Python 3.11, CatBoost 1.2.10, Torch 2.8.0 CPU, numpy 2.2.6, pandas 2.3.3,
 scipy 1.15.3, scikit-learn 1.7.2, pyarrow 21.0.0 and sortedcontainers 2.4.0;
 safetensors for the frozen neural checkpoint; matplotlib, plotly and tabulate for

@@ -59,8 +59,11 @@ class ReportTests(unittest.TestCase):
             np.savez_compressed(folder/'test_predictions.npz',time=np.array([10000,20000,30000,40000]),
                 labels=np.tile(y[:,None],(1,3)),returns=np.tile(actual[:,None],(1,3)),scored=np.ones(4,dtype=bool),
                 **{name:np.tile(p[:,None,:],(1,3,1)) for name in METHODS})
+            (folder/'price_forecasts.html').write_text('existing frozen chart view',encoding='utf-8')
             render(folder,folder)
-            self.assertIn('Daily source coverage',(folder/'comparison.html').read_text(encoding='utf-8'))
+            document=(folder/'comparison.html').read_text(encoding='utf-8')
+            self.assertIn('Daily source coverage',document)
+            self.assertIn('href="price_forecasts.html"',document)
             self.assertTrue((folder/'comparison.png').exists());self.assertTrue((folder/'coverage_daily.csv').exists())
 
 if __name__=='__main__':unittest.main()

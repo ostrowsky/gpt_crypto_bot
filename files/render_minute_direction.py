@@ -142,6 +142,8 @@ def render(folder,books=None):
     plot.suptitle('CatBoost / compact DeepLOB — frozen BTC/ETH/SOL perpetual TEST');plot.tight_layout()
     plot.savefig(folder/'comparison.png',dpi=140);plt.close(plot)
     body=f'<h1>CatBoost / DeepLOB: 1, 3, 5 minutes</h1><p>{html.escape(context)}</p>'
+    if (folder/'price_forecasts.html').exists():
+        body+='<p><a href="price_forecasts.html"><strong>История цены, прогноз и факт для каждой модели — интерактивные графики</strong></a></p>'
     body+='<ul>'+''.join('<li>'+html.escape(s)+'</li>' for s in summary)+'</ul>'
     body+=pooled[visible].to_html(index=False,float_format=lambda x:f'{x:.4f}')
     body+=fig.to_html(full_html=False,include_plotlyjs=True)+curves.to_html(full_html=False,include_plotlyjs=False)+daily.to_html(full_html=False,include_plotlyjs=False)
@@ -153,6 +155,8 @@ def render(folder,books=None):
     document='<!doctype html><html><head><meta charset="utf-8"><title>Minute direction benchmark</title><style>body{font:15px sans-serif;max-width:1500px;margin:30px auto;padding:0 20px}table{border-collapse:collapse;font-size:12px;display:block;overflow:auto}td,th{padding:7px;border:1px solid #ddd}li{margin:8px 0}</style></head><body>'+body+'</body></html>'
     (folder/'comparison.html').write_text(document,encoding='utf-8')
     report='# CatBoost / DeepLOB: 1, 3, 5 minutes\n\n'+context+'\n\n'+'\n'.join('- '+s for s in summary)
+    if (folder/'price_forecasts.html').exists():
+        report+='\n\n[История цены, прогноз и факт по каждой модели](price_forecasts.html)\n'
     report+='\n\n'+table+'\n\n## Per asset\n\n'+assettable+'\n\n## Paired daily blocks\n\n'+paired.to_markdown(index=False,floatfmt='.6f')
     report+='\n\n## Coverage\n\n'+covtable.to_markdown(index=False)+'\n\n## Interpretation\n\n'+'\n'.join('- '+s for s in notes)+'\n'
     if len(days):report+='\n\n## Daily source coverage\n\n'+days.to_markdown(index=False,floatfmt='.2f')+'\n'
