@@ -194,3 +194,5 @@ Rocket capture and rule ablation: `docs/specs/rocket-capture-ablation.md` — re
 3. Shadow-only instrumentation may ship before replay when it does not alter BUY/SELL behavior.
 4. Evaluator findings may create hypotheses automatically, but production changes still require replay evidence.
 5. ML/RL changes must report effect on the bot objective, not only on surrogate PnL metrics.
+
+Order flow for bounded market execution: `docs/specs/order-flow-execution.md` — offline diagnostic complete, not approved for production; finite spot capture verified.
