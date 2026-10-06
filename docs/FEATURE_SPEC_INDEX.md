@@ -12,6 +12,7 @@ earlier capture of same-day watchlist top movers with a single unified
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| Protected one-bar SELL action advantage | 186-day causal action-value study REJECTED; no live change | `docs/specs/exit-action-advantage.md` | concrete hold-vs-sell cash delta, net alpha, early capture, giveback and drawdown | separately registered execution hypothesis; rejected deferral threshold not retuned |
 | Joint direction and conditional amplitude | 186-day causal prequential study REJECTED; no live change | `docs/specs/joint-direction-amplitude.md` | calibrated direction probability, conditional magnitude, after-cost alpha and unique early capture | separately registered exit-action hypothesis; rejected architecture not retuned on exposed TEST |
 | Impulse-speed CatBoost expected net edge | 186-day retrospective prequential experiment REJECTED; no live change | `docs/specs/impulse-entry-catboost.md` | after-cost account alpha, unique early leader capture, forecast errors and causal evidence timing | new registered target/exit hypothesis and fresh forward; rejected threshold not retuned |
 | Entry economics and replacement turnover | 186-day retrospective paired study complete; all three hypotheses REJECTED; no live change | `docs/specs/turnover-economics-replay.md` | additive cash costs, net alpha, unique early leader capture, turnover and drawdown | new registered entry/exit edge hypothesis; rejected filters not retuned on exposed TEST |
