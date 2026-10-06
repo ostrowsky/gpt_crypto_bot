@@ -198,3 +198,5 @@ Rocket capture and rule ablation: `docs/specs/rocket-capture-ablation.md` — re
 Order flow for bounded market execution: `docs/specs/order-flow-execution.md` — offline diagnostic complete, not approved for production; finite spot capture verified.
 
 Leader mission re-audit: `docs/specs/leader-mission-reaudit.md` — complete corrected raw22:00-close early/coverage/selection and leader accompaniment audit; fixed hypotheses not promoted.
+
+Leader trend continuation: `docs/specs/leader-trend-continuation.md` — completed maximum-period causal soft-exit replay: held-time component gain, overall mission trade-off; production unchanged.
