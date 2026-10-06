@@ -196,3 +196,5 @@ Rocket capture and rule ablation: `docs/specs/rocket-capture-ablation.md` — re
 5. ML/RL changes must report effect on the bot objective, not only on surrogate PnL metrics.
 
 Order flow for bounded market execution: `docs/specs/order-flow-execution.md` — offline diagnostic complete, not approved for production; finite spot capture verified.
+
+Leader mission re-audit: `docs/specs/leader-mission-reaudit.md` — complete corrected raw22:00-close early/coverage/selection and leader accompaniment audit; fixed hypotheses not promoted.
