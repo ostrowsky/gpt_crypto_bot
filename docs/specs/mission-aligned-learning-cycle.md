@@ -140,6 +140,31 @@ budget for parsing/serialization or queueing behind a writer. Default acquisitio
 budget becomes max(300s,2*replacement_budget+60s); lock owner/release semantics
 unchanged. A bounded timeout still records failure, never unlocks another writer.
 
+Windows snapshot readers share READ/WRITE/DELETE so atomic replacement can
+publish a new path while the reader finishes its immutable original handle.
+Retry ONLY actual Win32 sharing/lock errors32/33 for up to30s; access denial,
+missing files and malformed records remain failures. No ACL changes, lock
+deletion, forced handle closure, or bypass of dataset write locks.
+On Windows publish uses ReplaceFileW (preserving destination ACLs), not MoveFileEx
+overwrite, which failed with WinError5 in the real shared-reader test. Existing
+bounded replacement retry remains; partial/native errors fail closed. Tests
+verify old-reader bytes, new-path bytes and an unmodified missing-file failure.
+
+## Fixed forward shadow implementation
+
+Bounded35days; STOP file halts only the shadow. Latest mature discovery/early
+models are mandatory; weights, inference/kernel sources and model hashes frozen,
+no forward refitting. Feature_clock>model_fit_at, receipt>=feature_clock,
+issued>=receipt; max5minute issue delay. Immutable per-cycle public raw klines,
+exchange registry, watchlist and receipts. No keys/account endpoints/orders.
+Training-only1%/99% feature bounds flag at least4outside dimensions as drift.
+Collect true future daily outcomes from exact UTC hourly grids;23/25hour DST
+days are valid, gaps are unknown. Only full local-day origin grids with no
+missing/stale pairs qualify. Brier/base rates describe forecasts, not BUY effect.
+Actual acceptance remains explicitly unverified; retrospective scores or these
+proxy forecasts cannot unlock canary. Independent raw/fold/control/denominator
+audit is required before any historical conclusion.
+
 Verified wrapper failure: Set-Content heartbeat sharing IOException terminated
 the supervisor but left Python alive. Heartbeat uses UTF8 temporary file and
 atomic Replace/Move with bounded5s retry. Publication failure logs warning and

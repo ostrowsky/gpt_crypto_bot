@@ -119,10 +119,9 @@ class CandidateDatasetQualityTests(unittest.TestCase):
 
     def test_atomic_replace_outlives_short_windows_reader_contention(self) -> None:
         tmp = unittest.mock.Mock()
-        tmp.replace.side_effect = [PermissionError("reader busy")] * 20 + [None]
-        with patch.object(critic_dataset.time, "sleep") as sleep_mock:
+        with patch.object(critic_dataset, "publish_snapshot", side_effect=[PermissionError("reader busy")] * 20 + [None]) as publisher,patch.object(critic_dataset.time, "sleep") as sleep_mock:
             critic_dataset._atomic_replace_with_retry(tmp, Path("dataset.jsonl"))
-        self.assertEqual(tmp.replace.call_count, 21)
+        self.assertEqual(publisher.call_count, 21)
         self.assertEqual(sleep_mock.call_count, 20)
 
     def test_legacy_ml_dataset_collection_is_disabled_by_default(self) -> None:

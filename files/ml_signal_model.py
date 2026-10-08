@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+from evidence_snapshot_io import open_snapshot
 
 
 ROOT = Path(__file__).resolve().parent
@@ -59,7 +60,7 @@ SEQ_INDEX = {
 
 
 def _iter_jsonl(path: Path) -> Iterable[dict]:
-    with path.open("r", encoding="utf-8") as f:
+    with open_snapshot(path) as f:
         for line in f:
             s = line.strip()
             if not s:

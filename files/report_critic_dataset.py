@@ -1,4 +1,5 @@
 from __future__ import annotations
+from evidence_snapshot_io import open_snapshot
 
 import json
 from collections import Counter
@@ -12,7 +13,7 @@ import critic_dataset
 def _iter_rows(path: Path) -> Iterable[Dict[str, Any]]:
     if not path.exists():
         return
-    with path.open("r", encoding="utf-8", errors="ignore") as source:
+    with open_snapshot(path,errors="ignore") as source:
         for line in source:
             if not line.strip():
                 continue

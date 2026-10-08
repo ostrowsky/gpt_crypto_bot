@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - non-Windows fallback
 
 from ml_signal_model import build_runtime_record
 import policy_provenance
+from evidence_snapshot_io import open_snapshot,publish_snapshot
 
 
 ROOT = Path(__file__).resolve().parent
@@ -187,7 +188,7 @@ def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
     deadline = time.monotonic() + _REPLACE_TIMEOUT_SEC
     while True:
         try:
-            tmp.replace(target)
+            publish_snapshot(tmp,target)
             cached = _disk_id_cache.pop(str(tmp.resolve()), None)
             if cached:
                 stat = target.stat()
@@ -209,7 +210,7 @@ def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
 def _scan_mutations(mutator) -> tuple[bool, bool]:
     changed = False
     had_bad_rows = False
-    with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source:
+    with open_snapshot(CRITIC_FILE,errors="ignore") as source:
         for line in source:
             if not line.strip():
                 continue
@@ -230,7 +231,7 @@ def _write_mutated_stream(mutator, tmp: Path) -> tuple[bool, bool]:
     had_bad_rows = False
     ids = set()
     try:
-        with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source, tmp.open(
+        with open_snapshot(CRITIC_FILE,errors="ignore") as source, tmp.open(
             "w", encoding="utf-8"
         ) as destination:
             for line in source:
@@ -274,7 +275,7 @@ def _append(record: Dict[str, Any]) -> bool:
                 # a prefix in place. Replacements force a full ID rescan.
                 if stat.st_size > cached[1] or stat.st_mtime_ns == cached[2]:
                     offset, ids = cached[1], cached[3].copy()
-            with CRITIC_FILE.open("rb") as source:
+            with open_snapshot(CRITIC_FILE,"rb") as source:
                 source.seek(offset)
                 for line in source:
                     if not line.strip():
@@ -308,7 +309,7 @@ def get_records(record_ids: set[str]) -> Dict[str, Dict[str, Any]]:
     found: Dict[str, Dict[str, Any]] = {}
     try:
         with _dataset_io_lock():
-            with CRITIC_FILE.open("r", encoding="utf-8", errors="ignore") as source:
+            with open_snapshot(CRITIC_FILE,errors="ignore") as source:
                 for line in source:
                     if not line.strip():
                         continue
@@ -596,7 +597,7 @@ def append_collector_batch(records: list[dict]) -> dict:
         with _dataset_io_lock():
             ids = set()
             if CRITIC_FILE.exists():
-                with CRITIC_FILE.open("r", encoding="utf-8") as source:
+                with open_snapshot(CRITIC_FILE) as source:
                     for line in source:
                         if not line.strip():
                             continue

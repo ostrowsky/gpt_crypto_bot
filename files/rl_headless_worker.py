@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 import critic_dataset
+from evidence_snapshot_io import open_snapshot
 import config
 import data_collector
 import ml_candidate_ranker
@@ -128,7 +129,7 @@ def _count_jsonl_rows(path: Path) -> int:
     if not path.exists():
         return 0
     rows = 0
-    with path.open("r", encoding="utf-8", errors="ignore") as source:
+    with open_snapshot(path,errors="ignore") as source:
         for line in source:
             if line.strip():
                 rows += 1
@@ -139,7 +140,7 @@ def _count_ranker_rows(path: Path) -> int:
     if not path.exists():
         return 0
     rows = 0
-    with path.open("r", encoding="utf-8", errors="ignore") as source:
+    with open_snapshot(path,errors="ignore") as source:
         for line in source:
             if not line.strip():
                 continue

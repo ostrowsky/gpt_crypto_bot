@@ -7340,7 +7340,7 @@ class TestCriticRankerPreparation(unittest.TestCase):
             target.write_text("old\n", encoding="utf-8")
             tmp.write_text("new\n", encoding="utf-8")
 
-            original_replace = Path.replace
+            original_replace = critic_dataset.publish_snapshot
             calls = {"n": 0}
 
             def _flaky_replace(path_obj, dst):
@@ -7349,7 +7349,7 @@ class TestCriticRankerPreparation(unittest.TestCase):
                     raise PermissionError(5, "Access is denied")
                 return original_replace(path_obj, dst)
 
-            with patch("pathlib.Path.replace", new=_flaky_replace), \
+            with patch("critic_dataset.publish_snapshot", new=_flaky_replace), \
                  patch("critic_dataset.time.sleep", return_value=None):
                 critic_dataset._atomic_replace_with_retry(tmp, target)
 
