@@ -1,10 +1,12 @@
 param(
-    [int]$RestartDelaySec = 15
+    [int]$RestartDelaySec = 15,
+    [int]$ExistingPythonPid = 0
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root 'learning_heartbeat.ps1')
 $python = Join-Path $root "pyembed\python.exe"
 $script = Join-Path $root "files\rl_headless_worker.py"
 $workdir = Join-Path $root "files"
@@ -58,8 +60,11 @@ function Write-LoopState {
         $payload.exit_code = $ExitCode
     }
     $json = $payload | ConvertTo-Json -Depth 4
-    Set-Content -Path $pidFile -Value $json -Encoding UTF8
-    Set-Content -Path $heartbeatFile -Value $json -Encoding UTF8
+    foreach($taskHeartbeatPath in @($pidFile,$heartbeatFile)) {
+        if(-not (Write-LearningHeartbeat -Path $taskHeartbeatPath -Json $json)) {
+            Add-Content -Path $loopLog -Encoding UTF8 -Value "$now headless_loop: heartbeat sharing failure, child supervision continues"
+        }
+    }
 }
 
 Push-Location $workdir
@@ -79,7 +84,14 @@ try {
         $started = (Get-Date).ToString("o")
         Add-Content -Path $loopLog -Encoding UTF8 -Value "$started headless_loop: worker start"
         $argList = @($script) + @($workerArgs)
-        $proc = Start-Process -FilePath $python -ArgumentList $argList -WorkingDirectory $workdir -WindowStyle Hidden -PassThru
+        if($ExistingPythonPid -gt 0) {
+            $taskExisting=Get-CimInstance Win32_Process -Filter "ProcessId=$ExistingPythonPid"
+            if($taskExisting.ExecutablePath -ne $python -or $taskExisting.CommandLine -notlike "*$script*"){throw 'Existing learning worker identity mismatch'}
+            $proc=Get-Process -Id $ExistingPythonPid
+            $ExistingPythonPid=0
+        } else {
+            $proc = Start-Process -FilePath $python -ArgumentList $argList -WorkingDirectory $workdir -WindowStyle Hidden -PassThru
+        }
         Write-LoopState -State "running" -PythonPid $proc.Id -StartedAt $started
 
         while (-not $proc.HasExited) {

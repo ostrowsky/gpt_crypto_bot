@@ -115,7 +115,7 @@ def _minimal_market_fixture() -> tuple[np.ndarray, dict]:
 
 class CandidateDatasetQualityTests(unittest.TestCase):
     def test_cross_process_lock_budget_exceeds_full_stream_rewrite_budget(self) -> None:
-        self.assertGreaterEqual(critic_dataset._CROSS_PROCESS_LOCK_TIMEOUT_SEC, 120.0)
+        self.assertGreaterEqual(critic_dataset._CROSS_PROCESS_LOCK_TIMEOUT_SEC, 2*critic_dataset._REPLACE_TIMEOUT_SEC+60)
 
     def test_atomic_replace_outlives_short_windows_reader_contention(self) -> None:
         tmp = unittest.mock.Mock()

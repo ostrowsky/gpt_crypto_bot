@@ -126,3 +126,21 @@ healthy. Cycle stats publish requested/ok/failed and newly persisted IDs.
 Recovery status write failures cannot swallow the integrity incident or retry.
 Wrapper startup must verify actual PID/heartbeat and retain stderr; discover
 identity-verified orphan learning workers before restart, never duplicates.
+
+Verified wrapper failure: Set-Content heartbeat sharing IOException terminated
+the supervisor but left Python alive. Heartbeat uses UTF8 temporary file and
+atomic Replace/Move with bounded5s retry. Publication failure logs warning and
+keeps supervising the child; it never claims a fresh heartbeat. No lock deletion.
+AttachOnly may attach a repaired supervisor to exactly one verified orphan,
+without restarting training/collector/report schedulers. An existing wrapper,
+ambiguous workers or wrong executable/source path rejects attachment.
+
+The legacy lock budget120s equals atomic replacement retry120s, leaving no
+budget for parsing/serialization or queueing behind a writer. Default acquisition
+budget becomes max(300s,2*replacement_budget+60s); lock owner/release semantics
+unchanged. A bounded timeout still records failure, never unlocks another writer.
+
+Verified wrapper failure: Set-Content heartbeat sharing IOException terminated
+the supervisor but left Python alive. Heartbeat uses UTF8 temporary file and
+atomic Replace/Move with bounded5s retry. Publication failure logs warning and
+keeps supervising the child; it never claims a fresh heartbeat. No lock deletion.

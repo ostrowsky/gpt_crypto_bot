@@ -45,7 +45,7 @@ _disk_id_cache: Dict[str, tuple] = {}
 _MAX_LOGGED = 100_000
 _CROSS_PROCESS_LOCK_TIMEOUT_SEC = max(
     10.0,
-    float(os.getenv("GPT_BOT_CRITIC_LOCK_TIMEOUT_SEC", "120")),
+    float(os.getenv("GPT_BOT_CRITIC_LOCK_TIMEOUT_SEC", "300")),
 )
 _CROSS_PROCESS_LOCK_POLL_SEC = 0.05
 _REPLACE_RETRY_SEC = 0.10
@@ -53,6 +53,8 @@ _REPLACE_TIMEOUT_SEC = max(
     10.0,
     float(os.getenv("GPT_BOT_CRITIC_REPLACE_TIMEOUT_SEC", "120")),
 )
+if "GPT_BOT_CRITIC_LOCK_TIMEOUT_SEC" not in os.environ:
+    _CROSS_PROCESS_LOCK_TIMEOUT_SEC = max(_CROSS_PROCESS_LOCK_TIMEOUT_SEC, 2*_REPLACE_TIMEOUT_SEC+60)
 
 
 class DatasetIntegrityError(RuntimeError):
