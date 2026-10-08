@@ -246,7 +246,9 @@ def build_status_snapshot(
         },
         "collector": {
             "enabled": state.collector_enabled,
-            "running": state.collector_enabled,
+            "running": state.collector_running,
+            "recovery_state": state.collector_recovery_state,
+            "recovery_attempt": state.collector_recovery_attempt,
             "last_cycle_started_at": state.collector_last_cycle_started_at,
             "last_cycle_finished_at": state.collector_last_cycle_finished_at,
             "last_cycle_stats": state.collector_last_cycle_stats,
@@ -1219,6 +1221,9 @@ class WorkerState:
     collector_last_cycle_finished_at: Optional[str] = None
     collector_last_cycle_stats: Dict[str, Any] = field(default_factory=dict)
     collector_last_error: str = ""
+    collector_running: bool = False
+    collector_recovery_attempt: int = 0
+    collector_recovery_state: str = "idle"
     label_recovery: Dict[str, Any] = field(default_factory=dict)
     independent_evaluation: Dict[str, Any] = field(default_factory=dict)
     release_controller: Dict[str, Any] = field(default_factory=dict)
@@ -1327,8 +1332,10 @@ class WorkerState:
 
 
 async def _collector_supervisor(state: WorkerState) -> None:
+    from collector_recovery import retryable,RETRY_LIMIT,RETRY_SECONDS
     log = logging.getLogger("rl_headless_worker.collector")
     while True:
+        state.collector_running = True
         state.collector_last_cycle_started_at = _utc_now_iso()
         try:
             btc_ctx = await data_collector._get_btc_context()
@@ -1337,6 +1344,10 @@ async def _collector_supervisor(state: WorkerState) -> None:
             state.collector_last_cycle_stats = stats
             state.collector_last_cycle_finished_at = _utc_now_iso()
             state.collector_last_error = ""
+            state.collector_enabled = True
+            state.collector_running = False
+            state.collector_recovery_attempt = 0
+            state.collector_recovery_state = "healthy"
             COLLECTOR_STOP_FILE.unlink(missing_ok=True)
             log.info(
                 "Collector cycle: %s/%s ok, bull=%s",
@@ -1346,10 +1357,17 @@ async def _collector_supervisor(state: WorkerState) -> None:
             )
             await _write_status_now(state)
         except asyncio.CancelledError:
+            state.collector_running = False
             raise
         except Exception as exc:
             state.collector_last_error = str(exc)
             state.collector_enabled = False
+            state.collector_running = False
+            state.collector_recovery_state = "blocked"
+            will_retry = retryable(exc) and state.collector_recovery_attempt < RETRY_LIMIT
+            if will_retry:
+                state.collector_recovery_attempt += 1
+                state.collector_recovery_state = "retry_wait"
             log.exception("Collector cycle failed: %s", exc)
             await _write_status_now(state)
             COLLECTOR_STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1361,13 +1379,9 @@ async def _collector_supervisor(state: WorkerState) -> None:
                 "Collector fail-closed guard tripped; collection is disabled, "
                 "while reporting and training schedulers remain alive"
             )
-            cause = exc.__cause__ or exc
-            if (isinstance(cause, PermissionError)
-                    or (isinstance(cause, TimeoutError)
-                        and str(cause).startswith("timeout acquiring critic_dataset lock:"))):
-                # Retry only a known transient Windows IO failure. Malformed
-                # evidence and unknown integrity failures still require repair.
-                await asyncio.sleep(300)
+            if will_retry:
+                # Recovery never deletes a byte-lock or treats failed writes as success.
+                await asyncio.sleep(RETRY_SECONDS)
                 state.collector_enabled = True
                 continue
             return

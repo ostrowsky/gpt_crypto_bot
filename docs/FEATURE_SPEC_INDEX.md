@@ -200,3 +200,5 @@ Order flow for bounded market execution: `docs/specs/order-flow-execution.md` �
 Leader mission re-audit: `docs/specs/leader-mission-reaudit.md` — complete corrected raw22:00-close early/coverage/selection and leader accompaniment audit; fixed hypotheses not promoted.
 
 Leader trend continuation: `docs/specs/leader-trend-continuation.md` — completed maximum-period causal soft-exit replay: held-time component gain, overall mission trade-off; production unchanged.
+
+Mission-aligned learning cycle: `docs/specs/mission-aligned-learning-cycle.md` — sequential collector recovery, common objectives, separated training tasks, policy replay and evidence-gated forward release.
