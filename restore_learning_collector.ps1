@@ -8,7 +8,13 @@ $taskRuntime=Join-Path $taskRoot '.runtime'
 $taskStateFile=Join-Path $taskRuntime 'rl_worker_bg.json'
 $taskState=Get-Content -LiteralPath $taskStateFile -Raw | ConvertFrom-Json
 $taskProcesses=@()
-foreach($taskProcessId in @($taskState.wrapper_pid,$taskState.python_pid)) {
+# A stale wrapper receipt must not hide an orphan from a failed prior launch.
+$taskOrphans=@(Get-CimInstance Win32_Process | Where-Object {
+ ($_.ExecutablePath -eq $taskPython -and $_.CommandLine -like "*$taskWorker*") -or
+ ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like "*$taskLoop*")
+})
+$taskProcessIds=@($taskState.wrapper_pid,$taskState.python_pid)+@($taskOrphans.ProcessId)
+foreach($taskProcessId in @($taskProcessIds | Select-Object -Unique)) {
  if(-not $taskProcessId){continue}
  $taskProcess=Get-CimInstance Win32_Process -Filter "ProcessId=$taskProcessId"
  if($null -eq $taskProcess){continue}
@@ -26,7 +32,7 @@ foreach($taskName in @('rl_worker_bg.json','rl_worker_status.json','collector_in
  if(Test-Path -LiteralPath $taskPath){Copy-Item -LiteralPath $taskPath -Destination $taskBackup}
 }
 # Stop verified wrapper first, preventing it from respawning the old worker.
-foreach($taskProcess in $taskProcesses) {
+foreach($taskProcess in @($taskProcesses | Sort-Object @{Expression={if($_.Name -eq 'powershell.exe'){0}else{1}}})) {
  & taskkill.exe /PID $taskProcess.ProcessId /F | Out-Null
  if($LASTEXITCODE -ne 0 -and (Get-Process -Id $taskProcess.ProcessId -ErrorAction SilentlyContinue)){throw 'Verified learning worker stop failed'}
 }
@@ -37,7 +43,23 @@ if(Test-Path -LiteralPath $taskTrainLock) {
 }
 # Dataset byte-lock remains untouched. Incident marker is cleared only by a real successful cycle.
 $taskArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$taskLoop,'--enable-collector')
-$taskNew=Start-Process -FilePath 'powershell.exe' -ArgumentList $taskArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru
+$taskNew=Start-Process -FilePath 'powershell.exe' -ArgumentList $taskArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskBackup 'wrapper.stdout.log') -RedirectStandardError (Join-Path $taskBackup 'wrapper.stderr.log')
 $taskSummary.new_wrapper_pid=$taskNew.Id;$taskSummary.incident_backup=$taskBackup
+$taskSummary | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskBackup 'restart.json') -Encoding UTF8
+$taskReady=$false
+for($taskTry=0;$taskTry -lt 12;$taskTry++) {
+ Start-Sleep -Seconds 1
+ $taskNew.Refresh()
+ if($taskNew.HasExited){throw "Learning wrapper exited; inspect $taskBackup\wrapper.stderr.log"}
+ try {
+  $taskLive=Get-Content -LiteralPath $taskStateFile -Raw | ConvertFrom-Json
+  if($taskLive.wrapper_pid -eq $taskNew.Id -and $taskLive.state -eq 'running') {
+   $taskActual=Get-CimInstance Win32_Process -Filter "ProcessId=$($taskLive.python_pid)"
+   if($taskActual.ExecutablePath -eq $taskPython -and $taskActual.CommandLine -like "*$taskWorker*"){$taskReady=$true;$taskSummary.new_python_pid=$taskActual.ProcessId;break}
+  }
+ } catch { }
+}
+if(-not $taskReady){throw "Learning wrapper heartbeat unverified; inspect $taskBackup"}
+$taskSummary.launch_verified=$true
 $taskSummary | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskBackup 'restart.json') -Encoding UTF8
 $taskSummary | ConvertTo-Json

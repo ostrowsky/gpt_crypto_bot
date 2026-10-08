@@ -2280,10 +2280,29 @@ class TestDataCollector(unittest.TestCase):
 
     def test_T142b_data_collector_offloads_hot_path_to_threads(self):
         """T142b: data_collector не должен держать event loop на compute/write hot path."""
-        src = Path("data_collector.py").read_text(encoding="utf-8")
-        self.assertIn("def _process_coin_sync(", src)
-        self.assertIn("await asyncio.to_thread(", src)
-        self.assertIn("await asyncio.to_thread(_log_dataset_stats)", src)
+        import data_collector as dc
+        import threading
+        from unittest.mock import AsyncMock, patch
+        event_thread = threading.get_ident()
+        worker_threads = []
+        data = np.zeros(32, dtype=[(k, 'i8' if k == 't' else 'f8') for k in ('t','o','h','l','c','v')])
+        data['c'] = 100
+        def compute(*args):
+            worker_threads.append(threading.get_ident())
+            return {}
+        def signal(*args):
+            worker_threads.append(threading.get_ident())
+            return 'none'
+        def labels(**kwargs):
+            worker_threads.append(threading.get_ident())
+        with patch.object(dc, 'fetch_klines', new=AsyncMock(return_value=data)), \
+             patch.object(dc, 'compute_features', new=compute), \
+             patch.object(dc, '_detect_rule_signal', new=signal), \
+             patch.object(dc.critic_dataset, 'fill_pending_from_data', new=labels), \
+             patch.object(dc.config, 'LEGACY_ML_DATASET_COLLECTION_ENABLED', False, create=True):
+            self.assertTrue(asyncio.run(dc._process_coin(None, 'BTCUSDT', '15m', False, 0.)))
+        self.assertEqual(len(worker_threads), 3)
+        self.assertTrue(all(t != event_thread for t in worker_threads))
 
     def test_T143_seconds_until_next_bar_positive(self):
         """T143: _seconds_until_next_bar возвращает положительное число"""

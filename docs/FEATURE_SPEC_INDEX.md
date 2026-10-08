@@ -201,4 +201,4 @@ Leader mission re-audit: `docs/specs/leader-mission-reaudit.md` — complete cor
 
 Leader trend continuation: `docs/specs/leader-trend-continuation.md` — completed maximum-period causal soft-exit replay: held-time component gain, overall mission trade-off; production unchanged.
 
-Mission-aligned learning cycle: `docs/specs/mission-aligned-learning-cycle.md` — sequential collector recovery, common objectives, separated training tasks, policy replay and evidence-gated forward release.
+Mission-aligned learning cycle: `docs/specs/mission-aligned-learning-cycle.md` — verified collector restart and batched persistence; versioned objectives, separated training, full replay and guarded forward release.

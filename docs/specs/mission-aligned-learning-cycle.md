@@ -63,3 +63,66 @@ enabled/running/healthy/retry_wait/blocked; failed cycle never becomes success.
 Identity-checked workspace worker/wrapper restart preserves incident/status/lock
 evidence, touches no trading process and never removes dataset byte-lock. Any
 train-lock cleanup requires dead owner; preserve all models/datasets/history.
+
+## Point2 raw collection and boundary repair
+
+V1 fetched191days over699requested public/historically-mentioned symbols.43
+files were rejected because last native day ends early on delisting, although
+their prior complete days are valid. Preserve V1. V2 changes ONLY record-level
+coverage handling: retain SHA-bound full native days, reject partial last row
+on that day, disclose partial symbols in coverage. No model has been fitted or
+threshold tuned. Current+historically-reported symbol union is observational,
+not a retrospective PIT certification. Failed/partial histories never become
+zero returns or clean proof of absence.
+
+V3 labels reuse the identical V2 raw receipts, without refetching or model fitting:
+valid below-volume assets are retained as known negative candidates; liquidity
+filters only exchange ranking, never the training denominator. Partial native
+days remain unknown. Intraday extension preserves SHA-bound archived prefixes,
+fetches missing tails/pairs, records unavailable/gapped histories separately,
+and never silently reduces the declared requested watchlist.
+
+## Points3..6 fixed experiment protocol (before fitting)
+
+All baseline replay candidates, including later rejected candidates, form entry
+population. Two independent CatBoost classifiers predict (a) final global leader
+membership and (b) early membership at the current candidate price. Closed17-bar
+15m prefixes, timeframe, cyclic UTC clock, original causal score and signal mode
+only; no symbol/day IDs or legacy future annotations. Parameters:300trees,
+depth4, learning_rate0.03, l2=10, seed42, 2threads, no auto class weights.
+Refit each30days after initial30days; inner validation starts at80% whole local
+days of matured history. Train label availability<validation boundary; validation
+availability<fit clock. Unknown labels/features do not become negatives.
+
+One registered exploratory ranking arm adds at most4score points:
+8*(early_probability-0.5), with missing/untrained scores unchanged. This can
+affect ranking/admission only inside OFFLINE unchanged10-slot replay. No threshold
+search or classifier accuracy claim authorizes deployment. Control candles,
+candidate identities, modes, cooldowns, replacement and hard exits stay identical.
+Held position ticks and blocked cooldown states are separately recorded from the
+control replay. Continuation head labels next1h positive close return AND no
+future close drawdown>2originATR; reentry head uses4h. These are explicit proxy
+targets, not proof of exit improvement. Both stay action-neutral in this cycle;
+the next policy relaxation requires its own registered full replay.
+
+Entry acceptance gate: TEST early count gain>=1,3calendar-day paired95% lower
+bound for early delta>0, coverage and unique BUY precision not worse, complete
+companion exit metrics with no worse held-time/retention on matched entries.
+Unknown/unmatched companion states block an overall PASS. Fresh forward gate:
+fixed hashes, at least30 completed local days/100 eligible leader-day targets,
+PIT universe and watchlist before predictions, feature receive<=issue clock,
+verified actual acceptance clocks and complete data coverage. Retrospective
+passes never bypass this gate. Drift/error/missing provenance => shadow only;
+rollback is disablement of the optional model, never removing protective gates.
+
+Collector persistence repair: each collector snapshot is buffered in memory
+until the cycle's market requests finish, then NEW IDs are appended under one
+shared dataset lock/uniqueness scan. Existing decisions/features/labels are
+preserved, including higher-priority monitor BUY/block evidence; collector
+snapshots never rewrite an existing decision. Mark IDs logged only after durable
+append. Forward labels use existing strict batched update. Malformed history
+aborts before any append; zero successful market pairs cannot mark recovery
+healthy. Cycle stats publish requested/ok/failed and newly persisted IDs.
+Recovery status write failures cannot swallow the integrity incident or retry.
+Wrapper startup must verify actual PID/heartbeat and retain stderr; discover
+identity-verified orphan learning workers before restart, never duplicates.

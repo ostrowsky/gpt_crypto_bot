@@ -1335,7 +1335,9 @@ async def _collector_supervisor(state: WorkerState) -> None:
     from collector_recovery import retryable,RETRY_LIMIT,RETRY_SECONDS
     log = logging.getLogger("rl_headless_worker.collector")
     while True:
+        prior_recovery_state = state.collector_recovery_state
         state.collector_running = True
+        state.collector_recovery_state = "collecting"
         state.collector_last_cycle_started_at = _utc_now_iso()
         try:
             btc_ctx = await data_collector._get_btc_context()
@@ -1358,6 +1360,7 @@ async def _collector_supervisor(state: WorkerState) -> None:
             await _write_status_now(state)
         except asyncio.CancelledError:
             state.collector_running = False
+            state.collector_recovery_state = prior_recovery_state
             raise
         except Exception as exc:
             state.collector_last_error = str(exc)
@@ -1369,12 +1372,15 @@ async def _collector_supervisor(state: WorkerState) -> None:
                 state.collector_recovery_attempt += 1
                 state.collector_recovery_state = "retry_wait"
             log.exception("Collector cycle failed: %s", exc)
-            await _write_status_now(state)
             COLLECTOR_STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
             COLLECTOR_STOP_FILE.write_text(
                 "collector_integrity_failure\n" + str(exc) + "\n",
                 encoding="utf-8",
             )
+            try:
+                await _write_status_now(state)
+            except Exception:
+                log.exception("Collector incident retained; status publication failed")
             log.critical(
                 "Collector fail-closed guard tripped; collection is disabled, "
                 "while reporting and training schedulers remain alive"

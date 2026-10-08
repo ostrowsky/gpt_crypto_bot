@@ -477,6 +477,7 @@ def log_candidate(
     btc_momentum_4h: float = 0.0,
     market_vol_24h: float = 0.0,
     strict: bool = False,
+    record_buffer: Optional[list] = None,
 ) -> str:
     record_id = _candidate_id(sym, tf, bar_ts)
     source = "data_collector" if stage == "collector" else "main_monitor"
@@ -485,7 +486,7 @@ def log_candidate(
         tf=tf,
         source=source,
     )
-    if _is_logged(record_id):
+    if record_buffer is None and _is_logged(record_id):
         _update_existing_candidate(
             record_id=record_id,
             action=action,
@@ -560,6 +561,11 @@ def log_candidate(
         "trade_bars_held": None,
         "linked_ml_record_id": "",
     }
+    if record_buffer is not None:
+        if stage != "collector" or action != "candidate":
+            raise ValueError("only collector snapshots may be buffered")
+        record_buffer.append(rec)
+        return rec_id
     try:
         if _append(rec) is False:
             _update_existing_candidate(
@@ -573,6 +579,45 @@ def log_candidate(
             raise DatasetIntegrityError(str(e)) from e
         return ""
     return rec_id
+
+
+def append_collector_batch(records: list[dict]) -> dict:
+    """One uniqueness barrier; preserve existing, possibly higher-priority evidence."""
+    prepared = {}
+    for rec in records:
+        if not rec.get("id") or rec.get("decision", {}).get("stage") != "collector" or rec["decision"].get("action") != "candidate":
+            raise DatasetIntegrityError("invalid collector batch record")
+        prepared.setdefault(rec["id"], rec)
+    if not prepared:
+        return {"new_ids": 0, "existing_ids": 0}
+    try:
+        with _dataset_io_lock():
+            ids = set()
+            if CRITIC_FILE.exists():
+                with CRITIC_FILE.open("r", encoding="utf-8") as source:
+                    for line in source:
+                        if not line.strip():
+                            continue
+                        row = json.loads(line)
+                        if not isinstance(row, dict):
+                            raise DatasetIntegrityError("non-object dataset row")
+                        if row.get("id"):
+                            ids.add(row["id"])
+            new = [r for k, r in prepared.items() if k not in ids]
+            # Serialize all rows before any write; serialization failures cannot
+            # leave a prefix falsely reported as a complete successful batch.
+            payload = "".join(json.dumps(r, ensure_ascii=False, cls=_Enc) + "\n" for r in new)
+            CRITIC_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with CRITIC_FILE.open("a", encoding="utf-8") as destination:
+                destination.write(payload)
+                destination.flush()
+                os.fsync(destination.fileno())
+            for rec_id in prepared:
+                _mark_logged(rec_id)
+            _disk_id_cache.pop(str(CRITIC_FILE.resolve()), None)
+        return {"new_ids": len(new), "existing_ids": len(prepared)-len(new)}
+    except Exception as exc:
+        raise DatasetIntegrityError(str(exc)) from exc
 
 
 def mark_trade_taken(record_id: str, linked_ml_record_id: str = "") -> None:

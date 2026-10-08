@@ -50,5 +50,14 @@ class RecoveryTests(unittest.TestCase):
         marker=self.run_supervisor([worker.critic_dataset.DatasetIntegrityError('malformed')],s)
         self.assertTrue(marker);self.assertEqual(s.collector_recovery_attempt,0);self.assertFalse(s.collector_enabled)
 
+    def test_status_failure_cannot_swallow_integrity_incident(self):
+        s=worker.WorkerState(3600,300,120,20,True)
+        with tempfile.TemporaryDirectory() as td,patch.object(worker,'COLLECTOR_STOP_FILE',Path(td)/'incident'),\
+             patch.object(worker.data_collector,'_get_btc_context',new=AsyncMock(return_value={})),\
+             patch.object(worker.data_collector,'_collect_once',new=AsyncMock(side_effect=worker.critic_dataset.DatasetIntegrityError('malformed'))),\
+             patch.object(worker,'_write_status_now',new=AsyncMock(side_effect=PermissionError('status unavailable'))):
+            asyncio.run(worker._collector_supervisor(s))
+            self.assertTrue(worker.COLLECTOR_STOP_FILE.exists());self.assertEqual(s.collector_recovery_state,'blocked')
+
 
 if __name__=='__main__':unittest.main()

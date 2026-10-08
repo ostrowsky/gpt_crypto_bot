@@ -99,6 +99,7 @@ async def _process_coin(
     btc_momentum_4h:  float = 0.0,
     market_vol_24h:   float = 0.0,
     critic_label_batches: Optional[list[dict[str, Any]]] = None,
+    critic_record_batches: Optional[list[dict[str, Any]]] = None,
 ) -> bool:
     """
     Загружает бары монеты, логирует последний закрытый бар,
@@ -152,6 +153,7 @@ async def _process_coin(
                 btc_momentum_4h=btc_momentum_4h,
                 market_vol_24h=market_vol_24h,
                 strict=True,
+                record_buffer=critic_record_batches,
             )
             if not record_id:
                 raise critic_dataset.DatasetIntegrityError(
@@ -225,6 +227,7 @@ async def _collect_once(btc_context: dict) -> dict:
     ok = 0
     fail = 0
     critic_label_batches: list[dict[str, Any]] = []
+    critic_record_batches: list[dict[str, Any]] = []
 
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=30)
@@ -237,6 +240,7 @@ async def _collect_once(btc_context: dict) -> dict:
                     is_bull_day, btc_vs_ema50,
                     btc_momentum_4h, market_vol_24h,
                     critic_label_batches,
+                    critic_record_batches,
                 )
                 for sym, tf in batch
             ]
@@ -251,13 +255,16 @@ async def _collect_once(btc_context: dict) -> dict:
             if batch_start + BATCH_SIZE < len(pairs):
                 await asyncio.sleep(BATCH_DELAY)
 
+    if ok == 0:
+        raise RuntimeError("collector cycle has no successful market pairs")
+    persisted = await run_cpu(critic_dataset.append_collector_batch, critic_record_batches)
     await run_cpu(
         critic_dataset.fill_pending_batch,
         critic_label_batches,
         strict=True,
     )
 
-    return {"ok": ok, "fail": fail, "total": len(pairs)}
+    return {"ok": ok, "fail": fail, "total": len(pairs), **persisted}
 
 
 # ── Рыночный контекст (вычисляется один раз за цикл) ──────────────────────────
