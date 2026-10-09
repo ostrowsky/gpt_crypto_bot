@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import json,hashlib
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -34,6 +36,7 @@ import critic_dataset
 import ml_dataset
 from indicators import compute_features
 from runtime_executors import run_cpu
+from collector_recovery import CollectorNetworkError
 from strategy import fetch_klines, check_entry_conditions, check_retest_conditions, \
     check_breakout_conditions, check_impulse_conditions, check_alignment_conditions, \
     check_trend_surge_conditions, get_entry_mode
@@ -46,6 +49,7 @@ BAR_SECONDS   = 900    # 15 минут = длина бара
 POLL_INTERVAL = BAR_SECONDS  # опрашиваем раз в закрытие бара
 BATCH_SIZE    = 10     # монет параллельно (не перегружать API)
 BATCH_DELAY   = 0.3    # секунды между батчами
+COLLECTOR_RECEIPT_DIR=Path(__file__).resolve().parent.parent/'.runtime/collector_market_universe'
 
 
 # ── Вычисление rule_signal ─────────────────────────────────────────────────────
@@ -100,6 +104,7 @@ async def _process_coin(
     market_vol_24h:   float = 0.0,
     critic_label_batches: Optional[list[dict[str, Any]]] = None,
     critic_record_batches: Optional[list[dict[str, Any]]] = None,
+    universe_receipt: Optional[dict] = None,
 ) -> bool:
     """
     Загружает бары монеты, логирует последний закрытый бар,
@@ -107,6 +112,7 @@ async def _process_coin(
     """
     try:
         data = await fetch_klines(session, sym, tf, limit=FETCH_LIMIT)
+        fetch_return_ms = int(time.time()*1000)
         if data is None or len(data) < 30:
             return False
 
@@ -114,6 +120,12 @@ async def _process_coin(
         i = len(c) - 2  # последний ЗАКРЫТЫЙ бар
 
         if i < 20:
+            return False
+        tf_seconds = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+        bar_ms = tf_seconds.get(tf, BAR_SECONDS) * 1000
+        cutoff = int(data["t"][i]) + bar_ms
+        if cutoff > fetch_return_ms + 30000 or fetch_return_ms-cutoff > bar_ms+30000:
+            log.warning("Collector rejects stale/future close: %s %s cutoff=%s fetched=%s",sym,tf,cutoff,fetch_return_ms)
             return False
 
         feat = await run_cpu(
@@ -159,9 +171,13 @@ async def _process_coin(
                 raise critic_dataset.DatasetIntegrityError(
                     f"candidate append returned no record id for {sym} [{tf}]"
                 )
+            if critic_record_batches is not None:
+                critic_record_batches[-1]["collection_evidence"] = dict(
+                    feature_cutoff_ms=cutoff,fetch_function_return_ms=fetch_return_ms,
+                    receive_clock_kind="upper_bound_after_fetch_return",wire_receive_verified=False,
+                    universe=universe_receipt,
+                )
 
-        tf_seconds = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
-        bar_ms = tf_seconds.get(tf, BAR_SECONDS) * 1000
         if bool(getattr(config, "LEGACY_ML_DATASET_COLLECTION_ENABLED", False)):
             # Diagnostic-only rollback path.  These rows do not satisfy the v2
             # candidate contract and remain excluded from online training.
@@ -226,12 +242,34 @@ async def _collect_once(btc_context: dict) -> dict:
 
     ok = 0
     fail = 0
+    failed_pairs=[]
+    excluded_pairs=[]
     critic_label_batches: list[dict[str, Any]] = []
     critic_record_batches: list[dict[str, Any]] = []
 
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=30)
     ) as session:
+        try:
+            async with session.get(f"{config.BINANCE_REST}/api/v3/exchangeInfo",params={"permissions":"SPOT"}) as response:
+                response.raise_for_status()
+                raw_universe=await response.read()
+                universe_received=datetime.now(timezone.utc).isoformat()
+        except aiohttp.ClientResponseError as exc:
+            if exc.status in (429,500,502,503,504):raise CollectorNetworkError('public universe request transient failure') from exc
+            raise
+        except (aiohttp.ClientConnectionError,asyncio.TimeoutError) as exc:
+            raise CollectorNetworkError('public universe connection/timeout failure') from exc
+        universe=json.loads(raw_universe)
+        if not isinstance(universe.get('symbols'),list):raise critic_dataset.DatasetIntegrityError('invalid exchange universe')
+        tradable={r['symbol'] for r in universe['symbols'] if r['status']=='TRADING' and r['quoteAsset']=='USDT'}
+        excluded_pairs=[dict(symbol=s,tf=tf,reason='asof_exchange_not_trading') for s,tf in pairs if s not in tradable]
+        pairs=[(s,tf) for s,tf in pairs if s in tradable]
+        directory=COLLECTOR_RECEIPT_DIR
+        directory.mkdir(parents=True,exist_ok=True)
+        receipt_path=directory/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.json')
+        await run_cpu(receipt_path.write_bytes,raw_universe)
+        universe_receipt=dict(path=str(receipt_path),sha256=hashlib.sha256(raw_universe).hexdigest(),received_utc=universe_received)
         for batch_start in range(0, len(pairs), BATCH_SIZE):
             batch = pairs[batch_start: batch_start + BATCH_SIZE]
             tasks = [
@@ -241,21 +279,24 @@ async def _collect_once(btc_context: dict) -> dict:
                     btc_momentum_4h, market_vol_24h,
                     critic_label_batches,
                     critic_record_batches,
+                    universe_receipt,
                 )
                 for sym, tf in batch
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            for r in results:
+            for pair,r in zip(batch,results):
                 if isinstance(r, critic_dataset.DatasetIntegrityError):
                     raise r
                 if r is True:
                     ok += 1
                 else:
                     fail += 1
+                    failed_pairs.append(dict(symbol=pair[0],tf=pair[1],reason='market_or_feature_unavailable_or_stale'))
             if batch_start + BATCH_SIZE < len(pairs):
                 await asyncio.sleep(BATCH_DELAY)
 
     if ok == 0:
+        if pairs:raise CollectorNetworkError('no successful tradable market pairs; source unavailable or stale')
         raise RuntimeError("collector cycle has no successful market pairs")
     persisted = await run_cpu(critic_dataset.append_collector_batch, critic_record_batches)
     await run_cpu(
@@ -264,7 +305,9 @@ async def _collect_once(btc_context: dict) -> dict:
         strict=True,
     )
 
-    return {"ok": ok, "fail": fail, "total": len(pairs), **persisted}
+    return {"ok": ok, "fail": fail, "total": len(pairs), "watchlist_pairs":len(symbols)*len(timeframes),
+        "excluded_pairs":excluded_pairs,"failed_pairs":failed_pairs,"universe_receipt":universe_receipt,
+        "coverage_state":"COMPLETE_TRADABLE" if fail==0 else "PARTIAL_TRADABLE", **persisted}
 
 
 # ── Рыночный контекст (вычисляется один раз за цикл) ──────────────────────────

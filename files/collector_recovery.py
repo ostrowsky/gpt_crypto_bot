@@ -2,11 +2,15 @@
 RETRY_LIMIT=3
 RETRY_SECONDS=300
 
+class CollectorNetworkError(RuntimeError):
+    """Known transient public-market request failure before evidence persistence."""
+
 
 def retryable(error):
     seen=set();current=error
     while current is not None and id(current) not in seen:
         seen.add(id(current))
+        if isinstance(current,CollectorNetworkError):return True
         if isinstance(current,TimeoutError) and str(current).startswith('timeout acquiring critic_dataset lock:'):
             return True
         if isinstance(current,PermissionError) and getattr(current,'winerror',None) in (32,33):

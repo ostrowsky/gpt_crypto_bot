@@ -2,7 +2,7 @@ import asyncio,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch,AsyncMock
 import rl_headless_worker as worker
-from collector_recovery import retryable,RETRY_LIMIT
+from collector_recovery import retryable,RETRY_LIMIT,CollectorNetworkError
 
 
 def nested_timeout():
@@ -18,6 +18,7 @@ class RecoveryTests(unittest.TestCase):
         sharing=PermissionError('sharing');sharing.winerror=32;self.assertTrue(retryable(sharing))
         self.assertFalse(retryable(PermissionError('ACL denied')))
         self.assertFalse(retryable(TimeoutError('network timeout')))
+        self.assertTrue(retryable(CollectorNetworkError('public API temporarily unavailable')))
         self.assertFalse(retryable(worker.critic_dataset.DatasetIntegrityError('malformed JSON')))
         cyclic=RuntimeError('cycle');cyclic.__cause__=cyclic;self.assertFalse(retryable(cyclic))
 

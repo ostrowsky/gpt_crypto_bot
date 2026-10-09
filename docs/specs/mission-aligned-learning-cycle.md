@@ -165,6 +165,41 @@ Actual acceptance remains explicitly unverified; retrospective scores or these
 proxy forecasts cannot unlock canary. Independent raw/fold/control/denominator
 audit is required before any historical conclusion.
 
+Before outcome replay/evaluation completes, register a calendar correction:
+initial runner computes3surviving-row blocks. Partial native days can leave
+calendar gaps, so that does not implement the promised3calendar-day blocks.
+Preserve that initial artifact; separately recompute paired intervals with a
+full calendar and NaN masks for absent days, normalized to observed-day count.
+No new model/parameters/thresholds/trades or rule selection. Corrected evaluation
+is authoritative; initial compressed-row intervals never approve release.
+
+Collector freshness correction: a successful kline response from a BREAK/delisted
+symbol is not fresh market coverage. Snapshot public exchangeInfo once per cycle,
+preserve raw/hash/receive clock, exclude non-TRADING pairs explicitly before
+requests. Reject future or stale closed features (>one interval+30s age).
+Publish requested/watchlist/excluded/failed pair counts separately. Persist a
+fetch-return upper-bound clock, not a fabricated network receipt or acceptance.
+Existing records are never backfilled with these new provenance fields.
+Known public API connection/timeout/429/5xx failures and zero successful tradable
+pairs reuse the same bounded3retry recovery. Permanent4xx/schema/integrity/ACL
+errors do not. Failure and stale coverage are never success, even if retried.
+
+Prepared experiment V1 models/candidates are preserved. During the first control
+replay, inherited research policy MagicMock exit/disabled-model wrappers retain
+every call and array view (process reached7.56GB). Stop that experiment only;
+resume V2 using identical SHA-bound prepared features/candidates/predictions and
+models, with ordinary pure function overrides instead of call-recording mocks.
+No parameters, scores, labels, admission rules or outcomes change. Full prior
+control prefix parity is mandatory. Preserve V1 aborted-resource receipt; it
+cannot be presented as a completed replay.
+Forward target ranking uses native local-day bars and the union of asof cycle
+registries plus a label-only end registry, so later listings can affect ranks
+without leaking into features. DST days use exact hourly aggregation. Changed
+intraday watchlist invalidates the fixed cohort; partial snapshots are excluded.
+Additional audit reconstructs ALL known entry/continuation/reentry targets from
+raw prices and probes actual BTC/ETH/AMP/SOL candidate generation after replacing
+all future bars with neutral unclosed sentinels. Finite probes are not PIT proof.
+
 Verified wrapper failure: Set-Content heartbeat sharing IOException terminated
 the supervisor but left Python alive. Heartbeat uses UTF8 temporary file and
 atomic Replace/Move with bounded5s retry. Publication failure logs warning and

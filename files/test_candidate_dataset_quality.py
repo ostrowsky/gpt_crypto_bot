@@ -151,12 +151,13 @@ class CandidateDatasetQualityTests(unittest.TestCase):
         ) as log_snapshot, patch.object(
             data_collector.ml_dataset, "fill_pending_from_data"
         ) as fill_legacy:
-            ok = asyncio.run(
-                data_collector._process_coin(
-                    None, "TESTUSDT", "15m", False, 0.0,
-                    critic_label_batches=batches,
+            with patch.object(data_collector.time,"time",return_value=(int(data['t'][-2])+900000+1000)/1000):
+                ok = asyncio.run(
+                    data_collector._process_coin(
+                        None, "TESTUSDT", "15m", False, 0.0,
+                        critic_label_batches=batches,
+                    )
                 )
-            )
         self.assertTrue(ok)
         log_snapshot.assert_not_called()
         fill_legacy.assert_not_called()

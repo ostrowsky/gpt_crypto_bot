@@ -2287,6 +2287,7 @@ class TestDataCollector(unittest.TestCase):
         worker_threads = []
         data = np.zeros(32, dtype=[(k, 'i8' if k == 't' else 'f8') for k in ('t','o','h','l','c','v')])
         data['c'] = 100
+        data['t'] = np.arange(32)*900000
         def compute(*args):
             worker_threads.append(threading.get_ident())
             return {}
@@ -2298,6 +2299,7 @@ class TestDataCollector(unittest.TestCase):
         with patch.object(dc, 'fetch_klines', new=AsyncMock(return_value=data)), \
              patch.object(dc, 'compute_features', new=compute), \
              patch.object(dc, '_detect_rule_signal', new=signal), \
+             patch.object(dc.time, 'time', return_value=31*900+2), \
              patch.object(dc.critic_dataset, 'fill_pending_from_data', new=labels), \
              patch.object(dc.config, 'LEGACY_ML_DATASET_COLLECTION_ENABLED', False, create=True):
             self.assertTrue(asyncio.run(dc._process_coin(None, 'BTCUSDT', '15m', False, 0.)))
