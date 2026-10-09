@@ -17,7 +17,7 @@ class FreshnessTests(unittest.TestCase):
         response=MagicMock();response.read=AsyncMock(return_value=raw);response.__aenter__=AsyncMock(return_value=response)
         session=MagicMock();session.get.return_value=response;session.__aenter__=AsyncMock(return_value=session)
         process=AsyncMock(return_value=True)
-        with tempfile.TemporaryDirectory() as td,patch.object(dc,'COLLECTOR_RECEIPT_DIR',Path(td)),patch.object(dc.config,'load_watchlist',return_value=['ACTIVEUSDT','OLDUSDT']),patch.object(dc.config,'TIMEFRAMES',['15m','1h']),patch.object(dc.aiohttp,'ClientSession',return_value=session),patch.object(dc,'_process_coin',new=process),patch.object(dc.critic_dataset,'append_collector_batch',return_value=dict(new_ids=0,existing_ids=0)),patch.object(dc.critic_dataset,'fill_pending_batch'):
+        with tempfile.TemporaryDirectory() as td,patch.object(dc,'COLLECTOR_RECEIPT_DIR',Path(td)),patch.object(dc.config,'load_watchlist',return_value=['ACTIVEUSDT','OLDUSDT']),patch.object(dc.config,'TIMEFRAMES',['15m','1h']),patch.object(dc.aiohttp,'ClientSession',return_value=session),patch.object(dc,'public_market_request',return_value=(raw,dict(received_utc='2026-10-09T00:00:00Z'))),patch.object(dc,'_process_coin',new=process),patch.object(dc.critic_dataset,'append_collector_batch',return_value=dict(new_ids=0,existing_ids=0)),patch.object(dc.critic_dataset,'fill_pending_batch'):
             stats=asyncio.run(dc._collect_once({}))
             self.assertEqual((stats['ok'],stats['total'],stats['watchlist_pairs']), (2,2,4))
             self.assertEqual(len(stats['excluded_pairs']),2);self.assertEqual(stats['coverage_state'],'COMPLETE_TRADABLE')

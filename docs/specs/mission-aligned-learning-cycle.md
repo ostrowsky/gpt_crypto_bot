@@ -199,6 +199,10 @@ intraday watchlist invalidates the fixed cohort; partial snapshots are excluded.
 Additional audit reconstructs ALL known entry/continuation/reentry targets from
 raw prices and probes actual BTC/ETH/AMP/SOL candidate generation after replacing
 all future bars with neutral unclosed sentinels. Finite probes are not PIT proof.
+Operational universe transport repair: aiohttp body read timed out on the large
+exchangeInfo response while public urllib collector completed the same resource.
+Reuse that verified read-only request path in the CPU executor, preserving exact
+URL/status/received-clock/raw hash; normal kline transport stays unchanged.
 
 Verified wrapper failure: Set-Content heartbeat sharing IOException terminated
 the supervisor but left Python alive. Heartbeat uses UTF8 temporary file and

@@ -24,6 +24,7 @@ import asyncio
 import logging
 import time
 import json,hashlib
+import urllib.error
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -37,6 +38,7 @@ import ml_dataset
 from indicators import compute_features
 from runtime_executors import run_cpu
 from collector_recovery import CollectorNetworkError
+from fetch_mission_history import request as public_market_request
 from strategy import fetch_klines, check_entry_conditions, check_retest_conditions, \
     check_breakout_conditions, check_impulse_conditions, check_alignment_conditions, \
     check_trend_surge_conditions, get_entry_mode
@@ -251,14 +253,12 @@ async def _collect_once(btc_context: dict) -> dict:
         timeout=aiohttp.ClientTimeout(total=30)
     ) as session:
         try:
-            async with session.get(f"{config.BINANCE_REST}/api/v3/exchangeInfo",params={"permissions":"SPOT"}) as response:
-                response.raise_for_status()
-                raw_universe=await response.read()
-                universe_received=datetime.now(timezone.utc).isoformat()
-        except aiohttp.ClientResponseError as exc:
-            if exc.status in (429,500,502,503,504):raise CollectorNetworkError('public universe request transient failure') from exc
+            raw_universe,universe_meta=await run_cpu(public_market_request,'exchangeInfo',{"permissions":"SPOT"})
+            universe_received=universe_meta['received_utc']
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429,500,502,503,504):raise CollectorNetworkError('public universe request transient failure') from exc
             raise
-        except (aiohttp.ClientConnectionError,asyncio.TimeoutError) as exc:
+        except (urllib.error.URLError,TimeoutError) as exc:
             raise CollectorNetworkError('public universe connection/timeout failure') from exc
         universe=json.loads(raw_universe)
         if not isinstance(universe.get('symbols'),list):raise critic_dataset.DatasetIntegrityError('invalid exchange universe')
@@ -269,7 +269,7 @@ async def _collect_once(btc_context: dict) -> dict:
         directory.mkdir(parents=True,exist_ok=True)
         receipt_path=directory/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.json')
         await run_cpu(receipt_path.write_bytes,raw_universe)
-        universe_receipt=dict(path=str(receipt_path),sha256=hashlib.sha256(raw_universe).hexdigest(),received_utc=universe_received)
+        universe_receipt=dict(path=str(receipt_path),sha256=hashlib.sha256(raw_universe).hexdigest(),received_utc=universe_received,request=universe_meta)
         for batch_start in range(0, len(pairs), BATCH_SIZE):
             batch = pairs[batch_start: batch_start + BATCH_SIZE]
             tasks = [
