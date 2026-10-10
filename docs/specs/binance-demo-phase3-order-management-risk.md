@@ -24,6 +24,7 @@ This document enables no exchange requests, orders, policy changes or learning.
 [financial contract](binance-demo-phase0-financial-contract.md),
 [account adapter](binance-demo-phase1-account-adapter.md),
 [universe/data](binance-demo-phase2-universe-market-data.md),
+[application isolation](binance-demo-application-isolation.md),
 [roadmap](../roadmaps/binance-demo-daily-pnl-roadmap.md),
 [Truth Harness](truth-harness.md). TH-01..TH-12 обязательны.
 
@@ -31,7 +32,9 @@ This document enables no exchange requests, orders, policy changes or learning.
 
 Spot Demo, long-only, покупки за выделенные средства; pilot execution — USDT
 пары, хотя мониторинг охватывает весь разрешённый universe. Один OrderManager
-(OMS), RiskManager и фактический ledger обслуживают main/agent/model intents.
+(OMS), RiskManager и фактический ledger обслуживают только intents новых
+policy plugins (main/agent/model) независимого приложения `apps/binance_demo_bot`.
+Текущие main/agent процессы старого бота не подключаются к новому OMS.
 Включены BUY, защита, HOLD, частичный/полный SELL, cancel/reconcile, восстановление.
 Исключены production hosts, плечо, shorts, выводы, переводы, свободный RL,
 торговля по Telegram-сообщениям и автоматическое увеличение бюджета.
@@ -40,9 +43,21 @@ Spot Demo, long-only, покупки за выделенные средства;
 `OrderExecutor`, `RiskManager`, `AccountReconciler`; transactional SQLite WAL
 с durable outbox и журналом событий. Имена — design targets, не наличие кода.
 
+Исходники/пакет, `.env`, `.venv`, config, release pointers и бюджет принадлежат
+только новому приложению. DB, outbox, journals, locks/leases/PID, cursors,
+snapshots и backups живут только внутри его `.runtime`; пути проверяются
+после разрешения symlink/junction и не могут указывать в legacy runtime.
+Нет imports старого `files/*`, чтения `files/.env`, JSON positions/models,
+старого control plane или общего mutable состояния. Credentials не копируются
+и не подхватываются fallback из старого приложения; demo account используется
+исключительно новым приложением. UI port/Telegram polling token отдельные;
+зарегистрированный resource cap не позволяет recovery исчерпать ресурсы старого
+бота. Этот документ не создаёт каталогов/служб и не перемещает существующие данные.
+
 ## Contracts and durable identity
 
-Общий EventEnvelope: `schema_version=1`, `environment`, `account_episode_id`,
+Общий EventEnvelope: `schema_version=1`, `application_id=binance_demo_bot`,
+`environment`, `account_episode_id`,
 `portfolio_scope_id`, `event_id`, `event_type`, `causation_id`,
 `exchange_event_time_ms` (nullable), фактические `received_at_ms` UTC,
 `received_monotonic_ns`, `process_instance_id`, `recorded_at_ms`; при наличии `decision_id`, `arm_id`,
@@ -97,6 +112,10 @@ Lease timeout сам по себе не гарантирует fencing на Bina
 не начинает отправку, пока старый процесс не исключён как sender и его in-flight
 requests не сверены. При сомнении takeover блокируется; split-brain не лечится
 вторым executor. Backups не запускаются одновременно с живым writer.
+Здесь старый sender — только идентифицированный predecessor экземпляр нового
+приложения. Ownership/PID проверяют app root, instance identity и epoch;
+совпадение имени `python.exe` недостаточно. Нельзя attach/kill/restart старый
+бот, collectors или их supervisors; legacy locks/PID/stop markers не читаются.
 
 Непосредственно перед `SEND_STARTED` executor проверяет актуальные release
 generation, ticket/revocation, intent expiry, risk state и lease. Откат атомарно
@@ -105,7 +124,7 @@ generation, ticket/revocation, intent expiry, risk state и lease. Откат а
 отзываются как новые входы при смене entry policy.
 
 Дубли `executionReport`/REST fills не создают второй fill/fee. Fill uniqueness:
-`(environment, account_episode_id, symbol, exchange_trade_id)`; order/list
+`(application_id, environment, account_episode_id, symbol, exchange_trade_id)`; order/list
 идентичность проверяется отдельно. Противоречащий payload с тем же ключом —
 incident. Cumulative quantity согласуется с unique fills; поздний NEW не
 откатывает FILLED. Arrival order/event timestamps не заменяют reconciliation.
@@ -207,6 +226,9 @@ dedup/private event merge → reconciliation quantities/fees/free/locked/reserve
 API историю больше не отдаёт; неразрешимый gap блокирует новые входы и полную
 атрибуцию. Balance mismatch, manual trade, reset начинают incident/episode
 протокол фазы 0; старые незакрытые экспозиции не забываются при перезапуске.
+Восстанавливаются только app-owned ledger/cursors/backups и реальные экспозиции
+его demo account. Legacy JSON не импортируется как начальный баланс/позиции.
+Recovery не переиспользует старые worker scripts, tokens, services или UI ports.
 
 ## Primary metrics and acceptance criteria
 
@@ -244,9 +266,11 @@ receipt/order-flow depth отмечается, не заменяется точ�
 
 Rollback отключает новые entries/release pointer, удерживает ledger/cursors/
 ownership и сопровождение existing exposure, запускает reconciliation.
-Возврат к старому JSON engine не может забыть или повторно купить активы.
+Rollback возвращает только compatible policy/source нового приложения;
+миграция/переключение в текущую версию старого бота и её JSON engine запрещены.
 Schema/artifact upgrade имеет проверенный backward read/restore план; снимок
-перед миграцией сохраняется. Production environment остаётся запрещённой.
+перед миграцией сохраняется только в app-owned `.runtime`. Отключение новой
+службы не меняет config/processes старого бота. Production environment запрещена.
 
 ## Planned focused tests and verification scenarios
 
@@ -274,6 +298,11 @@ Schema/artifact upgrade имеет проверенный backward read/restore 
 | D3-18 | Actual arms equal budget/immutable ownership, partial fees: сумма к account, no posthoc split. |
 | D3-19 | Full lifecycle demo evidence + independent money recomputation: integration, не profit claim. |
 | D3-20 | Ledger backup/restore/migration rollback: незакрытые orders и tombstones восстановлены. |
+| D3-21 | Старый бот/collector работают одновременно: новые producers/OMS не attach и не меняют их state. |
+| D3-22 | Legacy env/db/model/backup path, symlink/junction escape: startup BLOCK, нет credential fallback. |
+| D3-23 | Recovery видит чужой PID/lock/token: не attach/kill/restart; только app-owned predecessor. |
+| D3-24 | Новое приложение restart/rollback: собственные orders сохранены, старые services/config неизменны. |
+| D3-25 | Совпавший UI port/Telegram token, превышенный resource cap: fail startup/stop expansion, без вытеснения старого бота. |
 
 ## Primary API references
 

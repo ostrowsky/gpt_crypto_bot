@@ -3,6 +3,8 @@
 Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
 Owner: repository maintainer. Contract: `daily_net_equity_pnl_v1`.
 Parent: [программа](binance-demo-autonomous-trading-program.md).
+Boundary: [отдельное приложение](binance-demo-application-isolation.md)
+`apps/binance_demo_bot`; свои package/env/config/ledger/процессы.
 Depends on: [финансовый контракт](binance-demo-phase0-financial-contract.md),
 [market data](binance-demo-phase2-universe-market-data.md),
 [OMS/risk](binance-demo-phase3-order-management-risk.md).
@@ -22,8 +24,11 @@ Depends on: [финансовый контракт](binance-demo-phase0-financia
 
 ## Scope
 
-Существующие правила извлекаются в чистый decision layer или adapter без
-скрытых JSON/Telegram/order side effects. Baseline manifest замораживает
+Правила baseline независимо реализуются в новом package; прежние алгоритмы
+могут быть read-only источником идей, не импортируемым decision adapter.
+Нет refactor, route или подключения `files/monitor.py`/старых workers.
+Новый чистый decision layer не имеет JSON/Telegram/order side effects.
+Baseline manifest замораживает
 entry/exit modes, thresholds, cooldown, replacement, holding limits, TP/SL,
 universe eligibility, price clocks, sizing, portfolio cap и source hashes.
 Прежняя политика не переносится как «точный baseline», если эти поля изменены:
@@ -31,7 +36,7 @@ universe eligibility, price clocks, sizing, portfolio cap и source hashes.
 
 Decision layer принимает immutable causal snapshot и подтверждённый ledger,
 возвращает `BUY | HOLD | SELL | WAIT | BLOCK` intent с reason codes.
-Main/agent — источники кандидатов одного scheduler; один risk/OMS решает
+Main/agent — только app-local новые plugins одного scheduler; собственный risk/OMS решает
 admission и резерв средств. Виртуальный log не подтверждает fill.
 Модель обучения, новый entry edge, order-flow delay и real trading здесь
 не внедряются. Каждая новая стратегия проходит [phase 6](binance-demo-phase6-profit-hypothesis-evaluation.md).
@@ -86,8 +91,8 @@ rejected/partial/dust. Отдельно early/coverage/precision с опреде
 
 ## Acceptance criteria
 
-- Все источники BUY/SELL идут через один account-aware OMS; никакая ветка
-  monitor/agent не может отдельно «купить» актив только в JSON.
+- Все новые app-local источники BUY/SELL идут через собственный account-aware
+  OMS; действующие monitor/agent не подключаются и их конфигурация не меняется.
 - Frozen snapshot повторно воспроизводит action/reason/quantity; prefix future
   mutation не меняет уже выпущенные intents.
 - Одновременные BUY не превышают free/reserved budget, cap или correlated
@@ -129,6 +134,7 @@ Tests указаны для реализации; сейчас не выполн
 `entry_enabled=false` останавливает admission, не protective SELL.
 Отключение policy adapter не удаляет actual exposure. Ledger/reconcile/OMS
 остаются до разрешения всех orders и остатков; model pointer возвращается
-к проверенному compatible champion без пересчёта исторических решений.
+к проверенному compatible champion **этого приложения** без пересчёта исторических решений.
 При несовместимом risk/episode/scope откат блокирует новые входы вместо
-включения legacy JSON execution. До реализации новые действия выключены.
+включения legacy JSON execution. Управление старым приложением как fallback
+запрещено. До реализации новые действия выключены.

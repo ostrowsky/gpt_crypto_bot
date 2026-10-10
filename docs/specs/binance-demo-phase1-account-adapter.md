@@ -3,6 +3,7 @@
 Registered: 2026-10-10, Europe/Budapest. Status: **PLANNED; specification only**.
 Priority: P1, after [phase 0](binance-demo-phase0-financial-contract.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
+Application boundary: [independent app isolation](binance-demo-application-isolation.md).
 Objective: `daily_net_equity_pnl_v1`; environment: `BINANCE_SPOT_DEMO`.
 This document does not enable account access, order sending or existing signals.
 
@@ -22,10 +23,13 @@ cannot establish positive PnL or turn integration readiness into trading approva
 ## Scope and planned components
 
 Implement `BinanceDemoAdapter`, `DemoClock`, capability registry and a private
-event reader. Reuse asynchronous request infrastructure only behind explicit
-demo configuration. Do not repoint `config.BINANCE_REST` or existing collectors.
-New implementation paths: `files/binance_demo_adapter.py` and
-`files/test_binance_demo_adapter.py`; source files are not created by this spec.
+event reader in the new app `apps/binance_demo_bot/`. Planned implementation:
+`src/binance_demo_bot/adapter.py` and `tests/test_adapter.py` relative to that
+app root, with its own `.venv`, dependencies/lock, configuration and lifecycle.
+Current source may be studied read-only as a reference; no runtime imports of
+`files/*`, shared current-app clients, configuration or globals are allowed.
+Do not repoint existing endpoints or start/stop old collectors or trading workers.
+This specification creates no executable app code.
 
 Allowed operations: public ping/time/metadata; signed account, order/list,
 fill, commission and account-filter reads; current private stream subscriptions.
@@ -50,12 +54,29 @@ These are the documented Spot Demo services, a separate environment from Spot
 Testnet. Demo balance reset is user-controlled; demo outcomes are virtual.
 [Binance Demo general information](https://github.com/binance/binance-spot-api-docs/blob/master/demo-mode/general-info.md).
 
-Load only `BINANCE_DEMO_API_KEY` and `BINANCE_DEMO_API_SECRET` from the configured
-local process environment or `files/.env`; preserve other settings. Missing,
+Load only `BINANCE_DEMO_API_KEY` and `BINANCE_DEMO_API_SECRET` from
+`apps/binance_demo_bot/.env` or an explicitly injected, app-owned process pair.
+No upward `.env` search, `files/.env` read, inherited legacy-global credential
+fallback or `PYTHONPATH` dependency is allowed. Missing,
 empty, whitespace-corrupted or key-type-incompatible values fail closed with a
 redacted reason. Never use legacy production variables as a fallback. The
 credential pair is loaded once per explicit credential generation; rotation
 invalidates prior capability evidence and starts reconciliation again.
+
+The earlier check and keys saved in the old app do not provision the new app.
+Migration is a separate user-opt-in action; this spec neither copies secrets
+nor imports old capability/runtime evidence. Use app-owned account aliases,
+credential generations, manifests, logs, cursors and locks under its `.runtime/`.
+Resolved writable paths must remain inside the new app, including symlink checks.
+No current `positions`, models, logs, runtime stores or process controls are read
+or modified. Dependency installation targets only the app's `.venv`.
+
+A different key does not create a different account. Register exclusive demo
+account/OMS ownership before execution; foreign/manual orders and fills cause
+reconciliation/attribution incidents, not silently adopted bot profit. Binance
+IP budgets and account-wide filters/order counts are not isolated by app/key.
+The new adapter uses its own bounded limiter and aggregate exchange evidence;
+it cannot reserve capacity by stopping or reconfiguring current workers.
 
 Validate parsed scheme, exact hostname, port and path before serialization and
 at dispatch; reject userinfo, unexpected ports, fragments, alternate hosts and
@@ -113,7 +134,7 @@ all symbols. Success proves the tested validation request only.
 
 ## Account snapshots, events and reconciliation interface
 
-Use the program `EventEnvelope`: `schema_version=1`, environment,
+Use the program `EventEnvelope`: `schema_version=1`, `application_id=binance_demo_bot`, environment,
 `account_episode_id`, `portfolio_scope_id`, `event_id`, `event_type`,
 `causation_id`, nullable `exchange_event_time_ms`, actual UTC `received_at_ms`,
 `received_monotonic_ns`, `process_instance_id`, `recorded_at_ms`; optional `decision_id`, `arm_id`,
@@ -125,7 +146,7 @@ Absent model/policy identity is null, never a fabricated fitted artifact.
 Balances preserve every asset's Decimal `free` and `locked`, including zero
 records where returned; use explicit response coverage, not a presumption that
 omitted assets are zero. Orders retain exchange/client/list IDs, symbol, status,
-quantities and transaction time. Fills retain `(episode, symbol, trade_id)`
+quantities and transaction time. Fills retain `(application_id, environment, account_episode_id, symbol, exchange_trade_id)`
 identity, price/base/quote quantity, order ID, commission/asset and event time.
 Unknown status/schema is quarantined; no conversion into virtual BUY/SELL fills.
 An all-zero response or unexpected balance jump is not automatically a reset;
@@ -193,6 +214,8 @@ Implement and run these scenario IDs before calling the phase complete:
 | ADP-07 | Paginated fills, duplicate/reordered events and reconnect fills; exact balances/IDs, no duplicate ledger debit |
 | ADP-08 | Omitted balances, unknown schema, stream gap/unrecoverable history; reconciliation never invents completeness |
 | ADP-09 | Restart with durable cursors, preexisting orders and reset ambiguity; no orders sent, no result silently reset |
+| ADP-10 | Old `.env`, globals/PYTHONPATH, models/tickets and runtime path supplied; rejected without reading old stores |
+| ADP-11 | Separate key/same account, foreign orders and shared rate exhaustion; ownership uncertain/entry blocked, no old-process stop |
 
 ## Risk / trade-offs and rollback switch
 

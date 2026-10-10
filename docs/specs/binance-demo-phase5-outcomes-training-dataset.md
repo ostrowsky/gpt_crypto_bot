@@ -3,6 +3,8 @@
 Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
 Owner: repository maintainer. Contract: `daily_net_equity_pnl_v1`.
 Parent: [программа](binance-demo-autonomous-trading-program.md).
+Boundary: [отдельное приложение](binance-demo-application-isolation.md),
+own `apps/binance_demo_bot/.runtime` и dataset namespace; без старого state.
 Depends on: [P0 money](binance-demo-phase0-financial-contract.md),
 [P2 data](binance-demo-phase2-universe-market-data.md),
 [P3 OMS](binance-demo-phase3-order-management-risk.md).
@@ -25,8 +27,10 @@ Report должен отличать наблюдение, гипотезу, int
 Append-only decision/outcome ledger, immutable dataset revisions, daily
 financial report и обучение readiness. Никакого нового ranking/order
 enablement, настройки thresholds или automatic promotion в этой фазе.
-Legacy dataset сохраняется как `legacy_virtual/unknown_provenance`;
-не импортируется в actual demo reward с выдуманными clocks/fills.
+Legacy dataset не читается новым runtime. Если отдельно разрешён offline import
+immutable exported archive, он остаётся `legacy_virtual/unknown_provenance`;
+не импортируется в actual demo reward с выдуманными clocks/fills. Свои raw,
+snapshots, models, reports, cursors и backups находятся в own `.runtime`.
 
 ## Data contracts
 

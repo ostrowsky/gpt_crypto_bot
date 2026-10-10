@@ -3,6 +3,8 @@
 Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
 Owner: repository maintainer. Contract: `daily_net_equity_pnl_v1`.
 Parent: [программа](binance-demo-autonomous-trading-program.md).
+Boundary: [отдельное приложение](binance-demo-application-isolation.md),
+свои package/dependencies/datasets/compute budget; без legacy runtime imports.
 Depends on: [финансовый контракт](binance-demo-phase0-financial-contract.md),
 [causal universe/data](binance-demo-phase2-universe-market-data.md),
 [baseline](binance-demo-phase4-baseline-policy.md),
@@ -32,11 +34,12 @@ config. Unrestricted RL, live exploration на ключе и автоматич�
 переписывание кода вне scope. Неподтверждённый candidate сохраняет статус
 research и не становится champion по расписанию обучения.
 
-Reuse `mission_learning`, calendar evaluator и durable experiment loop только
-через новые contract/capability adapters. `portfolio_alpha`/book simulator
-расширить для actual candidate population, arbitrary maximum range, partial
-exits, lifecycle/timing и continuous MTM. Старый `MAX_REPLAY_DAYS=30` не
-обосновывает отсутствие остальных доступных месяцев.
+Существующие `mission_learning`, calendar evaluator, experiment loop и
+`portfolio_alpha`/book simulator — только read-only design references.
+Самостоятельные реализации в новом package покрывают actual candidate
+population, arbitrary maximum range, partial exits, lifecycle/timing и
+continuous MTM. Старые модули не расширяются/импортируются и их state не
+читается. `MAX_REPLAY_DAYS=30` старой версии не ограничивает новый backtest.
 
 ## Experiment and model contracts
 

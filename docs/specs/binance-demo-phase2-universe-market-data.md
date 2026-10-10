@@ -3,6 +3,7 @@
 Registered: 2026-10-10, Europe/Budapest. Status: **PLANNED; specification only**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
+Application boundary: [independent app isolation](binance-demo-application-isolation.md).
 Objective: `daily_net_equity_pnl_v1`; environment: `BINANCE_SPOT_DEMO`.
 This document does not change the current watchlist, feed or trading policy.
 
@@ -17,11 +18,14 @@ coverage is a prerequisite, not evidence that more instruments increase profit.
 ## Scope and planned components
 
 Implement `UniverseService`, `MarketDataService`, `FeatureSnapshot` and
-`QuoteConversionGraph`. New planned paths: `files/binance_demo_universe.py`,
-`files/binance_demo_market_data.py`, their focused test files. Reuse appropriate
-collector/feature helpers after same-environment and receipt-clock verification.
-`files/ws/binance_stream.py` currently defaults to production public streams;
-do not assume its partial-depth messages are a reconstructable incremental book.
+`QuoteConversionGraph` in the independent `apps/binance_demo_bot/` application.
+Planned app-relative paths: `src/binance_demo_bot/universe.py`,
+`src/binance_demo_bot/market_data.py`, `tests/test_universe.py`,
+`tests/test_market_data.py`; own `.venv`, dependency lock and lifecycle.
+Old algorithms may be studied read-only and reimplemented with new-app tests;
+no `files/*` imports, current clients/config/global state or old runtime/data
+stores are used. Own snapshots/caches/cursors live only under app `.runtime/`.
+The old partial-depth client is not proof of a valid incremental L2 algorithm.
 
 Monitor every account-permitted Spot pair, including non-USDT quote assets;
 maintain separate assets/pairs, actual holdings, execution scope and shortlist.
@@ -148,7 +152,17 @@ bounded restart attempts below the documented IP limits. These conservative
 values are configuration, not a promise that full L2 for all pairs is cheap.
 [Market-stream limits](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md#websocket-limits).
 
-Raw samples and `FeatureSnapshot` use program `EventEnvelope` and add
+The limiter owns only new-app requests, not the existing bot's scheduling.
+IP/connection and account order/filter budgets may be shared despite separate
+keys/processes. Inspect aggregate exchange headers and conservatively account
+for external traffic; exhausted/uncertain headroom blocks entries or lowers data
+readiness. Never stop/reconfigure old workers, reuse their sockets/cache/locks,
+or promise guaranteed protection capacity from independent local rate counters.
+Own service/UI ports/tokens, reconnection state and source manifests remain
+distinct; a port/path/namespace collision fails without taking over another app.
+
+Raw samples and `FeatureSnapshot` use program `EventEnvelope` with
+`application_id=binance_demo_bot` and add
 `snapshot_id`, `objective_contract_id`, `process_instance_id`, source/method, symbol, interval, exchange event
 time, actual receipt/monotonic time, closed-bar flag, schema version, raw hash,
 metadata/universe/route IDs, feature definition SHA and validity reasons.
@@ -232,6 +246,8 @@ coverage audit and a new forward cohort before promotion (phases 4/6/7).
 | DATA-04 | Changed-only ticker omissions, many symbols, 429/ban/reconnect; explicit freshness and protected priority budget |
 | DATA-05 | Future-chosen shortlist or conversion route; rejected leakage, paired as-of population preserved |
 | DATA-06 | Midnight mark arrives late versus current-price repair; financial repair cannot alter prior decisions |
+| DATA-07 | Old cache/import/PYTHONPATH, path traversal/symlink escape or worker namespace; isolated startup rejects, current files untouched |
+| DATA-08 | Shared IP quota/external account orders and port collision; own readiness degrades, no foreign-process control |
 
 ## Risk / trade-offs and rollback switch
 

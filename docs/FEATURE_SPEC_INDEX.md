@@ -6,8 +6,10 @@ Last updated: 2026-10-10 Europe/Budapest
 
 The planned Binance Spot Demo program uses `daily_net_equity_pnl_v1`:
 daily net account equity PnL in USDT after trading fees, under fixed risk and
-capital constraints. Its specifications are registered before implementation;
-they do not activate account execution or change the existing runtime policy.
+capital constraints. It is an independent application in `apps/binance_demo_bot`,
+with its own package, environment, state and lifecycle. Its specifications are
+registered before implementation; existing application code/config/workers
+are not modified or used as runtime dependencies.
 See [the program and priority gates](specs/binance-demo-autonomous-trading-program.md).
 
 Existing signal, WATCH and research capabilities retain their versioned scope:
@@ -19,11 +21,12 @@ metrics, rejected results and approvals are not renamed as new demo profit evide
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
-| Binance Demo autonomous daily-PnL program | PLANNED; specs only; no runtime enablement | `docs/specs/binance-demo-autonomous-trading-program.md` | daily net equity PnL, fixed-budget return, risk and evidence integrity | implement P0 then P1/P2; technical milestone before any automatic trading |
-| Binance Demo P0 financial contract | PLANNED; implementation pending | `docs/specs/binance-demo-phase0-financial-contract.md` | full account equity/PnL, fees/flows, reconciliation, complete calendar days | implement Decimal/event ledger and FIN-01..11; no trading-policy approval |
-| Binance Demo P1 account adapter | PLANNED; implementation pending | `docs/specs/binance-demo-phase1-account-adapter.md` | signed-read and private-event evidence, account/key capabilities, freshness | implement read-only adapter and ADP-01..09; ORDER_SEND remains disabled |
+| Binance Demo application isolation | PLANNED; separate app, current version untouched | `docs/specs/binance-demo-application-isolation.md` | forbidden legacy access/control count, own environment/state, resource and ownership boundaries | independent apps/binance_demo_bot skeleton; ISO-01..10 before execution |
+| Binance Demo autonomous daily-PnL program | PLANNED; specs only; no runtime enablement | `docs/specs/binance-demo-autonomous-trading-program.md` | daily net equity PnL, fixed-budget return, risk and evidence integrity | independent app skeleton and P0 then P1/P2; technical milestone before any automatic trading |
+| Binance Demo P0 financial contract | PLANNED; implementation pending | `docs/specs/binance-demo-phase0-financial-contract.md` | full account equity/PnL, fees/flows, reconciliation, complete calendar days | implement Decimal/event ledger and FIN-01..12; no trading-policy approval |
+| Binance Demo P1 account adapter | PLANNED; implementation pending | `docs/specs/binance-demo-phase1-account-adapter.md` | signed-read and private-event evidence, account/key capabilities, freshness | implement read-only adapter and ADP-01..11; ORDER_SEND remains disabled |
 | Binance Demo P2 universe and market data | PLANNED; implementation pending | `docs/specs/binance-demo-phase2-universe-market-data.md` | all-permitted coverage, receipt clocks, conversion/valuation completeness | implement complete as-of discovery/data and UNI/DATA scenarios; separate pilot execution scope |
-| Binance Demo P3 OMS and risk | PLANNED; implementation pending | `docs/specs/binance-demo-phase3-order-management-risk.md` | actual fills/reconcile, protected open exposure, duplicate/unknown sends and bounded recovery | implement durable single OMS and D3-01..20; controlled demo cycle before automatic entries |
+| Binance Demo P3 OMS and risk | PLANNED; implementation pending | `docs/specs/binance-demo-phase3-order-management-risk.md` | actual fills/reconcile, protected open exposure, duplicate/unknown sends and bounded recovery | implement durable single OMS and D3-01..25; controlled demo cycle before automatic entries |
 | Binance Demo P4 baseline policy | PLANNED; implementation pending | `docs/specs/binance-demo-phase4-baseline-policy.md` | daily net PnL/return, DD/day loss/exposure, policy/intent parity | P0–P3 ready; maximum-history replay and new forward before bounded automatic demo |
 | Binance Demo P5 outcomes and training dataset | PLANNED; implementation pending | `docs/specs/binance-demo-phase5-outcomes-training-dataset.md` | decision/fill/mature-label coverage, reconciled daily result and dataset provenance | capture ledger before first trade; verified exports/revisions before training |
 | Binance Demo P6 profit hypothesis evaluation | PLANNED; implementation pending | `docs/specs/binance-demo-phase6-profit-hypothesis-evaluation.md` | absolute daily earning and paired financial uplift, CI/SESOI/power, risk | mature dataset; independent maximum-history and new frozen forward; no direct deployment |

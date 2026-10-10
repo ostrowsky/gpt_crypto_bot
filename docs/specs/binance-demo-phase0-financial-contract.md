@@ -6,6 +6,7 @@ P0, до подключения торговли. **Исполняемая ре�
 
 Программа: [автономная демо-торговля](binance-demo-autonomous-trading-program.md). Источник приоритетов:
 [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md).
+Обязательная граница: [изоляция нового приложения](binance-demo-application-isolation.md).
 
 ## Problem
 
@@ -24,20 +25,25 @@ Binance Demo виртуальный; он не является реальной
 Существующие [mission-aligned-learning-cycle](mission-aligned-learning-cycle.md) и
 `SCOUT_OPTIMIZATION_SPEC.md` описывают прежний контур. Их early capture, coverage и precision сохраняются
 как исторические/диагностические показатели; прошлые результаты не становятся доказательством прибыли по
-новому контракту. Новый runtime выбирает `objective_contract_id` явно; миграция выполняется вместе с кодом,
-тестами и конфигурацией, без переименования старых отчётов.
+новому контракту. Финансовый runtime создаётся как независимое приложение `apps/binance_demo_bot`,
+с явно выбранным `objective_contract_id`; это не миграция действующего бота или его позиций.
 
 ## Scope
 
-Первый runtime: один выделенный Spot Demo аккаунт, без плеча/шортов, один учитываемый портфель. Мониторинг
-всех доступных активов не означает торговлю всеми. По всему аккаунту учитываются **все** ненулевые активы,
-включая dust, fee assets и активы вне выбранного торгового universe.
+Первый runtime: эксклюзивный Spot Demo аккаунт нового приложения, без плеча/шортов, один учитываемый
+портфель. Другой API key того же аккаунта не создаёт изоляцию. Эксклюзивность account identity закреплена
+в собственном account manifest; неподтверждённое ownership блокирует торговое enablement. Мониторинг всех
+активов не означает торговлю всеми. По аккаунту оцениваются **все** ненулевые free+locked assets, включая
+dust, fee assets и неторгуемые seed assets. Seed inventory — opening valuation, не автоматическая торговая
+позиция и не разрешение продать старые активы/сопровождать чужие orders.
 
 Планируемые компоненты: `FinancialLedger`, `AccountReconciler`, `ValuationService`,
 `DailyPerformanceService`; transactional SQLite WAL с одним владельцем записи, атомарным commit
 события/проекции/outbox и immutable журналом. Binance balance/fills — источник подтверждения, ledger —
-воспроизводимая локальная проекция. Legacy JSON positions и виртуальные fills не импортируются как
-подтверждённые исполнения. Новая схема событий общая для последующих фаз.
+воспроизводимая локальная проекция только нового приложения. Собственные package, `.venv`, `.env` и
+`.runtime` расположены под `apps/binance_demo_bot`; SQLite ledger, cursors, reports и outbox принадлежат
+только этому namespace. Нет чтения/импорта старых `files/*`, позиций, моделей, runtime, `.env`, sharing loop
+или импорта их fills. Ключи не копируются автоматически. Схема событий общая только для фаз нового приложения.
 
 ### Идентичность и типизированные события
 
@@ -45,6 +51,7 @@ Binance Demo виртуальный; он не является реальной
 
 ```text
 schema_version: integer = 1
+application_id: binance_demo_bot
 environment: BINANCE_SPOT_DEMO
 objective_contract_id: daily_net_equity_pnl_v1
 account_episode_id, portfolio_scope_id, event_id, event_type: string
@@ -77,7 +84,7 @@ amounts/quantity/prices передаются decimal strings с asset/unit; bina
 | `DailyPerformanceFinalized` | day boundaries, revision/source hash, snapshot/episode/scope IDs, financial metrics, completeness, reasons, policy versions. |
 | `AccountEpisodeClosed` | reset/closure reason, final certified snapshot or explicit gap, new episode linkage; reset difference не классифицируется как прибыль. |
 
-Unique fill key: `(environment, account_episode_id, symbol, exchange_trade_id)`. REST backfill и WebSocket
+Unique fill key: `(application_id, environment, account_episode_id, symbol, exchange_trade_id)`. REST backfill и WebSocket
 delivery с тем же ключом не создают второе исполнение. Изменённый payload по уже принятому ключу — конфликт
 для reconciliation. Комиссия из fill порождает один `AssetFeeRecorded` по уникальному fill/commission key;
 две deliveries не создают два fee debits. ACK, intent, trigger, cancel и order reservation не являются
@@ -92,15 +99,20 @@ fill/fee/PnL. Reservation переносит free в locked без измене�
 ключей одного аккаунта не создают разные счета. Первые arm сравнения отключены. Позднее isolated OMS
 subportfolios требуют непересекающихся lots/reservations/orders, зарегистрированных allocation flows и
 тождества суммы arms всему account; межполитическое неттирование запрещено. PnL arms не складывается с
-account PnL повторно. Ручные сделки включаются в account result, но нарушают атрибуцию политики и блокируют
-financial promotion.
+account PnL повторно. Неизвестные/manual/other-app orders и fills отражаются в сверке всего аккаунта, но
+остаются `ownership=UNATTRIBUTED`: не получают app order/position ownership и не отменяются/продаются
+автоматически. Их появление нарушает эксклюзивность, блокирует entries/promotion до разрешения incident;
+app-owned exchange protection сохраняется. Нельзя объявить внешнюю сделку своим финансовым улучшением.
 
 ### Inventory и комиссии
 
 Активы учитываются один раз как `free + locked`; позиции/ордера не добавляют их стоимость повторно. FIFO
 lots имеют lot/source-fill/scope IDs, remaining quantity, USDT carrying cost и acquisition UTC. Метод FIFO
 фиксируется на эпизод и не выбирается после результата. Initial lots получают basis opening mark: прибыль до
-начала эпизода не приписывается боту.
+начала эпизода не приписывается боту. Lot ownership различает `SEED`, `APPLICATION`, `UNATTRIBUTED`;
+opening SEED не проходит автоматически в application-managed exit inventory.
+FIFO cost attribution — бухгалтерская проекция, не источник разрешения OMS на продажу; execution ownership
+и доступный остаток application fills проверяются отдельно даже для того же fungible base asset.
 
 Gross fill сначала создаёт asset movements; продажа списывает FIFO lots, partial fill меняет только
 исполненное количество. Для non-USDT quote сохраняются её USDT conversion и FIFO disposal attribution;
@@ -204,6 +216,7 @@ PASS. Primary/actual/demo/shadow/simulation labels не смешиваются.
 | FIN-09 | Gross receipts, fee/slippage attribution, external AI cost: sales не reward; costs не вычтены дважды. |
 | FIN-10 | Arm lot/reservation sum к account, negative stock, balance residual: ownership инварианты либо ERROR. |
 | FIN-11 | Missing downtime day → recovered losing day: gap видим, убыток возвращён, old favorable verdict пересмотрен. |
+| FIN-12 | Старые files/runtime/models/.env недоступны, новый package/venv/SQLite/loop независимы; same-account/different-key не изоляция, SEED/unknown orders не становятся app positions. |
 
 Это **planned test scenarios**, не выполненные тесты реализации. Фаза завершена только после реализации,
 focused tests и независимого recompute одинакового input log; численный net PnL должен сверяться с account
@@ -229,11 +242,13 @@ TH-01–TH-12 применяются по [truth-harness](truth-harness.md). Spe
 
 ## Rollback
 
-Контракт, scope и risk IDs закреплены в manifest; reader отвергает неизвестную версию. При нарушении сверки
-новые entries блокируются будущим RiskManager, existing exchange protection сохраняется. Возврат
+Контракт, app-local source artifacts/scope и risk IDs закреплены в собственном manifest; reader отвергает
+неизвестную версию или чужой application namespace. При нарушении сверки новые entries блокируются будущим
+RiskManager, app-owned exchange protection сохраняется; чужие orders не меняются. Возврат
 software/policy версии не откатывает fills и баланс: journal остаётся, проекции пересчитываются, отчёт
 переходит в PENDING/ERROR до восстановления. Смена accounting rule создаёт новый contract version и
-параллельный пересчёт; выбирать выгодную версию запрещено.
+параллельный пересчёт; выбирать выгодную версию запрещено. Rollback действует только в новом приложении;
+старый бот, его процессы, ledger, конфигурация и позиции не затрагиваются.
 
 ## Dependencies and handoff
 

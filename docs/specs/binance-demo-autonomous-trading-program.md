@@ -5,6 +5,9 @@ Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
 TH-01..TH-12 из [Truth Harness](truth-harness.md) обязательны.
+Binding user constraint: [самостоятельное приложение](binance-demo-application-isolation.md)
+в `apps/binance_demo_bot`, со своим package/env/state/processes. Текущий бот
+не расширяется и не используется как runtime dependency.
 
 ## Problem
 
@@ -30,8 +33,9 @@ precision и удержание тренда объясняют результа
 
 ## Scope
 
-Spot Demo, long-only, собственные средства, одна каноническая книга счёта и
-один OMS. Публичные и приватные источники имеют явную среду. Все доступные
+Самостоятельный Spot Demo app, long-only, собственные средства, одна каноническая
+книга выделенного счёта и один свой OMS. Main/agent здесь — только новые app-local
+policy plugins, не текущие процессы. Публичные и приватные источники имеют явную среду. Все доступные
 аккаунту активы наблюдаются; покупка ограничивается проверенной торговой
 популяцией, бюджетом и качеством данных. Реальные средства, margin, futures,
 withdraw/transfer, автоматическое повышение риска и произвольное изменение
@@ -46,7 +50,8 @@ withdraw/transfer, автоматическое повышение риска и
 
 | Приоритет | Каноническая спецификация | Зависимость перед enablement | Результат реализации |
 |---|---|---|---|
-| P0 / фаза 0 | [Финансовый контракт](binance-demo-phase0-financial-contract.md) | Нет | Тестируемая бухгалтерия, risk contract и формат evidence |
+| Boundary / prerequisite | [Изоляция приложения](binance-demo-application-isolation.md) | Нет | Own package/env/runtime; без изменений текущего приложения |
+| P0 / фаза 0 | [Финансовый контракт](binance-demo-phase0-financial-contract.md) | Boundary | Тестируемая бухгалтерия, risk contract и формат evidence |
 | P1 / фаза 1 | [Account adapter](binance-demo-phase1-account-adapter.md) | P0 идентификаторы/границы | Demo read/auth/capability, без execution enablement |
 | P2 / фаза 2 | [Universe и market data](binance-demo-phase2-universe-market-data.md) | P1 права/снимок аккаунта | Полная мониторинговая популяция и causal snapshots |
 | P3 / фаза 3 | [OMS и риск](binance-demo-phase3-order-management-risk.md) | P0–P2 и технические тесты | Контролируемый защищённый BUY/SELL и reconcile |
@@ -71,7 +76,7 @@ protection → actual SELL → reconcile → объективный PnL одно
 
 Канонический `EventEnvelopeV1`:
 
-- `schema_version=1`, `environment=BINANCE_SPOT_DEMO`,
+- `schema_version=1`, `application_id=binance_demo_bot`, `environment=BINANCE_SPOT_DEMO`,
   `objective_contract_id=daily_net_equity_pnl_v1`;
 - `event_id`, `event_type`, `causation_id`, `account_episode_id`,
   `portfolio_scope_id`; `arm_id` при разделении политик;
@@ -121,8 +126,10 @@ inventory; USDT/no-trade только для сверенного USDT-only бю
 частоту глубокого анализа. Финансовые интервалы могут оставаться недостаточно
 точными. Увеличение числа сделок ради выборки запрещено. Демо-fill evidence
 не доказывает возможность получить те же fills или доходность на real exchange.
-Не строить дублирующий control plane: reuse существующих модулей разрешён
-только с новым проверенным contract adapter, не переносом старого approval.
+Control plane реализуется внутри нового package с собственным lifecycle.
+Старые решения — read-only design references; runtime imports существующих
+модулей/состояния и перенос старого approval запрещены. Source hashes,
+dependencies, fixtures и frozen contracts принадлежат только новому app.
 
 ## Backtest / verification gate
 

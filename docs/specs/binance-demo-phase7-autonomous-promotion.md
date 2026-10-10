@@ -3,6 +3,8 @@
 Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
 Owner: repository maintainer. Contract: `daily_net_equity_pnl_v1`.
 Parent: [программа](binance-demo-autonomous-trading-program.md).
+Boundary: [отдельное приложение](binance-demo-application-isolation.md):
+own policies/model pointer/keys/ledger/services в `apps/binance_demo_bot`.
 Depends on: [P0](binance-demo-phase0-financial-contract.md),
 [P3 OMS](binance-demo-phase3-order-management-risk.md),
 [P4 baseline](binance-demo-phase4-baseline-policy.md),
@@ -27,7 +29,9 @@ PnL на том же бюджете и риске; наблюдать резул
 ## Scope and allowed changes
 
 `DemoReleaseController` — единственный владелец compatible active policy
-pointer; OMS владеет ордерами, RiskManager — неизменными hard constraints.
+pointer **нового приложения**; его OMS владеет только своими ордерами,
+его RiskManager — собственными неизменными hard constraints. Старые learning
+workers, release controller, config, policy pointers и services не вызываются.
 Trainer/LLM/evaluator не пишут active pointer и не используют ключи.
 Новая capability `BINANCE_SPOT_DEMO_DAILY_PNL_V1` не принимает legacy WATCH
 или score-overlay ticket, даже если подпись его файла валидна.
@@ -96,7 +100,8 @@ Accepted/possibly-sent entry requests переходят в reconciliation/query
 а не удаляются. Protective SELL/recovery сохраняют отдельную authority.
 Для реально принятой
 заявки controller ждёт reconciliation и знает её остаток. RiskManager/OMS/
-account observations и защитные ордера остаются. Если prior model/source/scope
+account observations и защитные ордера остаются. Prior version всегда
+принадлежит только новому приложению. Если prior model/source/scope
 несовместим, freeze new entries безопаснее незаверенного fallback.
 
 ## Monitoring and automatic response
