@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-10. Status: **P0-A/B offline core + durable journal / 110 GREEN; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A REST foundation / 166 GREEN; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -72,13 +72,17 @@ P0-A/B: [110 tests GREEN](../../apps/binance_demo_bot/tests/README.md) в соб
 среде после recorded RED. Financial assertions выполнены; monetary/valuation
 core и начальные isolation/startup guards реализованы. P0-B WAL journal,
 atomic outbox/replay/restart и immutable report revisions реализованы.
-Actual account anchors/cursors/reconcile и P1–P7 остаются planned. Следующий
-приоритет — P1 adapter contracts/tests до реализации; order sending disabled.
+P1-A REST: 56 focused tests после RED; безопасные account/orders/fill reads,
+clock/signing/rate guards и реальный public Demo ping/time реализованы.
+Authenticated read smoke, private events и actual anchors/cursors/reconcile
+остаются pending. Следующий приоритет — P1-B через specs/tests/code; order
+sending disabled. Фазы 2–7 planned; готовность заработать не доказана.
 
 ## Shared interfaces and ownership
 
-Планируемые интерфейсы, а не существующие реализованные классы:
-`BinanceDemoAdapter`, `UniverseService`, `MarketDataService`, `DecisionIntent`,
+`BinanceDemoAdapter` реализован как P1-A read-only REST foundation.
+Остальные интерфейсы пока планируемые:
+`UniverseService`, `MarketDataService`, `DecisionIntent`,
 `RiskManager`, `OrderManager`, `AccountReconciler`, `DailyPerformanceService`,
 `ProfitEvaluator`, `DemoReleaseController`.
 

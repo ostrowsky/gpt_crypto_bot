@@ -1,12 +1,16 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-10. Статус: **P0-A/B offline core и durable journal реализованы; остальной план не внедрён**.
+Дата: 2026-10-11. Статус: **P0-A/B и P1-A REST foundation реализованы; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
 atomic outbox/restart/replay/report revisions, 110 GREEN после RED.
+P1-A: read-only REST adapter, подпись, clock/TLS/rate guards, account/orders/fills;
+56 focused GREEN после RED, всего 166 app tests GREEN. Публичный Demo ping/time
+проверен; authenticated read smoke и private events/reconcile остаются впереди.
 Фаза 0 ещё требует фактические account anchors/cursors/reconcile integration;
-фазы 1–7 PLANNED. Наличие спецификации не означает включения функции.
+P1 завершён частично; P1-B и фазы 2–7 PLANNED. Следующий приоритет — private
+events, durable cursors и фактическая сверка; ORDER_SEND disabled.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот
 не дорабатывается и не подключается к новому контуру.
@@ -82,9 +86,11 @@ equity/free/locked, комиссии, поступления продаж, об�
 | `files/mission_learning.py`, `files/mission_calendar_evaluation.py` | Обучение с созревшими метками и календарная оценка; новый reward и целевая популяция. |
 | `files/phase1_experiment_loop.py`, `files/safe_signal_release.py`, `files/validated_ranker_rollout.py` | Источники принципов проверки; новый app реализует свой evaluator/release/rollback, без импорта старого control plane или его approvals. |
 
-Полноценного подписанного Spot account/order adapter в проверенных исходниках
-нет. Первое узкое место — достоверное исполнение и бухгалтерия, затем проверка
-торговой политики. Текущее обучение не объявляется финансовым улучшением.
+В прежнем приложении полноценного подписанного Spot account/order adapter нет.
+В отдельном приложении реализован P1-A read-only REST foundation; private stream,
+reconcile и исполнение пока отсутствуют. Узкое место — достоверное исполнение
+и бухгалтерия, затем проверка торговой политики. Текущее обучение не объявляется
+финансовым улучшением.
 Все перечисленные прежние модули остаются нетронутыми. Новые реализации
 находятся в отдельном package; его runtime не импортирует `files/`, не читает
 старые state/models/logs/`.env` и не управляет существующими workers.

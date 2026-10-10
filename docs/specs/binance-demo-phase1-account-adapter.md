@@ -1,11 +1,13 @@
 # Binance Demo phase 1: account adapter and capability evidence
 
-Registered: 2026-10-10, Europe/Budapest. Status: **PLANNED; specification only**.
+Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
+Status: **P1-A REST foundation / 56 focused tests GREEN; full P1 incomplete**.
 Priority: P1, after [phase 0](binance-demo-phase0-financial-contract.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
 Objective: `daily_net_equity_pnl_v1`; environment: `BINANCE_SPOT_DEMO`.
-This document does not enable account access, order sending or existing signals.
+Explicit library calls can read Demo; the offline entrypoint starts no account
+client. Order sending and existing signal integration remain disabled.
 
 ## Problem
 
@@ -29,7 +31,8 @@ app root, with its own `.venv`, dependencies/lock, configuration and lifecycle.
 Current source may be studied read-only as a reference; no runtime imports of
 `files/*`, shared current-app clients, configuration or globals are allowed.
 Do not repoint existing endpoints or start/stop old collectors or trading workers.
-This specification creates no executable app code.
+P1-A implements only the REST subset documented below; the remaining scope is
+planned. No running authenticated service or private-event reader exists yet.
 
 Allowed operations: public ping/time/metadata; signed account, order/list,
 fill, commission and account-filter reads; current private stream subscriptions.
@@ -227,3 +230,160 @@ stale. In later execution phases this switch also closes entry readiness, but
 never cancels exchange protection or deletes positions. Resume only after fresh
 reconciliation. TH-01..TH-12 and the complete engineering cycle apply when code
 is implemented; planned scenarios are not tests already run.
+
+## P1-A: first read-only implementation contract (2026-10-11)
+
+Implement the REST foundation first. This milestone covers ping/server time,
+account balances/permissions, open orders, individual order lookup and per-symbol
+fill recovery. Private WS, order lists, commission/filter probes, durable cursor
+checkpoints, journal ingestion, complete reconnect reconciliation and optional
+order validation remain P1-B/P2 work. No phase-complete or account-reconciled
+claim follows from P1-A. Its switch is an explicit constructor `enabled=False`;
+disabled adapters perform no transport calls. No environment auto-discovery.
+
+Verified sources on 2026-10-11:
+[Demo endpoints](https://developers.binance.com/en/docs/products/spot/demo-mode/general-info),
+[REST signing and limits](https://developers.binance.com/en/docs/products/spot/rest-api),
+[account/order/fill endpoints](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/account).
+`myTrades` permits `symbol+fromId`, not `fromId+endTime`; the maximum page is
+1000. A terminal page certifies only exhaustion of the queried symbol/cursor
+at that observation. It cannot certify all history, all symbols, socket health,
+financial ownership or balances. Demo is distinct from Testnet.
+
+Public APIs in own `adapter.py`:
+
+* `AdapterError(reason)` exposes only a stable reason code, never raw URLs,
+  queries, headers, response bodies, UID or underlying exception messages.
+* `sign_rest(parameters, secret)` returns the exact sorted percent-encoded
+  query plus HMAC-SHA256 signature. Values: strings, finite Decimal, integer,
+  boolean; no floats/null/containers, duplicate names or reserved `signature`.
+  UTF-8 percent encoding and Decimal fixed-point are explicit. Time inputs are
+  already integers in the declared unit; `time_ms(value, unit='ms'|'us')`
+  converts explicitly, rejects fractional millisecond truncation and booleans.
+* `DemoClock(wall_ms=..., monotonic_ns=...)`, `observe(server_time_ms,
+  started_wall_ms, ended_wall_ms, started_monotonic_ns, ended_monotonic_ns)`,
+  `timestamp_ms()`: midpoint offset, half-RTT uncertainty, <=60s age, <=1s RTT,
+  <=250ms uncertainty/jump. Negative/nonmonotonic clocks fail closed. No sample
+  means `CLOCK_UNSYNCED`; rejection invalidates the old sample.
+* `HttpResponse(status, body, headers={})`, `DemoHttpTransport(base_url=...)
+  and `request(method, path, query, headers, timeout_s)` use HTTPS only, exact
+  Demo hostname/443, no redirects or inherited proxy, TLS verification, fixed
+  `/api/v3/` read-path allowlist, GET only. Invalid path/host/method is rejected
+  before sending keys. Private request/response fields have redacted repr.
+  Connect <=5s, remaining operation budget <=15s; response cap 8MiB. Network
+  exception content is not propagated. Dispatch guards apply even when called
+  directly; a caller cannot bypass them with mutation endpoints.
+  REST base accepts exactly the canonical URL or its explicit `:443` form;
+  empty userinfo/port, control characters and empty query/fragment markers are
+  rejected too. Non-string dispatch paths fail before opening a socket.
+  One owned HTTPS connection is reused after a fully consumed response; request
+  headers never carry over. `close()` is idempotent and releases it. Transport errors,
+  redirects, size/deadline failures discard the connection; the next read may
+  open a new verified connection. No cross-host pool or redirect is introduced.
+* `BinanceDemoAdapter(credentials, *, account_alias, credential_generation,
+  episode_id, scope_id, identity_key, transport=None, clock=None,
+  enabled=True, sleep=...)`: all identity strings are nonempty opaque local
+  IDs; `identity_key` is explicit app-owned bytes >=32 bytes, hidden in repr.
+  HMAC of the exchange UID with this stable local key allows same-account
+  recognition across API-key generations without persisting raw UID. A missing
+  UID remains identity-unverified. No ownership is granted by this token.
+* `sync_clock()`, `ping()`, `read_account()`, `read_open_orders(symbol=None)`,
+  `read_order(symbol, order_id)`, `recover_fills(symbol, *, from_id,
+  page_size=1000, max_pages=100)`; no arbitrary private-request API.
+  Credentials are validated at construction (nonempty ASCII without whitespace,
+  no PEM/RSA/Ed25519 material); the caller uses the existing app-only loader.
+  `capabilities()` returns fresh scoped evidence and always disables ORDER_SEND,
+  KEY_TRADE_VALIDATED and PRIVATE_EVENTS. Account `canTrade` is distinct from
+  key authority. A stale/failed authenticated read invalidates prior readiness.
+
+Normalized result dictionaries contain only whitelisted data, actual receipt
+and request clocks, monotonic receipt, endpoint, SHA256 of sanitized canonical
+data, application/environment/objective/episode/scope/account/generation,
+clock uncertainty, `exchange_reconciled=False`, and ACCOUNT_UNRECONCILED.
+Account response `updateTime` is preserved as a mutation timestamp; freshness
+uses receipt clocks, never a claim that updateTime equals snapshot time.
+`omitZeroBalances=false`; preserve returned zero rows, `free` and `locked` as
+Decimal. Omitted assets remain outside returned coverage, not invented zeroes.
+Absent canTrade/permissions remain null; malformed booleans/money, duplicate
+assets, unknown account type/order enum or future exchange time fail closed.
+UID, API secrets and arbitrary response fields never enter normalized data/hash.
+Orders preserve exchange/client/list IDs, side/type/status, price, original,
+executed and cumulative quote quantities, time/updateTime. Fills preserve symbol,
+trade/order/list IDs, price/qty/quoteQty, commission/asset, buyer/maker and time;
+ownership stays UNATTRIBUTED and never becomes a virtual APPLICATION fill.
+Monetary response strings use ASCII digits with an optional fractional part;
+whitespace, underscores and exponent notation are schema errors. Every signed
+read failure, including order/fill parsing, invalidates previous read capability.
+A clock jump also closes capability readiness. A failed explicit clock sync
+invalidates the prior sample, even if failure occurs before `observe`.
+`sync_clock` may take at most three quality samples on the same transport within
+one 15s budget, discarding high-RTT samples. TLS setup can make the first sample
+too slow; a warm connection must meet the same original limits. Do not relax
+RTT/uncertainty limits, use a failed sample or synthesize a successful clock.
+
+Retries: maximum three attempts per logical GET within total 15s, fresh signature
+each attempt, .25/.5s transient backoff. A -1021 timestamp error triggers at most
+one server-time resync within that budget. Auth/signature errors block the adapter
+until a new credential-generation instance; 418 blocks until explicit recovery.
+429 closes reads until Retry-After expires (monotonic clock); missing/malformed
+Retry-After blocks for 60s. No immediate rate-limit retry. Observe shared-IP used
+weight; a local conservative rolling-minute budget of 1200 weight reserves before
+each attempt, with no claim of exclusive IP capacity. Unknown headers/schema
+cannot certify global rate availability. Persisted limiter/restart and concurrent
+worker budgets remain future services; P1-A is single-threaded.
+The rolling budget retains each reservation for a full 60s; it must not reset all
+requests at an arbitrary minute boundary. A shared-IP weight observation is a
+conservative floor for 60s after receipt. Expiration of a rate-limit block does
+not restore invalidated authentication evidence. Unknown dependency exception
+reasons and malformed response headers are redacted stable failures. A response
+after the 15s logical deadline cannot establish success. Evidence hashes remain
+independent of ambient Decimal precision.
+
+Fill recovery requires an explicit starting ID, retains immutable observations,
+sorts by trade ID, deduplicates identical economic identity, rejects conflicts,
+foreign symbols and nonprogressing pages. More than max_pages yields an explicit
+partial result with resume ID; no implicit durable checkpoint or missing-history
+success. A failed page raises with no complete result. No inference from held
+assets/open orders to the all-symbol fill population.
+
+Focused offline tests, before implementation:
+
+| ID | Observable P1-A contract |
+|---|---|
+| REST-01 | Independent exact signature vector, Unicode/Decimal/booleans, explicit ms/us, malformed/reserved params. |
+| REST-02 | Production/Testnet/userinfo/port/path/method/redirect and response-size guards; TLS verified, no proxy fallback. |
+| REST-03 | Clock midpoint/age/RTT/uncertainty/jumps, initial sync, stale sync, one timestamp retry. |
+| REST-04 | Balance precision/zeros/omissions and actual receipt, permissions missing/false/true, generation and UID sanitization. |
+| REST-05 | Read-only orders with complete identity, UNATTRIBUTED fills/fees; unknown enums/schema/money rejected. |
+| REST-06 | Pagination/tail/overlap duplicates/conflicts/nonprogress/partial resume; no global reconciliation or checkpoint. |
+| REST-07 | 429/418/auth/timeout/5xx, total attempts/deadline, used-weight/local budget, disabled adapter, stale capability. |
+| REST-08 | Synthetic key/secret/UID/error/query never in repr, diagnostics or normalized evidence; old credentials never read. |
+
+Injected scripted transports test request bytes and failure handling; they are
+unit evidence, not authenticated Demo observations. Standard HTTPS transport
+requires focused dispatch/TLS/redirection tests and an authorized public Demo
+ping/time smoke where networking permits. Real private smoke remains pending
+until a dedicated pair is provisioned explicitly in this application's own .env.
+
+### Recorded verification (2026-10-11)
+
+SPEC -> 41 missing-adapter RED errors -> implementation -> 41 GREEN. Subsequent
+boundary tests reproduced 10 failures before fixes (money grammar, invalidated
+read evidence, clock/sample failure, rolling/shared rate budgets, dependency
+redaction and Decimal precision); 52 GREEN. Persistent-connection/clock-quality
+contract tests then produced 2 failures + 2 missing-interface/behavior errors
+before implementation; final **56 adapter tests GREEN**, no skip/xfail.
+Final URL review strengthened two existing tests: 5 failures/1 type error RED
+for empty userinfo/port/query/fragment, stripped control characters and non-string
+paths, then the exact canonical URL and dispatch type guards were implemented.
+Protocol response-size fixture was corrected to implement the actual `read1`
+interface; the size assertion was retained. All fixtures use synthetic data.
+
+Real public Demo HTTPS smoke: ping HTTP 200; three time HTTP 200 responses on
+one warmed connection, RTT 295.631/289.361/293.302ms, every clock sample SYNCED
+under unchanged limits. Earlier fresh-connection RTT 1211–1857ms correctly failed
+CLOCK_QUALITY. These are dated connectivity/clock observations, not an SLA.
+Private requests: 0; matching-engine orders: 0. Unit tests are not authenticated
+account permission evidence. No new-app real credential pair was provisioned or
+read. Authenticated read smoke, PRIVATE_EVENTS, account ownership and full
+ADP-01..11/reconciliation remain pending. Raw logs stay app-local ignored runtime.
