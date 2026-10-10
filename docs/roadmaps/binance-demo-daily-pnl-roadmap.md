@@ -1,10 +1,11 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-10. Статус: **P0-A offline core реализован; остальной план не внедрён**.
+Дата: 2026-10-10. Статус: **P0-A/B offline core и durable journal реализованы; остальной план не внедрён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
-P0-A: свой package/.venv/lock, financial и isolation kernel, 81 GREEN после RED.
-Фаза 0 ещё требует durable ledger/outbox/restart/reconcile integration;
+P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
+atomic outbox/restart/replay/report revisions, 110 GREEN после RED.
+Фаза 0 ещё требует фактические account anchors/cursors/reconcile integration;
 фазы 1–7 PLANNED. Наличие спецификации не означает включения функции.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот

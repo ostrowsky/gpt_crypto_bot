@@ -1,9 +1,9 @@
-# Independent Binance Demo bot — P0-A financial core
+# Independent Binance Demo bot — P0-A/B financial core and journal
 
 This separate application implements offline Decimal accounting, valuation,
-daily equity PnL, FIFO/fees and initial path/configuration isolation. It does
-not send orders, run learning workers or connect to Binance. SQLite/outbox,
-reconciliation adapters and the P1–P7 services remain planned.
+daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation. It does
+not send orders, run learning workers or connect to Binance. Actual
+exchange reconciliation adapters and the P1–P7 services remain planned.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md).
@@ -34,8 +34,20 @@ this app's ignored `.env`, based on `.env.example`, or pass the complete pair
 explicitly. No parent-env discovery, old-config imports or legacy key fallback.
 Real credentials have not been copied or validated in this milestone.
 
-`FinancialLedger` is an **in-memory projection**, not durable production storage.
-Its caller supplies contemporaneous marks; daily reporting takes certified
-snapshots and explicit reconciliation status. The kernel cannot itself certify
-exchange coverage or absence of manual account activity. Do not enable trading
-until durable ledger, account ownership, adapter, OMS/risk and release gates pass.
+`FinancialLedger` is the pure in-memory projection. `JournalStore` persists its
+immutable fill events, separate receipt clocks, projection and outbox in SQLite
+WAL/FULL with an app-local OS writer lease. Late fills rebuild chronological
+FIFO; receipt-cutoff queries exclude fills not yet available. Reports retain
+all revisions; changed economic sources mark earlier revisions stale. Exact
+fill/report retries and outbox ACKs are idempotent; delivery is at-least-once.
+
+All journal/report evidence remains `LOCAL_PROJECTION`, `exchange_reconciled=false`.
+Callers supply marks and certified daily snapshots. Historical availability
+of seed anchors/marks, actual exchange coverage and account ownership must be
+established by P1/P2/reconcile. No production/account permission follows from
+storage correctness. The journal freezes its accounting code fingerprint;
+changing accounting artifacts requires an explicit versioned migration.
+
+Verified: **110 tests GREEN**, including 29 durable integration cases and real
+process deaths before/after commit. Trading awaits account adapter, exclusive
+ownership, actual anchors, OMS/risk and release evidence.

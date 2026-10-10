@@ -1,6 +1,6 @@
 # Binance Demo — фаза 0: финансовый контракт
 
-Дата: 2026-10-10. Статус: **P0-A CORE_IMPLEMENTED / 81 GREEN; durable/integration pending**. Владелец: сопровождающий репозитория. Приоритет:
+Дата: 2026-10-10. Статус: **P0-A/B LOCAL_CORE_AND_JOURNAL_IMPLEMENTED / 110 GREEN; exchange anchors pending**. Владелец: сопровождающий репозитория. Приоритет:
 P0, до подключения торговли. **Реализовано offline financial core; полный контракт фазы ещё не завершён.** Документ не
 подключает аккаунт, не размещает заявки и не меняет действующие настройки.
 
@@ -203,12 +203,106 @@ PASS. Primary/actual/demo/shadow/simulation labels не смешиваются.
 
 ## Acceptance criteria
 
+### P0-B: durable journal / outbox / corrected reports
+
+Контракт фиксируется до тестов/кода (2026-10-10). Scope — собственная SQLite
+проекция fills и immutable daily report inputs, не account adapter/OMS и не
+подтверждение фактической прибыли. Public module: `binance_demo_bot.journal`.
+
+Verified: 29 durable integration tests GREEN после missing-module RED,
+outbox/provenance/corruption RED и report-retry RED; общая партия 110 GREEN.
+Before/after-commit deaths и report after-commit death выполнены реальными
+subprocesses. SQLite fixture connections закрываются явно; assertions сохранены.
+
+`JournalStore(paths, *, episode_id, scope_id, opening_lots,
+database="ledger.sqlite", fault_hook=None)` использует только
+`AppPaths.runtime_path(database)` и соседний app-local writer lease. Один
+writer по OS file lock; после process death lock освобождается ОС, чужие PID
+не завершаются, чужие lock files не удаляются. Второй owner → `WriterBusy`.
+SQLite `journal_mode=WAL`, `synchronous=FULL`, `foreign_keys=ON`, explicit
+transactions. Namespace/schema/episode/scope/opening inventory frozen в meta;
+reopen с иной identity/неизвестной version → `JournalIntegrityError`, без migration.
+Все domain exceptions наследуют ValueError, accounting ошибки — AccountingError.
+
+| Interface | Observable contract |
+|---|---|
+| `append_fill(envelope, fill, marks)` | APPLIED/DUPLICATE. Envelope: schema_version=1, application_id, environment, objective_contract_id, account_episode_id, portfolio_scope_id, event_id, event_type=ExchangeFillRecorded, exchange_event_time_ms, received_at_ms, received_monotonic_ns, process_instance_id. Clocks integers; exchange clock совпадает с fill; process ID не смешивается при monotonic анализе. recorded_at_ms назначается store при insert. |
+| `projection(marks, *, as_of_received_ms=None)` | Decimal balances/managed_quantities/attribution, source_sha256, evidence_kind=LOCAL_PROJECTION, exchange_reconciled=false. Финансовый replay сортирует unique fills по `(exchange_event_time_ms, insertion sequence)`; receipt-cutoff replay сначала исключает ещё не полученные/future-clock fills. |
+| `events()` / `receipts()` | Immutable accepted economic events и отдельные deliveries с сохранёнными clocks. Same financial key / equal normalized payload и marks → одна financial event/fee, несколько distinct receipts; exact event_id retry не добавляет receipt. |
+| `sqlite_settings()` | Actual connection values `{journal_mode:wal, synchronous:2, foreign_keys:1}` для проверки storage protocol; не declaration из config. |
+| `pending_outbox(limit=100)` / `ack_outbox(id)` | Durable local notifications only; no ORDER_SEND. Неacknowledged сообщения после рестарта возвращаются с тем же ID и payload. ACK идемпотентен; unknown ID отвергается. Delivery at-least-once, consumer обязан dedup по ID. |
+| `record_daily_report(day, *, opening, closing, flows, reconciliation_status, economic_costs_usdt)` | Вызывает financial daily_performance; inputs immutable, full Budapest day boundaries/episode/scope проверены, future/unended day не финализируется. Добавляет revision, supersedes, source_sha256, content_sha256 и actual recorded UTC. |
+| `reports(day)` | Все revisions по порядку, не только выгодные/COMPLETE. `stale` вычисляется относительно текущей source generation. Новое economic event консервативно invalidates старые reports; новый report append, старый не overwritten. Returned provenance остаётся LOCAL_PROJECTION, не exchange certification. |
+| `close()` / context manager | Освобождает только свой SQLite handle/file lease, idempotent close. Нет worker/network/process-control side effects. |
+
+Optional envelope fields causation_id/decision_id/arm_id/model_id/policy_version/
+source_sha256/risk_contract_id сохраняются как string/null, не отбрасываются.
+В frozen meta входит hash собственного accounting code (financial/journal/isolation);
+reopen с другим code artifact отвергается до явной versioned migration.
+
+Money записываются только canonical decimal strings (equivalent decimal
+formatting не создаёт конфликт). Финансовый identity включает все обязательные
+fill поля P0-A и frozen contemporaneous marks; delivery metadata не меняют его.
+Пересмотр mark/basis принятого fill требует будущей versioned correction event,
+а не тихого overwrite. Duplicate event_id с иной delivery, trade payload или
+marks → LedgerConflict, без mutation accepted events/projection/outbox.
+Invalid namespace/schema/types/amounts и oversell/replay failure отвергаются
+атомарно. Caller обязан сохранить rejected raw evidence/quarantine incident;
+полный incident lifecycle/reconciliation block реализуется с adapter/OMS.
+
+Economic event + receipt + materialized balances/managed projection + outbox
+notification committed одной transaction. Before-commit exception/process
+death оставляет всё прежним; after-commit caller uncertainty безопасна при
+retry того же event_id. Report revision + report outbox тоже атомарны.
+`fault_hook(stage)` — явный engineering injection `before_commit`/`after_commit`,
+по умолчанию None; интеграционные тесты используют реальные subprocess deaths.
+Ни hooks, ни fixtures не запускают/останавливают существующий бот.
+
+Exact report retry по canonical inputs + day + текущей source generation
+возвращает прежний ID/revision без нового outbox. Money поля snapshots/flows/
+economic costs нормализуются; after-commit process death безопасен при retry.
+Изменённые inputs или новая financial generation append новую revision.
+
+Events, receipts, meta и reports защищены от UPDATE/DELETE SQL triggers.
+На reopen проверяются canonical content hashes, receipt/event associations и
+materialized projection против replay. Несоответствие → JournalIntegrityError;
+не пытаться обнулить историю/переписать anchors или автоматически исправлять
+повреждённый journal. Outbox ACK — отдельное mutable delivery state, payload
+не меняется.
+Outbox ID/topic/payload/hash также immutable, DELETE запрещён; допустим только
+ACK. На reopen hash и association с соответствующим event/report проверяются.
+Это локальная integrity check, не защита от администратора, переписавшего все
+данные и hashes; external signed anchors ещё не реализованы.
+
+P0-B scenarios (все сначала RED, затем implementation/GREEN):
+`DUR-01` persistence/reopen and WAL/FULL;
+`DUR-02` REST/WS + exact retry dedup/Decimal equivalence;
+`DUR-03` conflicting payload/event ID/marks, atomicity;
+`DUR-04` exception and real process death before commit;
+`DUR-05` real process death after commit/retry;
+`DUR-06` deterministic late-fill FIFO rebuild;
+`DUR-07` receipt-cutoff excludes future knowledge across restart;
+`DUR-08` outbox repeat delivery/idempotent ACK/reopen;
+`DUR-09` immutable corrected losing report/stale favorable revision;
+`DUR-10` report atomic failure/day/episode/scope/future validation;
+`DUR-11` schema/identity/cache tamper/SQL immutability;
+`DUR-12` second writer refused, crashed writer lease recoverable, app path boundary.
+
+Remaining full-P0 gaps: actual account balance/fill/flow cursors and anchors,
+episode reset evidence, conversion coverage/precision/flow boundary protocol,
+cross-arm budgets, quarantine resolution and independent exchange recompute.
+Durable local fills/report storage alone не завершает FIN-01..12 или P0.
+Receipt-cutoff ограничивает только доступность journal fills. Историческая
+доступность opening seed anchor и переданных marks этим API не доказана:
+P1/P2 обязаны поставить PIT-certified anchors/valuation snapshots. Source hash
+проекции не заменяет hash текущей valuation или model feature snapshot.
+
 ### P0-A: публичный контракт первой партии unit-тестов
 
 Контракт зафиксирован до написания тестов (2026-10-10). Будущий импорт:
 `binance_demo_bot.financial` из собственного `apps/binance_demo_bot/src`.
-Это offline financial core; SQLite, outbox, account adapter, OMS и полная
-изоляция runtime проверяются следующими интеграционными партиями. Ни наличие
+Это offline financial core; SQLite/outbox проверены в P0-B. Account adapter,
+OMS и полная изоляция runtime требуют следующих партий. Ни наличие
 unit-тестов, ни их будущий GREEN не завершают FIN-01..12 целиком.
 
 API использует обычные mappings и Decimal results, чтобы не связывать тесты
@@ -225,7 +319,7 @@ fees, prices дополнительно проверяется допустим�
 | `day_bounds(day, timezone)` | ISO local date и IANA zone → tuple `(start_ms, end_ms)` UTC; DST учитывается. |
 | `day_for_timestamp(timestamp_ms, timezone)` | ISO local day события; правая граница принадлежит следующим суткам. |
 | `value_portfolio(balances, quotes, routes, *, boundary_ms, time_basis, max_age_ms)` | `balances[asset]={free,locked}`; `quotes[symbol]={base,quote,bid,ask,venue,event_time_ms,received_at_ms,response_started_at_ms,source_healthy}`; `routes[asset]=[(symbol,inverse),...]`. Только `BINANCE_SPOT_DEMO`, детерминированный путь до USDT. Результат `{status,equity_usdt,marks,reason_codes}`. USDT=1; inverse использует reciprocal(mid), не mid reciprocals. Все nonzero assets обязательны; zero assets не требуют quotes. |
-| `FinancialLedger(*, episode_id, opening_lots)` | Opening lot `{asset,quantity,basis_usdt,ownership}` с total carrying cost, ownership `SEED`/`APPLICATION`/`UNATTRIBUTED`. В памяти строится бухгалтерская проекция; durable event journal остаётся отдельной задачей. |
+| `FinancialLedger(*, episode_id, opening_lots)` | Opening lot `{asset,quantity,basis_usdt,ownership}` с total carrying cost, ownership `SEED`/`APPLICATION`/`UNATTRIBUTED`. Pure in-memory проекция; durable wrapper — P0-B JournalStore. |
 | `ledger.apply_fill(fill, marks)` | Fill содержит `application_id`, `environment`, `episode_id`, `symbol`, `trade_id`, `order_id`, `client_order_id`, `base_asset`, `quote_asset`, `side`, `quantity`, `quote_quantity`, `price`, `commission_asset`, `commission_quantity`, `exchange_event_time_ms`, `ownership`. `marks[asset]` — contemporaneous USDT mark. Возвращает `APPLIED`/`DUPLICATE`; меняется только исполненная quantity. |
 | `ledger.balances()` / `ledger.managed_quantity(asset)` | Все total balances как `dict[asset,Decimal]`; отдельно net application-owned inventory для разрешения exit. SEED inventory не даёт permission на SELL. |
 | `ledger.attribution(marks)` | `{gross_realized_usdt,fee_expenses_usdt,unrealized_usdt}`. Gross realized включает disposal fee asset; fees не списываются дважды. FIFO seed basis — opening mark; financial FIFO не заменяет operational ownership. |
@@ -280,8 +374,8 @@ count включает downtime. Mean/positive fraction используют т�
 P0-A milestone: public financial core реализован; original 64 financial tests
 и новые edge/isolation/startup tests проходят в own venv (81 GREEN суммарно).
 RED до implementation и отдельный RED для позднего fill записаны в test evidence.
-Durable replay/outbox/revision storage, cross-arm sum, reset evidence,
-account ownership и process/env isolation остаются PLANNED интеграциями.
+P0-B journal/replay/outbox/revisions реализованы; cross-arm sum, reset evidence,
+actual account ownership/anchors и full process isolation остаются PLANNED.
 
 | ID | Планируемый автоматический сценарий и ожидаемый результат |
 |---|---|
@@ -298,11 +392,11 @@ account ownership и process/env isolation остаются PLANNED интегр
 | FIN-11 | Missing downtime day → recovered losing day: gap видим, убыток возвращён, old favorable verdict пересмотрен. |
 | FIN-12 | Старые files/runtime/models/.env недоступны, новый package/venv/SQLite/loop независимы; same-account/different-key не изоляция, SEED/unknown orders не становятся app positions. |
 
-Первая партия P0-A: **81 GREEN** в собственном Python 3.14 `.venv`; финансовые
+P0-A/B: **110 GREEN** в собственном Python 3.14 `.venv`; финансовые
 assertions реально выполнены, включая исходные 64 теста. Предварительно проверены
 missing-interface RED, missing-entrypoint RED и reproduction late-fill failure.
 Реализация: `apps/binance_demo_bot/src/binance_demo_bot/financial.py` и isolation
-kernel; не durable ledger и не exchange-certified account reporting. Покрытие и команда запуска:
+kernel и P0-B JournalStore; не exchange-certified account reporting. Покрытие и команда запуска:
 [tests/README](../../apps/binance_demo_bot/tests/README.md). Остальные части
 FIN-01..12 остаются **planned integration scenarios**. Фаза завершена только после реализации,
 focused tests и независимого recompute одинакового input log; численный net PnL должен сверяться с account

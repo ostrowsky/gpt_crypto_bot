@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-10. Status: **P0-A offline core implemented / 81 GREEN; trading runtime pending**.
+Дата: 2026-10-10. Status: **P0-A/B offline core + durable journal / 110 GREEN; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -68,11 +68,12 @@ P5 ledger/outcome capture строится уже с P0–P3: первая де�
 Первый вертикальный milestone: snapshot → intent → actual fill → active
 protection → actual SELL → reconcile → объективный PnL одной демо-сделки.
 
-P0-A: [81 test GREEN](../../apps/binance_demo_bot/tests/README.md) в собственной
+P0-A/B: [110 tests GREEN](../../apps/binance_demo_bot/tests/README.md) в собственной
 среде после recorded RED. Financial assertions выполнены; monetary/valuation
-core и начальные isolation/startup guards реализованы. P0 durable journal,
-restart/outbox/reconcile и P1–P7 остаются planned. Следующий шаг — integration
-tests, затем durable implementation; trading enablement не выполнялось.
+core и начальные isolation/startup guards реализованы. P0-B WAL journal,
+atomic outbox/replay/restart и immutable report revisions реализованы.
+Actual account anchors/cursors/reconcile и P1–P7 остаются planned. Следующий
+приоритет — P1 adapter contracts/tests до реализации; order sending disabled.
 
 ## Shared interfaces and ownership
 

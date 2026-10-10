@@ -12,6 +12,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 | `test_financial_edge_contracts.py` | FIFO vs operational ownership, ambient Decimal context, malformed fills/statuses, refusal of late arrival-order fills until ordered replay. |
 | `test_application_isolation.py` | Own root/CWD independence, traversal and real junction/symlink escape, parent-env rejection, explicit-only demo keys, duplicate/missing values and redacted diagnostics. |
 | `test_offline_startup.py` | Installed own-venv package starts without credentials/trading; inherited PYTHONPATH rejected. |
+| `test_durable_journal.py` | 29 integration cases: WAL/FULL, actual process deaths, single writer, fill/report retry, outbox integrity/ACK, late FIFO/PIT receipt cutoffs, revisions, namespace/schema/cache and provenance. |
 
 Run from the app directory with its own installed environment:
 
@@ -38,11 +39,15 @@ Evidence sequence on 2026-10-10:
    then the chronological guard was implemented. Final full run: **81 GREEN**.
 
 Raw RED/GREEN output belongs in `../.runtime/test-evidence/` and is not committed.
+P0-B sequence: 24 missing-module errors before journal implementation; explicit
+SQLite-fixture connection cleanup corrected; additional outbox/provenance and
+report-retry failures reproduced before fixes. Final full run **110 GREEN**.
+The crash tests use own-venv subprocesses and `os._exit`, not simulated mocks.
 The old bundled interpreter was an external engineering bootstrap runner for
 the initial RED only; it is not a runtime dependency of this application.
 
-Remaining acceptance gates: SQLite/WAL/outbox and crash recovery, immutable
-report storage, actual exchange reconciliation, reset evidence, cross-arm sum,
+Remaining acceptance gates: actual exchange reconciliation/anchors and PIT
+valuation/seed availability, reset evidence, cross-arm sum,
 account ownership, full process/resource/port isolation and phases P1–P7.
 This is partial FIN-01..12/ISO coverage, not completion of those whole scenarios
 or proof of profitability. The offline entrypoint never enables order sending.
