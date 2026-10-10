@@ -1,7 +1,7 @@
 # Binance Demo — фаза 0: финансовый контракт
 
-Дата: 2026-10-10. Статус: **P0-A TESTS_WRITTEN / expected RED; implementation pending**. Владелец: сопровождающий репозитория. Приоритет:
-P0, до подключения торговли. **Исполняемая реализация этого контракта ещё не внедрена.** Документ не
+Дата: 2026-10-10. Статус: **P0-A CORE_IMPLEMENTED / 81 GREEN; durable/integration pending**. Владелец: сопровождающий репозитория. Приоритет:
+P0, до подключения торговли. **Реализовано offline financial core; полный контракт фазы ещё не завершён.** Документ не
 подключает аккаунт, не размещает заявки и не меняет действующие настройки.
 
 Программа: [автономная демо-торговля](binance-demo-autonomous-trading-program.md). Источник приоритетов:
@@ -213,6 +213,8 @@ unit-тестов, ни их будущий GREEN не завершают FIN-01
 
 API использует обычные mappings и Decimal results, чтобы не связывать тесты
 с внутренней структурой классов. Денежные входы — Decimal или decimal strings;
+Арифметика использует локальный Decimal Context(prec=50, ROUND_HALF_EVEN),
+независимый от настроек/ловушек вызывающего процесса; глобальный context не меняется.
 float, bool, NaN/Infinity отвергаются `ValueError`. На входах с quantities,
 fees, prices дополнительно проверяется допустимый знак. Error types
 `AccountingError` и `LedgerConflict` наследуют `ValueError`.
@@ -239,6 +241,14 @@ response_started_at <= received_at <= boundary, observation age <= max_age,
 source healthy; неизвестный exchange clock остаётся null. Future/stale/missing
 leg даёт PENDING и null equity всего портфеля. Crossed/nonpositive quote,
 negative inventory, неверный venue/циклический маршрут дают ERROR и null equity.
+
+Дополнительная FIN-07 граница: новые fills P0-A применяются в неубывающем
+exchange event time; одинаковый timestamp сохраняет порядок принятия.
+Новый fill с более ранним clock отвергается атомарно и не резервирует dedup key.
+Повтор уже принятого fill допустим независимо от последующих clocks.
+Полный durable журнал в следующей партии обязан сохранить late event и
+пересобрать хронологическую проекцию/corrected revision; in-memory core
+сам не выдаёт arrival-order correction за честный FIFO replay.
 
 Ledger rejects чужой application/environment/episode, неверное fill arithmetic
 `quantity * price != quote_quantity`, oversell и недостаток fee inventory.
@@ -267,8 +277,9 @@ count включает downtime. Mean/positive fraction используют т�
 числитель, знаменатель и все gap counts сохраняются. Старые revisions не
 удаляются входным сервисом; этот pure core не реализует хранение/approval.
 
-Первый test-only milestone: P0-A сценарии из FIN-01..11 и ownership-части
-FIN-12 написаны и дают ожидаемый RED из-за отсутствующего public module.
+P0-A milestone: public financial core реализован; original 64 financial tests
+и новые edge/isolation/startup tests проходят в own venv (81 GREEN суммарно).
+RED до implementation и отдельный RED для позднего fill записаны в test evidence.
 Durable replay/outbox/revision storage, cross-arm sum, reset evidence,
 account ownership и process/env isolation остаются PLANNED интеграциями.
 
@@ -287,9 +298,11 @@ account ownership и process/env isolation остаются PLANNED интегр
 | FIN-11 | Missing downtime day → recovered losing day: gap видим, убыток возвращён, old favorable verdict пересмотрен. |
 | FIN-12 | Старые files/runtime/models/.env недоступны, новый package/venv/SQLite/loop независимы; same-account/different-key не изоляция, SEED/unknown orders не становятся app positions. |
 
-Первая партия P0-A: **64 unit-теста написаны и обнаружены; 64 ожидаемых errors**
-из-за отсутствующего `binance_demo_bot.financial`, exit code 1. До реализации
-финансовые assertions не исполнялись. Покрытие первой партии и команда запуска:
+Первая партия P0-A: **81 GREEN** в собственном Python 3.14 `.venv`; финансовые
+assertions реально выполнены, включая исходные 64 теста. Предварительно проверены
+missing-interface RED, missing-entrypoint RED и reproduction late-fill failure.
+Реализация: `apps/binance_demo_bot/src/binance_demo_bot/financial.py` и isolation
+kernel; не durable ledger и не exchange-certified account reporting. Покрытие и команда запуска:
 [tests/README](../../apps/binance_demo_bot/tests/README.md). Остальные части
 FIN-01..12 остаются **planned integration scenarios**. Фаза завершена только после реализации,
 focused tests и независимого recompute одинакового input log; численный net PnL должен сверяться с account

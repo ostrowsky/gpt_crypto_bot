@@ -1,11 +1,12 @@
 # Binance Demo: самостоятельное приложение и границы изоляции
 
-Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
+Дата: 2026-10-10. Status: **P0-A KERNEL_IMPLEMENTED; full integration isolation pending**.
 Owner: repository maintainer. Application ID: `binance_demo_bot`.
 Приоритет: обязательное условие фаз 0–7
 [программы](binance-demo-autonomous-trading-program.md).
 Основание: пользователь требует отдельное приложение без воздействия
-на текущую версию бота. Новая директория описана, код приложения пока не создан.
+на текущую версию бота. Создан собственный package/env/path/credential kernel;
+полная process/account/resource изоляция ещё не подтверждена.
 
 ## Problem and objective fit
 
@@ -102,6 +103,43 @@ IP/connection и account limits могут быть общими несмотр�
 
 ## Primary metrics and acceptance criteria
 
+### P0-A isolation kernel: первый исполняемый scope
+
+Контракт фиксируется до тестов/кода. Собственный runtime использует Python
+3.14 из отдельного `.venv`, editable package и versioned `uv.lock`; старый
+`pyembed` допустим только как внешний engineering runner. Сборщик фиксируется
+в `pyproject.toml`; cache находится в собственном `.runtime`. Автоматического
+запуска сервисов/торговли, provisioning реальных ключей и shared poller нет.
+
+Публичный модуль `binance_demo_bot.isolation`:
+
+- `AppPaths(root)`: explicit абсолютный root приложения, canonical resolve,
+  без зависимости от CWD. `runtime_path(relative)` возвращает путь только
+  внутри собственного `.runtime`; absolute paths, `..` и resolved escapes
+  (включая links/junctions) отвергаются `ValueError`. `env_file` возвращает
+  только собственный `.env`, с такой же проверкой resolved boundary.
+- `assert_clean_pythonpath(value)`: null/пустое значение допустимо;
+  непустой injected PYTHONPATH отвергается `ValueError`. Проверяется на entrypoint
+  до импорта runtime компонентов; директория tests не является production startup.
+- `load_demo_credentials(paths, explicit=None)`: только собственный `.env`,
+  либо явно переданный mapping с полной парой `BINANCE_DEMO_API_KEY` и
+  `BINANCE_DEMO_API_SECRET`. Нет поиска parent, legacy names, смешивания источников
+  или автоматического чтения inherited environment. Decimal/financial core
+  ключей не читает. Возвращаемый `DemoCredentials` имеет `api_key`/`api_secret`,
+  но его repr/str и тексты исключений не раскрывают значения. Missing/empty,
+  duplicate ключи или неполная explicit пара → ValueError без fallback.
+- `python -I -m binance_demo_bot` — offline readiness entrypoint: isolated mode
+  исключает подмену package через PYTHONPATH/CWD, затем выполняется проверка
+  PYTHONPATH, затем JSON с application ID, own root, `order_send_enabled=false`
+  и `financial_core_only=true`. Не читает `.env`, не открывает sockets, не
+  создаёт workers и не является production trading service.
+
+Первый batch проверяет части ISO-01/02/03/10; install/import/start дополнительно
+проверяются в own venv с poison legacy PYTHONPATH/parent .env и fingerprints
+старого source/config. PID/ports/account ownership/resource budgets и все
+прочие integration части ISO-04..09 остаются PLANNED; readiness JSON не
+означает полного PASS изоляции или разрешения торговли.
+
 Business metric нового приложения — `daily_net_equity_pnl_v1`.
 Isolation metrics: число запрещённых import/read/write/process/control
 действий, namespace/path violations, shared-token/port collisions, resource
@@ -136,7 +174,12 @@ runtime-зависимость нового приложения и не permiss
 - `ISO-09`: собственные resource/aggregate rate breaches ограничивают только app;
 - `ISO-10`: credential provisioning не печатает секрет и не меняет старый файл.
 
-Это будущие тесты. Сейчас изменены документы, приложение не устанавливалось.
+P0-A установлен editable в собственное `.venv` (Python 3.14.3), с собственным
+`uv.lock`, cache и tzdata. 10 isolation unit-tests и два startup tests GREEN
+в общей партии 81 tests. Junction escape проверен реально; injection PYTHONPATH
+отвергается при isolated startup. Нет old runtime imports или credential copying.
+Полные ISO-01..10 acceptance criteria ещё не закрыты: нет своего OMS/server,
+account ownership check, resource trials или process/crash integration.
 
 ## Risk / trade-offs and rollback
 

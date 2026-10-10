@@ -1,44 +1,48 @@
-# Independent Demo bot: first P0 test batch
+# Independent Demo bot: P0-A tests
 
-Specification: [P0-A public contract](../../../docs/specs/binance-demo-phase0-financial-contract.md#p0-a-публичный-контракт-первой-партии-unit-тестов).
+Specifications: [financial API](../../../docs/specs/binance-demo-phase0-financial-contract.md#p0-a-публичный-контракт-первой-партии-unit-тестов),
+[isolation kernel](../../../docs/specs/binance-demo-application-isolation.md).
 Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
-These are offline behavioral tests of the future `binance_demo_bot.financial`
-module. No application implementation is included in this test-only milestone.
-Inputs are synthetic and contain no credentials or private exchange payloads.
-Expected numbers are fixed independently of the future implementation.
-
-| Test file | Spec coverage in this batch |
+| Test file | Coverage in this batch |
 |---|---|
-| `test_financial_valuation.py` | FIN-01 reserve identity; FIN-04/06 full inventory, dust and stablecoins; FIN-05 DST/event-day boundaries; FIN-06 conversion routes, historical clocks and quote freshness; FIN-10 invalid balances. |
-| `test_financial_ledger.py` | FIN-01 partial fills/FIFO; FIN-02 base/quote/BNB fees and non-USDT quote disposal; FIN-07 duplicate/conflicting fills; FIN-10 atomic accounting failures; FIN-12 seed/foreign/unattributed ownership. |
-| `test_daily_performance.py` | FIN-03 flows and episode boundaries; FIN-04 no-trade MTM and null denominators; FIN-08 flow-adjusted return/TWR; FIN-09 equity reward vs proceeds/extra costs; FIN-10 reconciliation; FIN-11 calendar gaps and adverse corrected revisions. |
+| `test_financial_valuation.py` | Decimal, free/locked identity, whole inventory, dust/stablecoins, conversion routes, stale/future quote rejection, historical clock protocol, DST/day boundaries. |
+| `test_financial_ledger.py` | Partial fills/FIFO, base/quote/BNB fees, fee-asset disposal, non-USDT quote, duplicate/conflicting trades, atomic failure, seed/foreign/unattributed ownership. |
+| `test_daily_performance.py` | Equity reward, flows, no-trade MTM, reconciliation/completeness, TWR, extra-account costs, calendar gaps and corrected revisions. |
+| `test_financial_edge_contracts.py` | FIFO vs operational ownership, ambient Decimal context, malformed fills/statuses, refusal of late arrival-order fills until ordered replay. |
+| `test_application_isolation.py` | Own root/CWD independence, traversal and real junction/symlink escape, parent-env rejection, explicit-only demo keys, duplicate/missing values and redacted diagnostics. |
+| `test_offline_startup.py` | Installed own-venv package starts without credentials/trading; inherited PYTHONPATH rejected. |
 
-Run from repository root, using the bundled interpreter as an **engineering
-bootstrap runner only** (not a new app runtime dependency):
+Run from the app directory with its own installed environment:
 
 ```powershell
-$env:PYTHONDONTWRITEBYTECODE = '1'
-pyembed\python.exe -m unittest discover -s apps/binance_demo_bot/tests -p 'test_*.py' -v
+.venv\Scripts\python.exe -I -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-After the app has its own environment and package, the same tests must run with
-that environment's Python. Tests add only the new app's own `src` to the import
-path. They do not import the existing bot or read its config/state/environment.
+All money fixtures and expected numbers are synthetic and independent of the
+implementation. No keys/private payloads, real orders, skips or xfail cases.
+The link-escape test uses a Windows junction without admin privileges; it removes
+only that link before cleaning up its bounded app-owned fixture directory.
 
-Verified 2026-10-10: **64 discovered tests, 64 errors, exit code 1 (expected RED)**.
-At this milestone each discoverable test fails
-in `setUp` with `ModuleNotFoundError: No module named 'binance_demo_bot'`.
-This is the intentionally missing public interface, permitted by the app's TDD
-contract. The financial assertions have **not passed or executed yet**. There
-are no skips, xfail cases, substitute implementation or always-green mocks.
-The next implementation step must make these unchanged contracts GREEN.
+Evidence sequence on 2026-10-10:
 
-Not covered yet: SQLite transactions/WAL/outbox, restart recovery, immutable
-report storage, exchange reconciliation/actual fills, episode reset evidence,
-cross-arm sum, account exclusivity and full process/environment isolation.
-FIN scenario labels identify partial contract coverage, not completion of all
-phase acceptance criteria. P1–P7 test batches remain planned. Passing this
-batch later will not certify profitability or enable order sending.
+1. Original 64 tests: RED, intended missing financial module, exit 1 (commit `7d98413`).
+2. Added isolation tests: 74 discovered / 74 missing-interface errors before
+   the new modules. Four additional financial boundaries also verified RED
+   before the financial implementation (40 selected financial tests).
+3. 78 financial/isolation tests passed in own venv; two startup tests RED with
+   missing `binance_demo_bot.__main__`. An initial uncommitted startup stub had
+   been created too early and was withdrawn for this correction; that initial
+   stub is not claimed as compliant test-first history.
+4. Late-fill reproduction: five edge tests / one failure (no AccountingError),
+   then the chronological guard was implemented. Final full run: **81 GREEN**.
 
-Local RED output belongs under `../.runtime/test-evidence/` and is not committed.
+Raw RED/GREEN output belongs in `../.runtime/test-evidence/` and is not committed.
+The old bundled interpreter was an external engineering bootstrap runner for
+the initial RED only; it is not a runtime dependency of this application.
+
+Remaining acceptance gates: SQLite/WAL/outbox and crash recovery, immutable
+report storage, actual exchange reconciliation, reset evidence, cross-arm sum,
+account ownership, full process/resource/port isolation and phases P1–P7.
+This is partial FIN-01..12/ISO coverage, not completion of those whole scenarios
+or proof of profitability. The offline entrypoint never enables order sending.

@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-10. Status: **specs complete; P0-A tests written / expected RED; runtime not implemented**.
+Дата: 2026-10-10. Status: **P0-A offline core implemented / 81 GREEN; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -41,7 +41,8 @@ policy plugins, не текущие процессы. Публичные и пр
 withdraw/transfer, автоматическое повышение риска и произвольное изменение
 кода learner в этот scope не входят.
 
-Эта поставка — спецификации, реестр и порядок реализации. Вызовы API,
+Реализовано отдельное offline financial core с own package/env/isolation kernel.
+Спецификации остальных фаз задают последующий порядок реализации. Вызовы API,
 размещение ордеров, запуск фоновых служб, новые модели и rollout здесь
 не выполняются. Фактический статус этапа меняется вместе с кодом, тестами
 и source-bound evidence, а не по наличию документа.
@@ -67,11 +68,11 @@ P5 ledger/outcome capture строится уже с P0–P3: первая де�
 Первый вертикальный milestone: snapshot → intent → actual fill → active
 protection → actual SELL → reconcile → объективный PnL одной демо-сделки.
 
-Первый test-only шаг P0-A: [64 offline unit-теста](../../apps/binance_demo_bot/tests/README.md)
-написаны после фиксации financial API; verified RED (64 missing-interface
-errors, exit code 1). Реализация финансового модуля отсутствует; assertions
-ещё не проходили. P0 integration и P1–P7 tests остаются planned. Торговое
-enablement не выполнялось.
+P0-A: [81 test GREEN](../../apps/binance_demo_bot/tests/README.md) в собственной
+среде после recorded RED. Financial assertions выполнены; monetary/valuation
+core и начальные isolation/startup guards реализованы. P0 durable journal,
+restart/outbox/reconcile и P1–P7 остаются planned. Следующий шаг — integration
+tests, затем durable implementation; trading enablement не выполнялось.
 
 ## Shared interfaces and ownership
 
