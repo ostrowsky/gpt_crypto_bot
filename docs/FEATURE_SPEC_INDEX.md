@@ -1,17 +1,33 @@
 # Feature Spec Index
 
-Last updated: 2026-08-27 Europe/Budapest
+Last updated: 2026-10-10 Europe/Budapest
 
 ## Objective
 
-Keep every material bot capability tied to the same north star:
+The planned Binance Spot Demo program uses `daily_net_equity_pnl_v1`:
+daily net account equity PnL in USDT after trading fees, under fixed risk and
+capital constraints. Its specifications are registered before implementation;
+they do not activate account execution or change the existing runtime policy.
+See [the program and priority gates](specs/binance-demo-autonomous-trading-program.md).
+
+Existing signal, WATCH and research capabilities retain their versioned scope:
 earlier capture of same-day watchlist top movers with a single unified
-10-position portfolio and profitable exits near trend reversal.
+10-position portfolio and profitable exits near trend reversal. Their prior
+metrics, rejected results and approvals are not renamed as new demo profit evidence.
 
 ## Spec Catalog
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| Binance Demo autonomous daily-PnL program | PLANNED; specs only; no runtime enablement | `docs/specs/binance-demo-autonomous-trading-program.md` | daily net equity PnL, fixed-budget return, risk and evidence integrity | implement P0 then P1/P2; technical milestone before any automatic trading |
+| Binance Demo P0 financial contract | PLANNED; implementation pending | `docs/specs/binance-demo-phase0-financial-contract.md` | full account equity/PnL, fees/flows, reconciliation, complete calendar days | implement Decimal/event ledger and FIN-01..11; no trading-policy approval |
+| Binance Demo P1 account adapter | PLANNED; implementation pending | `docs/specs/binance-demo-phase1-account-adapter.md` | signed-read and private-event evidence, account/key capabilities, freshness | implement read-only adapter and ADP-01..09; ORDER_SEND remains disabled |
+| Binance Demo P2 universe and market data | PLANNED; implementation pending | `docs/specs/binance-demo-phase2-universe-market-data.md` | all-permitted coverage, receipt clocks, conversion/valuation completeness | implement complete as-of discovery/data and UNI/DATA scenarios; separate pilot execution scope |
+| Binance Demo P3 OMS and risk | PLANNED; implementation pending | `docs/specs/binance-demo-phase3-order-management-risk.md` | actual fills/reconcile, protected open exposure, duplicate/unknown sends and bounded recovery | implement durable single OMS and D3-01..20; controlled demo cycle before automatic entries |
+| Binance Demo P4 baseline policy | PLANNED; implementation pending | `docs/specs/binance-demo-phase4-baseline-policy.md` | daily net PnL/return, DD/day loss/exposure, policy/intent parity | P0–P3 ready; maximum-history replay and new forward before bounded automatic demo |
+| Binance Demo P5 outcomes and training dataset | PLANNED; implementation pending | `docs/specs/binance-demo-phase5-outcomes-training-dataset.md` | decision/fill/mature-label coverage, reconciled daily result and dataset provenance | capture ledger before first trade; verified exports/revisions before training |
+| Binance Demo P6 profit hypothesis evaluation | PLANNED; implementation pending | `docs/specs/binance-demo-phase6-profit-hypothesis-evaluation.md` | absolute daily earning and paired financial uplift, CI/SESOI/power, risk | mature dataset; independent maximum-history and new frozen forward; no direct deployment |
+| Binance Demo P7 autonomous promotion | PLANNED; implementation pending | `docs/specs/binance-demo-phase7-autonomous-promotion.md` | actual canary financial gate, exact-scope activation and safe rollback | P3/P6 evidence; disjoint fresh cohorts and bounded release authority before updates |
 | Protected one-bar SELL action advantage | 186-day causal action-value study REJECTED; no live change | `docs/specs/exit-action-advantage.md` | concrete hold-vs-sell cash delta, net alpha, early capture, giveback and drawdown | separately registered execution hypothesis; rejected deferral threshold not retuned |
 | Joint direction and conditional amplitude | 186-day causal prequential study REJECTED; no live change | `docs/specs/joint-direction-amplitude.md` | calibrated direction probability, conditional magnitude, after-cost alpha and unique early capture | separately registered exit-action hypothesis; rejected architecture not retuned on exposed TEST |
 | Impulse-speed CatBoost expected net edge | 186-day retrospective prequential experiment REJECTED; no live change | `docs/specs/impulse-entry-catboost.md` | after-cost account alpha, unique early leader capture, forecast errors and causal evidence timing | new registered target/exit hypothesis and fresh forward; rejected threshold not retuned |
