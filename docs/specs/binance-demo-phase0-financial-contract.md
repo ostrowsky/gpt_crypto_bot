@@ -1,6 +1,6 @@
 # Binance Demo — фаза 0: финансовый контракт
 
-Дата: 2026-10-10. Статус: **PLANNED / specification only**. Владелец: сопровождающий репозитория. Приоритет:
+Дата: 2026-10-10. Статус: **P0-A TESTS_WRITTEN / expected RED; implementation pending**. Владелец: сопровождающий репозитория. Приоритет:
 P0, до подключения торговли. **Исполняемая реализация этого контракта ещё не внедрена.** Документ не
 подключает аккаунт, не размещает заявки и не меняет действующие настройки.
 
@@ -203,6 +203,75 @@ PASS. Primary/actual/demo/shadow/simulation labels не смешиваются.
 
 ## Acceptance criteria
 
+### P0-A: публичный контракт первой партии unit-тестов
+
+Контракт зафиксирован до написания тестов (2026-10-10). Будущий импорт:
+`binance_demo_bot.financial` из собственного `apps/binance_demo_bot/src`.
+Это offline financial core; SQLite, outbox, account adapter, OMS и полная
+изоляция runtime проверяются следующими интеграционными партиями. Ни наличие
+unit-тестов, ни их будущий GREEN не завершают FIN-01..12 целиком.
+
+API использует обычные mappings и Decimal results, чтобы не связывать тесты
+с внутренней структурой классов. Денежные входы — Decimal или decimal strings;
+float, bool, NaN/Infinity отвергаются `ValueError`. На входах с quantities,
+fees, prices дополнительно проверяется допустимый знак. Error types
+`AccountingError` и `LedgerConflict` наследуют `ValueError`.
+
+| Интерфейс | Вход и наблюдаемый результат |
+|---|---|
+| `decimal_amount(value)` | Конечный Decimal без промежуточного float; signed amounts допустимы. |
+| `day_bounds(day, timezone)` | ISO local date и IANA zone → tuple `(start_ms, end_ms)` UTC; DST учитывается. |
+| `day_for_timestamp(timestamp_ms, timezone)` | ISO local day события; правая граница принадлежит следующим суткам. |
+| `value_portfolio(balances, quotes, routes, *, boundary_ms, time_basis, max_age_ms)` | `balances[asset]={free,locked}`; `quotes[symbol]={base,quote,bid,ask,venue,event_time_ms,received_at_ms,response_started_at_ms,source_healthy}`; `routes[asset]=[(symbol,inverse),...]`. Только `BINANCE_SPOT_DEMO`, детерминированный путь до USDT. Результат `{status,equity_usdt,marks,reason_codes}`. USDT=1; inverse использует reciprocal(mid), не mid reciprocals. Все nonzero assets обязательны; zero assets не требуют quotes. |
+| `FinancialLedger(*, episode_id, opening_lots)` | Opening lot `{asset,quantity,basis_usdt,ownership}` с total carrying cost, ownership `SEED`/`APPLICATION`/`UNATTRIBUTED`. В памяти строится бухгалтерская проекция; durable event journal остаётся отдельной задачей. |
+| `ledger.apply_fill(fill, marks)` | Fill содержит `application_id`, `environment`, `episode_id`, `symbol`, `trade_id`, `order_id`, `client_order_id`, `base_asset`, `quote_asset`, `side`, `quantity`, `quote_quantity`, `price`, `commission_asset`, `commission_quantity`, `exchange_event_time_ms`, `ownership`. `marks[asset]` — contemporaneous USDT mark. Возвращает `APPLIED`/`DUPLICATE`; меняется только исполненная quantity. |
+| `ledger.balances()` / `ledger.managed_quantity(asset)` | Все total balances как `dict[asset,Decimal]`; отдельно net application-owned inventory для разрешения exit. SEED inventory не даёт permission на SELL. |
+| `ledger.attribution(marks)` | `{gross_realized_usdt,fee_expenses_usdt,unrealized_usdt}`. Gross realized включает disposal fee asset; fees не списываются дважды. FIFO seed basis — opening mark; financial FIFO не заменяет operational ownership. |
+| `daily_performance(opening, closing, flows, *, reconciliation_status, economic_costs_usdt)` | Snapshots `{boundary_ms,equity_usdt,status,episode_id,scope_id}`. Flows `{effective_ms,signed_usdt,status,classification}` с уже подтверждённой contemporaneous valuation; classification `DEPOSIT`, `WITHDRAWAL`, `INTERNAL_ACCOUNT_TRANSFER`. Internal account movement не external flow. Результат `{status,net_pnl_usdt,net_external_flow_usdt,daily_return,economic_pnl_usdt,economic_status,reason_codes}`. |
+| `time_weighted_return(segments)` | Хронологические flow-separated `{start_equity_usdt,end_equity_usdt}`; результат `{status,value}`. Missing или nonpositive start → `PENDING`, value null; пустой список тоже PENDING. |
+| `reconcile_pnl(*, net_pnl_usdt, gross_realized_usdt, fee_expenses_usdt, unrealized_delta_usdt, tolerance_usdt)` | `{status,residual_usdt}`; residual = net − (realized − fees + unrealized delta). Только abs(residual) <= заранее заданной nonnegative tolerance даёт COMPLETE. |
+| `aggregate_latest_daily(calendar_days, reports)` | ISO calendar manifest и reports `{day,revision,status,net_pnl_usdt}`. Последняя revision на каждую дату; результат `{N_calendar,N_complete,N_pending,N_error,positive_days,mean_daily_net_pnl_usdt,positive_day_fraction}`. Fraction `{n,N,value}`, N=0 → value null. Нет report → PENDING; неполные/error дни не становятся нулевыми returns. |
+
+Clock для valuation передаётся явно и не выбирается по результату. `EXCHANGE_EVENT`:
+event_time <= boundary и age <= max_age; поздняя receipt допустима только для
+бухгалтерии. `OBSERVED_RESPONSE`: completed interval
+response_started_at <= received_at <= boundary, observation age <= max_age,
+source healthy; неизвестный exchange clock остаётся null. Future/stale/missing
+leg даёт PENDING и null equity всего портфеля. Crossed/nonpositive quote,
+negative inventory, неверный venue/циклический маршрут дают ERROR и null equity.
+
+Ledger rejects чужой application/environment/episode, неверное fill arithmetic
+`quantity * price != quote_quantity`, oversell и недостаток fee inventory.
+Validation failure атомарна: баланс, FIFO и accepted trade key не меняются.
+Dedup key — episode/symbol/trade, не order ID; transport metadata `source` и
+`received_at_ms` не меняют economic payload. Другой economic payload под тем
+же ключом → LedgerConflict, без mutation. Частичные fills одного order с
+разными trade IDs независимы. `UNATTRIBUTED` не получает managed quantity;
+полный reconcile/manual-activity gate остаётся интеграционной задачей.
+
+Daily core не повторяет оценку market data: принимает сертифицированные
+snapshots/flows и explicit reconciliation status. ERROR component → ERROR;
+PENDING component/null equity → PENDING; только COMPLETE позволяет net reward.
+Episode/scope mismatch → ERROR; right boundary <= left → ValueError. Flows
+учитываются в `[opening.boundary_ms, closing.boundary_ms)`; наличие реального
+external flow убирает simple daily_return даже при суммарном net flow=0.
+Economic cost null означает economic PENDING независимо от net COMPLETE;
+заданный cost — только extra-account AI/infra, finite nonnegative Decimal.
+Fees уже содержатся в equity и не вычитаются повторно. Нулевой opening equity
+не мешает абсолютному net PnL, но запрещает daily_return.
+
+Aggregator отвергает duplicate `(day,revision)`, даты вне manifest и COMPLETE
+report с null PnL. Последняя revision может ухудшить COMPLETE до PENDING/ERROR;
+нельзя выбирать последнюю выгодную или только complete revision. Calendar
+count включает downtime. Mean/positive fraction используют только COMPLETE;
+числитель, знаменатель и все gap counts сохраняются. Старые revisions не
+удаляются входным сервисом; этот pure core не реализует хранение/approval.
+
+Первый test-only milestone: P0-A сценарии из FIN-01..11 и ownership-части
+FIN-12 написаны и дают ожидаемый RED из-за отсутствующего public module.
+Durable replay/outbox/revision storage, cross-arm sum, reset evidence,
+account ownership и process/env isolation остаются PLANNED интеграциями.
+
 | ID | Планируемый автоматический сценарий и ожидаемый результат |
 |---|---|
 | FIN-01 | BUY partial → OCO reserve → partial SELL: free+locked identity, exact fills, FIFO и equity bridge сходятся. |
@@ -218,7 +287,11 @@ PASS. Primary/actual/demo/shadow/simulation labels не смешиваются.
 | FIN-11 | Missing downtime day → recovered losing day: gap видим, убыток возвращён, old favorable verdict пересмотрен. |
 | FIN-12 | Старые files/runtime/models/.env недоступны, новый package/venv/SQLite/loop независимы; same-account/different-key не изоляция, SEED/unknown orders не становятся app positions. |
 
-Это **planned test scenarios**, не выполненные тесты реализации. Фаза завершена только после реализации,
+Первая партия P0-A: **64 unit-теста написаны и обнаружены; 64 ожидаемых errors**
+из-за отсутствующего `binance_demo_bot.financial`, exit code 1. До реализации
+финансовые assertions не исполнялись. Покрытие первой партии и команда запуска:
+[tests/README](../../apps/binance_demo_bot/tests/README.md). Остальные части
+FIN-01..12 остаются **planned integration scenarios**. Фаза завершена только после реализации,
 focused tests и независимого recompute одинакового input log; численный net PnL должен сверяться с account
 anchors, а completeness и denominator — с календарным manifest. Секреты не нужны в unit fixtures.
 

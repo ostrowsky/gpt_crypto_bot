@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
+Дата: 2026-10-10. Status: **specs complete; P0-A tests written / expected RED; runtime not implemented**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -66,6 +66,12 @@ P5 ledger/outcome capture строится уже с P0–P3: первая де�
 отсутствие forward evidence не разрешает P4/P7 торговое enablement.
 Первый вертикальный milestone: snapshot → intent → actual fill → active
 protection → actual SELL → reconcile → объективный PnL одной демо-сделки.
+
+Первый test-only шаг P0-A: [64 offline unit-теста](../../apps/binance_demo_bot/tests/README.md)
+написаны после фиксации financial API; verified RED (64 missing-interface
+errors, exit code 1). Реализация финансового модуля отсутствует; assertions
+ещё не проходили. P0 integration и P1–P7 tests остаются planned. Торговое
+enablement не выполнялось.
 
 ## Shared interfaces and ownership
 
