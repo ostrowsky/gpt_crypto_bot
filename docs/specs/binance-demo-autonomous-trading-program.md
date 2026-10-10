@@ -145,8 +145,14 @@ dependencies, fixtures и frozen contracts принадлежат только �
 not submit; `PROGRAM-04` one OMS owns all intents; `PROGRAM-05` no secret in
 exceptions/manifests; `PROGRAM-06` actual/shadow results never mix;
 `PROGRAM-07` money and exposure survive restart/rollback.
-При реализации — spec → focused tests → relevant checks → diff review →
-staged Truth Harness → commit → push. Эта документационная поставка проверяет
+Обязательный порядок пользователя: **spec → focused tests → RED → code →
+GREEN → refactor/regressions → diff review → staged Truth Harness → commit → push**.
+Тесты пишутся до реализации по acceptance criteria; RED должен подтвердить
+отсутствующее/неверное поведение, а не сбой среды. Always-green mocks,
+skip/xfail и ослабление assertions не заменяют этот этап. Для preserving refactor
+сначала contract coverage и явное обоснование GREEN без искусственного RED.
+Правило сохранено в [AGENTS.md нового приложения](../../apps/binance_demo_bot/AGENTS.md)
+и [процессе разработки](spec-first-workflow.md). Эта документационная поставка проверяет
 ссылки/регистрацию/согласованность и существующие spec/harness regressions;
 она не заявляет выполненными будущие финансовые или брокерские тесты.
 
