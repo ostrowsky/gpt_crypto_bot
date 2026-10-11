@@ -51,14 +51,21 @@ class _PreparedMarketBatch:
             insert_finished_ns=None, commit_finished_ns=None, failure_at_ns=None)
         self.rows, self.values, self.guards = [], {}, {}
         self._dependency_times = {}
+        self._read_context = None
         self.active = False
         self.conflict_symbol = None
 
     def __enter__(self):
         if self.store._own_batch() or self.active:
             raise AdapterError("NESTED_MARKET_BATCH")
-        self.active = True
         self._timing.update(state="PREPARING", prepare_start_ns=self._now())
+        self._read_context = self.store._reading()
+        try:
+            self._read_context.__enter__()
+        except BaseException:
+            self._timing.update(state="FAILED", failure_at_ns=self._now())
+            raise
+        self.active = True
         return self
 
     @property
@@ -112,6 +119,11 @@ class _PreparedMarketBatch:
 
     def __exit__(self, error_type, error, traceback):
         self.active = False
+        try:
+            self._read_context.__exit__(error_type,error,traceback)
+        except BaseException:
+            self._timing.update(state="FAILED", prepare_end_ns=self._now(), failure_at_ns=self._now())
+            raise
         self._timing["prepare_end_ns"] = self._now()
         if error_type is not None:
             self._timing.update(state="FAILED", failure_at_ns=self._now())
@@ -391,20 +403,26 @@ class MarketSnapshotStore:
         state = self._thread_reader()
         connection = state["connection"]
         with state["lock"]:
-            outer = state["depth"] == 0
-            if outer:
+            if state["depth"] == 0:
                 connection.execute("BEGIN")
+                state["failed"] = False
             state["depth"] += 1
             try:
                 yield connection
-                if outer:
-                    connection.commit()
             except BaseException:
-                if outer:
-                    connection.rollback()
+                state["failed"] = True
                 raise
             finally:
                 state["depth"] -= 1
+                # Overlapping prepared contexts can release out of LIFO order.
+                # The last readonly lease, rather than the first opener, closes.
+                if state["depth"] == 0:
+                    try:
+                        if state["failed"]: connection.rollback()
+                        else: connection.commit()
+                    except BaseException:
+                        connection.rollback()
+                        raise
 
     @contextmanager
     def batch(self):

@@ -113,7 +113,9 @@ class WriterAttributionTests(Fixture, unittest.TestCase):
         finally: self.store._read_con.set_trace_callback(None)
         queries = [sql for sql in traced if sql.startswith("SELECT available_ms")]
         self.assertEqual(len(queries), 1)
-        self.assertEqual(sum(sql=="BEGIN" for sql in traced), 9)
+        # P2B210 supersedes the former nine per-lookup read transactions.
+        self.assertEqual(sum(sql=="BEGIN" for sql in traced), 1)
+        self.assertEqual(sum(sql=="COMMIT" for sql in traced), 1)
         self.assertTrue(all(value["available_at_ms"]==NOW+5 for value in values))
         self.assertEqual(self.store.records("FEATURE", cutoff_ms=NOW), [])
 

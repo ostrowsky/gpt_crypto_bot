@@ -6,7 +6,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 451 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 461 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,
@@ -19,6 +19,9 @@ three-closed-bar warmup with a current open bar.
 rollback/null commit, idle/no-write/bounded timing, exact250ms/late durable
 completion, preserved raw packets, clock/precision/provenance and failure close,
 one atomic failure commit and rollback on the last failure row.
+`test_market_preparation_handoff.py` adds10 P2B2-10 cases: one actual read
+transaction, release before writer/error/empty paths, stable causal prefix,
+foreign writer/candle conflict, caller pins and non-LIFO success/error leases.
 
 | Test file | Coverage in this batch |
 |---|---|
@@ -179,3 +182,13 @@ SQLite abort triggers for both append/prepared paths; assertions stay intact.
 Final **17 focused /
 451 app GREEN**, with real SQL/rollback and mocked clock delays, no skips or
 weaker assertions. Scripted transports are network-denied and contain no keys.
+
+P2B2-10: eight tests first reproduced five intended failures:9 BEGINs vs1,
+missing active read lifetime in empty/error/writer-handoff scenarios, and a
+foreign dependency entering an already started preparation cut. After repair,
+all8 GREEN; the old P2B208 exact9-BEGIN expectation was superseded by the
+spec's stricter1 BEGIN/1 COMMIT while retaining dependency/as-of assertions.
+Then two non-LIFO lease tests reproduced premature commit/rollback before
+lifecycle repair. Final10 focused/461 app GREEN (63.645s full), no skips/xfail
+or causal assertion weakening; actual readonly SQL, foreign threads and writer
+abort triggers. Tests use app-owned synthetic public data, no keys/network.

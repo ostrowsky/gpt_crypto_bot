@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **451 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **461 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -68,6 +68,7 @@ Verified: **451 tests GREEN**, including 56 REST, 69 private/evidence cases,
 22 pinned SQLite/checkpoint/pressure/failure cases,
 12 writer attribution/bulk/dependency/receipt/warmup cases,
 17 durable delivery/evidence/failure cases,
+10 preparation read-prefix/handoff/lease cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -292,3 +293,18 @@ Final P2B2-09 public trial1791737943969095300:52.9277s after35.260s startup,
 retained lag evidence/invalidation with zero evidence-storage failures. Their
 last-group completion was307.5481..460.2281ms. Timing stages include scheduling;
 no controlled performance uplift or sustained-readiness claim is established.
+
+P2B2-10 keeps one readonly WAL cut during preparation, releasing its lease
+before writer handoff. Eight new rows sharing a persisted dependency now use
+one read BEGIN/COMMIT pair instead of nine. Exact retries, original receipts/
+hashes, causal dependency availability and atomic primary writes are retained.
+The cut pins on its first SELECT; foreign writes remain possible, and a foreign
+candle revision is still rejected by the writer's current-sequence guard.
+Caller read cuts and overlapping prepared contexts survive non-LIFO release;
+the last active lease closes the shared read transaction. A failed lease marks
+it for rollback on last release. No queue/engine/financial-code changes or
+FULL/250ms relaxation. Ten new tests followed intended RED; app461 GREEN.
+This verifies resource/correctness contracts, not full-market latency or PnL.
+P2B2-10 public trial1791740709548236200:47.9992632s after41.861s startup,
+1/6 connected,quotes21/1375,closed history10/1375 — FAIL. Five current failed
+sessions retained evidence/invalidation; zero evidence-storage failures.

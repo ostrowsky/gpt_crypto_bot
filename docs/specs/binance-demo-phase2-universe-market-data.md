@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 216 focused tests / 451 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 226 focused tests / 461 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -1279,3 +1279,95 @@ Next gate: attribute native SQL/CPU versus scheduler/serialization handoffs
 on the same full population and test a bounded receiver/writer architecture
 with preserved receipt evidence. Keep FULL/250ms, account certification and
 ORDER_SEND disabled; startup delivery remains explicitly unmeasured here.
+
+## P2B2-10: bounded preparation read handoffs (2026-10-11)
+
+P2B2-09 full-public verdict remains FAIL. Additional diagnostic trial
+1791739741612999800 used sparse wall/thread CPU wrappers plus a main-thread
+cProfile (significant overhead, not an SLA comparison). Full3727/1375 population,
+6 shards, source SHA matched; final46.0640882s,0/6 connected,quotes0/1375,
+history8/1375, no keys/orders. One reader get took306.1925ms with thread CPU
+reported0ms; Windows thread CPU quantization makes this a coarse diagnostic,
+not proof of the exact blocking cause. Preparation lookup currently opens/
+closes a separate readonly transaction per get/dependency lookup. Eight new
+rows sharing one persisted dependency use9 read BEGIN/COMMIT pairs despite
+having one bounded preparation lifetime. Reduce these avoidable SQL/native
+handoffs while keeping the immutable primary and freshness contracts.
+
+P2B210-01: one prepared context owns one readonly WAL transaction for all its
+lookups. It is lazy-pinned by its first actual SELECT, so all later lookups see
+that same committed prefix, plus the context's explicit staged overlay. Eight
+new rows with a shared dependency require one actual read BEGIN/COMMIT pair,
+not9. Keep per-ID existence checks, dependency availability/cache, original
+envelopes/hashes/receipts, detached results and <=64-row write chunks.
+P2B210-02: release the context's read transaction before entering the writer
+or storage-pressure guard, including empty groups. It must not pin WAL while
+waiting for writer completion. Preparation error closes/rolls back its owned
+read transaction, creates no partial primary writes and leaves the connection
+usable. Writer error cannot leave the preparation read transaction open.
+P2B210-03: foreign committed dependency/row revisions after the first read do
+not enter this context's prefix. A future dependency must remain missing until
+a new preparation/read cut. Foreign writers still complete while preparation
+is open. Candle conflict guard is rechecked under the writer against current
+primary sequence and rejects a foreign revision, without publishing the group.
+P2B210-04: an already pinned caller read is preserved. Nested readonly depth
+does not issue a new BEGIN/COMMIT or close the caller's prefix; only a context-
+owned outer read can be released. Never hold the writer during serialization.
+Nested writer batches remain forbidden. No unbounded queue, collector, global
+JSON cache, engine/financial code change, threshold or FULL relaxation.
+
+SPEC -> focused actual SQL/prefix/lifecycle tests -> intended RED -> code ->
+GREEN/regressions -> same full public population with sparse instrumentation
+and preserved failed trials -> staged Truth Harness -> selective commit/push.
+Use complete max-period causal replay before any trading-policy relaxation;
+this storage-only change has no BUY/SELL policy and ORDER_SEND remains off.
+Rollback is to the prior owned market-store implementation after stopping only
+this app and preserving its DB/evidence. No production/PnL qualification is
+implied by fewer SQL calls; report actual full-market readiness separately.
+
+Regression alignment: the old P2B208 dependency-cache test explicitly counted
+9 readonly BEGINs, documenting its former per-lookup behavior. P2B210-01
+supersedes that count with the stricter one-BEGIN/one-COMMIT contract; the new
+test reproduced9!=1 before code. Retain the old one-dependency-query, causal
+available time and as-of exclusion assertions, and add the one-COMMIT assertion.
+This is an explicit spec change to handoff count, not a weakened causal test.
+
+P2B210-05: existing overlapping prepared retries may release contexts in
+non-LIFO order on one thread. Shared readonly leases must keep their prefix
+until the last active lease exits; the first release must not commit/rollback
+another active context's read cut. Ordinary caller pins follow the same rule.
+Any failed read lease marks this shared readonly transaction for rollback on
+last release; no write is possible on it. Final commit failure attempts rollback
+and leaves depth0/connection usable. Each prepared write still commits atomically
+on the separate writer. A read retained by another caller/context is explicitly
+borrowed; only the last lease can close it before that context's writer handoff.
+Add non-LIFO success/error reproductions before repairing lease lifecycle.
+
+### P2B2-10 verification and full-market boundary
+
+Initial8 cases RED with5 intended failures (9 BEGINs vs1, missing open read
+lifetime and foreign dependency leakage into the preparation cut); then8 GREEN.
+Two non-LIFO lease cases subsequently RED before lifecycle repair. Final10
+focused/461 app GREEN (full63.645s), actual traced readonly SQL, foreign writers
+and SQLite abort triggers, no skips/xfail. The old9-BEGIN trace expectation was
+explicitly replaced by the spec's1 BEGIN/1 COMMIT; causal assertions retained.
+
+Sparse full-public trial1791740709548236200 after repair: startup41.861s,
+observation47.9992632s,3727 discovered/1375 active,6 planned shards, source SHA
+matched. Final1/6 connected,quotes21/1375,history10/1375 — FAIL. No keys/orders,
+production_qualified=False. All5 failed current sessions retained committed
+primary IDs and evidence/invalidation PERSISTED with zero storage failures.
+Their last-group completion260.5799..312.8115ms; the connected session's last
+group38.574ms is one diagnostic point, not sustained full-market readiness.
+Observation SQL maxima BEGIN125.0714ms,INSERT60.8523ms,commit160.7274ms;
+writer hold235.2214ms. Startup INSERT376.3201ms and writer wait221.5326ms
+are separate. Different windows/load and sparse instrumentation preclude a
+controlled uplift claim. Intermediate REST1375/1375 does not override FAIL.
+
+Retain preceding failed trials, do not relax FULL/250ms or enable trading.
+Next bounded hot-path gate: avoid repeatedly loading the Windows TLS trust
+store during shard startup/reconnect, with an app/supervisor-owned verified
+client context and explicit unsafe-context refusal. This is motivated by
+the earlier diagnostic SSL trust-load profile, not proven as the sole cause.
+Then repeat the same full population; serialization/SQL scheduler stalls and
+account/financial qualification remain unresolved until independently verified.
