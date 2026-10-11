@@ -6,7 +6,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 461 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 471 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,
@@ -22,6 +22,9 @@ one atomic failure commit and rollback on the last failure row.
 `test_market_preparation_handoff.py` adds10 P2B2-10 cases: one actual read
 transaction, release before writer/error/empty paths, stable causal prefix,
 foreign writer/candle conflict, caller pins and non-LIFO success/error leases.
+`test_market_tls_reuse.py` adds10 P2B2-11 cases: default owner/standalone context
+reuse, independent owner boundaries, custom/disabled paths, unsafe/mutated TLS,
+redacted creation failure before attempts and unchanged Demo handshake guards.
 
 | Test file | Coverage in this batch |
 |---|---|
@@ -192,3 +195,11 @@ Then two non-LIFO lease tests reproduced premature commit/rollback before
 lifecycle repair. Final10 focused/461 app GREEN (63.645s full), no skips/xfail
 or causal assertion weakening; actual readonly SQL, foreign threads and writer
 abort triggers. Tests use app-owned synthetic public data, no keys/network.
+
+P2B2-11:10 tests first RED with5 failures/2 missing-interface errors; three
+preserving custom/disabled/independent-owner cases correctly remained GREEN.
+After code10 focused/471 app GREEN (74.676s full); no skip/xfail or weakened
+assertions. Contexts are real SSLContext with configured verification; network
+handshakes are mocked and a deny probe remains uncalled. The intentional TLS1.1
+refusal case emits the stdlib deprecation warning; it is rejected, never used
+for real transport. Mock success is not proof of server trust-chain acceptance.

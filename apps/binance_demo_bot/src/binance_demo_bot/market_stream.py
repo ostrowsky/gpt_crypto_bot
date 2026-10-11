@@ -60,11 +60,23 @@ def _universe_projection(value):
     return result
 
 
+def _verified_market_tls(context=None):
+    if context is None:
+        try: context = ssl.create_default_context()
+        except Exception: raise AdapterError("WS_UNAVAILABLE") from None
+    if (not isinstance(context,ssl.SSLContext) or context.protocol != ssl.PROTOCOL_TLS_CLIENT
+            or context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname
+            or context.minimum_version < ssl.TLSVersion.TLSv1_2):
+        raise AdapterError("TLS_UNSAFE")
+    return context
+
+
 class DemoMarketWsTransport:
-    def __init__(self, url=WS_URL):
+    def __init__(self, url=WS_URL, *, ssl_context=None):
         if url not in (WS_URL, "wss://demo-stream.binance.com:443/stream"):
             raise AdapterError("FORBIDDEN_ENDPOINT")
         self._connection = None
+        self._ssl_context = _verified_market_tls(ssl_context) if ssl_context is not None else None
         self._logger = logging.Logger("binance_demo_bot.market_transport")
         self._logger.disabled, self._logger.propagate = True, False
         self._controls = deque()
@@ -74,7 +86,8 @@ class DemoMarketWsTransport:
             raise AdapterError("WS_ALREADY_CONNECTED")
         connection = None
         try:
-            connection = ws_connect(WS_URL, ssl=ssl.create_default_context(), proxy=None,
+            self._ssl_context = _verified_market_tls(self._ssl_context)
+            connection = ws_connect(WS_URL, ssl=self._ssl_context, proxy=None,
                 open_timeout=5, close_timeout=2, compression=None, max_size=WS_LIMIT,
                 max_queue=16, ping_interval=None, ping_timeout=5, logger=self._logger, legacy=True)
             if (connection.request.path != "/stream" or connection.request.headers.get("Host")
@@ -660,15 +673,26 @@ class MarketStreamSupervisor:
     def __init__(self, store, client, universe, deep_symbols=(), *, transport_factory=None,
                  background=False, enabled=True, include_candles=False):
         MarketDataService(store,client)._universe(universe,client.clock.wall_ms())
-        if type(background) is not bool or type(enabled) is not bool:
+        if (type(background) is not bool or type(enabled) is not bool
+                or transport_factory is not None and not callable(transport_factory)):
             raise AdapterError("INVALID_PARAMETERS")
         self.store,self.client,self.universe = store,client,_universe_projection(universe)
         self.plan = stream_plan(universe,deep_symbols,include_candles=include_candles)
-        self.transport_factory = transport_factory or DemoMarketWsTransport
+        self._default_factory = transport_factory is None
+        self._ssl_context = None
+        self.transport_factory = self._default_transport if self._default_factory else transport_factory
         self.background,self.enabled = background,enabled
         self.readers, self.attempts, self.slots = {},deque(),{}
         self._lock,self._stop,self._thread = threading.RLock(),threading.Event(),None
         self.running = False
+
+    def _prepare_tls(self):
+        with self._lock:
+            self._ssl_context = _verified_market_tls(self._ssl_context)
+            return self._ssl_context
+
+    def _default_transport(self):
+        return DemoMarketWsTransport(ssl_context=self._prepare_tls())
 
     def start(self):
         if not self.enabled:
@@ -681,6 +705,7 @@ class MarketStreamSupervisor:
             if error.reason not in {"CLOCK_UNSYNCED","CLOCK_STALE"}:
                 raise
             self.client.client.sync_clock()
+        if self._default_factory: self._prepare_tls()
         self.running = True
         self._stop.clear()
         self.tick()

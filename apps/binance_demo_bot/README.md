@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **461 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **471 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -69,6 +69,7 @@ Verified: **461 tests GREEN**, including 56 REST, 69 private/evidence cases,
 12 writer attribution/bulk/dependency/receipt/warmup cases,
 17 durable delivery/evidence/failure cases,
 10 preparation read-prefix/handoff/lease cases,
+10 owned TLS reuse/verification/failure cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -308,3 +309,17 @@ This verifies resource/correctness contracts, not full-market latency or PnL.
 P2B2-10 public trial1791740709548236200:47.9992632s after41.861s startup,
 1/6 connected,quotes21/1375,closed history10/1375 — FAIL. Five current failed
 sessions retained evidence/invalidation; zero evidence-storage failures.
+
+P2B2-11 prepares one verified client TLS context before default supervisor
+stream startup, reuses it across its shards/reconnects/stop-start, and keeps a
+separate context per supervisor. Standalone transports retain their own context
+after the first connect. Custom factories and disabled startup load no default
+trust store. Optional `ssl_context` is checked for client protocol, CERT_REQUIRED,
+hostname verification and minimum TLS1.2 at construction and each handshake.
+Creation failure stops the owner before connection attempts; health contains
+no TLS material/dependency exception text. Demo host/path, proxy/size/queue/
+logging guards, actual receipts, FULL and250ms remain.10 new tests after RED,
+471 app GREEN; mocked TLS checks are distinct from the public network smoke.
+Public trial1791741563868852000:1 REST plus1 market TLS build, startup6/6
+connected, first post-tick0/6; final48.0524598s,0/6 connected,REST quotes1375/1375,
+history14/1375 — FAIL. TLS reuse works; sustained stream latency remains open.

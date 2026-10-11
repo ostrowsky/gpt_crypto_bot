@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 226 focused tests / 461 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 236 focused tests / 471 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -1371,3 +1371,88 @@ client context and explicit unsafe-context refusal. This is motivated by
 the earlier diagnostic SSL trust-load profile, not proven as the sole cause.
 Then repeat the same full population; serialization/SQL scheduler stalls and
 account/financial qualification remain unresolved until independently verified.
+
+## P2B2-11: owned verified TLS context reuse (2026-10-11)
+
+P2B2-10 stays full-market FAIL. The diagnostic main-thread profile included
+repeated ssl.create_default_context trust-store work:824 load_verify_locations
+calls/2.446s and16 Windows enum_certificates calls/1.137s. Those are amplified
+profile wall observations, not a controlled native CPU or latency improvement
+claim. Current market transport creates a fresh TLS context on every connect,
+including each shard/reconnect while earlier reader threads are active. Move
+this repeated preparation out of the active default reconnect path.
+
+P2B211-01: each default MarketStreamSupervisor owns one client SSLContext,
+created/validated before enabling its first stream in start; reuse it for all
+its default transports, reconnects and stop/start. A new supervisor owns a new
+context (no module/global pool). Creating/disabled-starting the supervisor alone
+does not load certificates. Custom transport factories remain untouched and
+load no default TLS context. Reject noncallable non-None factories.
+P2B211-02: standalone DemoMarketWsTransport retains its own context after the
+first connect, reusing it on reconnect. Optional keyword ssl_context accepts
+only SSLContext with PROTOCOL_TLS_CLIENT, CERT_REQUIRED, check_hostname=True
+and minimum TLS>=1.2. Recheck these properties immediately before each handshake
+because the object can be mutated. An unsafe/noncontext object is TLS_UNSAFE
+before ws_connect; context creation failure maps to redacted WS_UNAVAILABLE.
+Supervisor TLS preparation failure leaves running=False, zero connection
+attempts/readers; no network started. Context creation is synchronized by the
+owner lock; no exposed mutable global or background TLS worker.
+P2B211-03: retain exact Demo host/path, disabled proxy/compression/logger,
+max_queue16/max_size1MiB, heartbeat, quotas, verify_hostname/trust chain,
+actual receipts, original freshness250ms, immutable WAL/FULL and fail-closed
+readiness. Health never includes SSL objects/certificates or dependency errors.
+Default trusted context uses ssl.create_default_context; do not substitute
+CERT_NONE, bypass Windows roots or claim mock handshake proves real TLS.
+
+SPEC -> focused fail-before-code context identity/lifetime/mutation/creation
+failure/custom-factory/disabled/endpoint/guard tests -> minimal code -> GREEN
+regressions -> same full public population with sparse diagnostics -> full/
+staged Truth Harness -> selective commit/push. Preserve every failed trial;
+fewer trust-load calls do not prove sustained readiness or PnL. No trading-policy
+relaxation; max-period causal replay required before future BUY/SELL changes.
+Rollback stops only this app and returns the prior transport/supervisor source,
+preserving primary state. Account/financial qualification and orders stay off.
+
+Next diagnostic (not product policy): in a fresh own public-smoke process only,
+compare the interpreter's default thread switch interval with1ms; record the
+actual interval in evidence and restore it in finally. Same full population,
+WAL/FULL,250ms and quotas; no old-bot/global host change, keys or orders. A
+short favorable point does not prove sustained readiness. This probes the
+scheduling/native-call convoy observed in stage wall versus CPU measurements;
+it is not permission to silently change application-wide runtime settings.
+
+### P2B2-11 verification and full-market boundary
+
+Ten focused tests first RED (5 failures/2 missing-interface errors); three
+preserving scenarios correctly GREEN. Then10 focused/471 app GREEN, full
+74.676s, no skips/xfail or weakened assertions. Unit contexts are real configured
+SSLContext; handshakes are mocked/network-denied, not a server trust proof.
+The intentional deprecated TLS1.1 fixture is refused before network use.
+
+Sparse public trial1791741563868852000: startup42.358s, observation48.0524598s,
+3727 discovered/1375 active,6 shards, source SHA matched, no keys/orders. Actual
+TLS builds:1 REST context (390.331ms) plus1 shared market context (287.8529ms),
+no per-shard/reconnect trust reload during this trial. Startup snapshot6/6
+connected; first post-tick snapshot0/6, final0/6 connected,quotes1375/1375 via
+recent REST snapshot,closed history14/1375 — FAIL. REST coverage is not stream
+readiness. All6 final failed sessions retained lag evidence and invalidation
+with zero evidence-storage failures; last-group completion251.1684..467.6529ms.
+Observed writer wait746.6359ms (sparse outer-lock profiler) differs from current
+last-group waits and must not be equated to one group's diagnostic phases.
+Observe SQL maxima:BEGIN85.2309ms,INSERT129.436ms,commit76.7275ms; startup
+INSERT456.4854ms separate. TLS reuse is verified, not a proven latency/PnL uplift.
+Failure appears after working tick as well as startup; preserve this boundary
+and test scheduling/serialization/writer handoffs before any gate relaxation.
+
+Owned-process1ms scheduling trial1791741790188852800 is also FAIL: source
+SHA matched,3727/1375 population,6 shards, startup34.545s/start connected2/6;
+first post-tick0/6,final47.6363272s,0/6 connected,REST quotes1375/1375,history12/1375.
+The finite probe restores its previous switch interval in finally and changes
+no product runtime setting. It is not promoted: a faster switch alone has not
+qualified stream readiness. Sequential market windows/disk/host load differ;
+no controlled causal speedup or degradation attribution is established.
+Next architectural gate: bounded common writer/coalesced durable group handoff,
+with commit ACK, exact causal receipts, candle guards, failure isolation and
+shutdown/backpressure tests before code. Avoid a growing queue or primary drops.
+FULL/250ms and disabled trading remain. Startup delivery and authenticated
+account/financial certification remain separately unqualified.

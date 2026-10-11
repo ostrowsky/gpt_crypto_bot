@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B2 foundations / 461 GREEN; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B2 foundations / 471 GREEN; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -128,6 +128,14 @@ FULL/250ms и causal envelope/guard сохраняются; full-market gate о�
 Свежий public trial1791740709548236200:47.9992632s,1/6 connected,
 quotes21/1375,history10/1375 — FAIL. Следующий gate — owned TLS context reuse
 с проверкой TLS guards, затем повтор полного потока; ORDER_SEND выключен.
+
+P2B2-11: owned TLS context reuse до stream startup и при reconnect вместо
+повторной Windows trust-store загрузки. Unsafe/mutated contexts отклоняются;
+TLS verification/hostname/minTLS1.2 и Demo endpoint сохранены.10 новых тестов
+после RED,471 GREEN. Это hot-path correctness, а не full-market или PnL pass.
+Public trial1791741563868852000:startup6/6, после tick0/6; финал48.0524598s,
+0/6 streams,REST quotes1375/1375,history14/1375 — FAIL. Только1 market TLS
+build; serialization/scheduler/writer остаются отдельным gate.
 
 ## Shared interfaces and ownership
 
