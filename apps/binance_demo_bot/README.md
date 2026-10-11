@@ -1,10 +1,12 @@
-# Independent Binance Demo bot — P0-A/B and P1-A REST foundation
+# Independent Binance Demo bot — P0-A/B and P1-A/B read-only foundations
 
 This separate application implements offline Decimal accounting, valuation,
 daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation.
 P1-A adds an explicitly invoked read-only Demo REST adapter. The offline
 entrypoint starts no account client. No order sending or learning workers exist.
-Private events, account reconciliation and the remaining P1–P7 services are pending.
+P1-B implements private event collection, durable fill/cursor recovery and
+diagnostic comparison with the journal. Authenticated runtime verification,
+certified account readiness and the remaining P2–P7 services are pending.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md),
@@ -50,12 +52,13 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **166 tests GREEN**, including 56 REST contract tests, 29 durable integration cases and real
+Verified: **235 tests GREEN**, including 56 REST, 69 private/evidence cases,
+29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
 
 `BinanceDemoAdapter` exposes `ping`, `sync_clock`, `read_account`,
-`read_open_orders`, `read_order` and explicit-cursor `recover_fills`. Construct
+`read_open_orders`, `read_open_order_lists`, `read_order` and explicit-cursor `recover_fills`. Construct
 it with `load_demo_credentials(AppPaths(own_absolute_root))`, opaque local
 account/generation/episode/scope IDs and a separately persisted app-owned random
 identity key (>=32 bytes). Keep this identity key stable across credential
@@ -74,3 +77,32 @@ coverage. P1-A neither writes fills to the journal nor certifies midnight
 anchors. Real public Demo ping/time were verified on 2026-10-11 (HTTP 200, warm
 RTT 289–296ms, valid clock samples). Authenticated read and private stream smoke
 are pending; ORDER_SEND is always disabled and key TRADE remains UNVERIFIED.
+
+P1-B library sequence:
+
+1. Explicitly load the new app's credentials and stable identity key; construct
+   the adapter and read its sanitized account token. Open `AccountEvidenceStore`
+   with that account/episode/scope token under the own `.runtime`.
+2. Construct `PrivateEventReader(adapter, store, process_instance_id=...)` and
+   call `start()`. It verifies account identity, subscribes once and starts only
+   its own reader thread. Production/Testnet targets, order mutations, unknown
+   subscriptions/events, payload logging and blind subscription retries are blocked.
+3. Use `AccountReconciler(store).recover(adapter, explicit_symbols)` to persist
+   every explicit symbol's REST evidence and overlapping cursor atomically.
+   Discover the complete permitted population through P2; held symbols alone
+   cannot establish this population. A stream fill never moves the REST cursor.
+4. Take fresh account/orders/lists snapshots and call `compare(journal, marks,
+   ..., journal_anchor_ms=...)`. Supply the actual opening-anchor provenance;
+   current quantities cannot prove historical seed basis. Check reasons and
+   `comparison_stale(id, journal=journal, marks=marks)` before using diagnostics.
+5. Close reader, store and transport explicitly. Reader stop leaves a durable
+   gap incident and joins only its own thread. No exchange orders are canceled.
+
+The evidence store preserves one economic fill across REST/WS plus separate
+receipt clocks, partial balance facts, unclassified flows/lists and unresolved
+incidents. Reopen verifies hashes/namespace and reconstructs cursors; conflicting
+economics or tampering fails closed. It never silently rewrites financial lots.
+Diagnostic READ_CHECK_MATCH still has `exchange_reconciled=false`; actual as-of
+cuts, ownership, P2 valuation and resolution evidence are required for readiness.
+The public Demo WSS handshake/time/Pong smoke passed on 2026-10-11 without keys.
+No authenticated subscription was attempted; startup remains offline.

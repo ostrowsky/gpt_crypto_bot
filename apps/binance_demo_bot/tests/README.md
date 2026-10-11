@@ -14,6 +14,8 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 | `test_offline_startup.py` | Installed own-venv package starts without credentials/trading; inherited PYTHONPATH rejected. |
 | `test_durable_journal.py` | 29 integration cases: WAL/FULL, actual process deaths, single writer, fill/report retry, outbox integrity/ACK, late FIFO/PIT receipt cutoffs, revisions, namespace/schema/cache and provenance. |
 | `test_adapter.py` | 56 P1-A cases: exact REST HMAC bytes, Demo host/GET/TLS guards, persistent connection, clock and actual receipts, redaction, Decimal/schema/UID tokens, permissions, read-only orders, fill pagination, deadline/retry/auth/rolling and shared-IP budget. |
+| `test_private_stream.py` | 31 P1-B cases: WS signing/host/TLS/quiet logger, ACK/session, buffering, normalization, fees/flows/lists, heartbeat/worker stop, shared limits and redaction. |
+| `test_account_evidence.py` | 38 P1-B cases: 36 real durable/reconcile scenarios plus 2 open-list adapter tests; atomic recovery/cursors, actual crashes, hashes/namespace/envelopes, duplicates/conflicts, journal/BNB fees, unknown coverage and report freshness. |
 
 Run from the app directory with its own installed environment:
 
@@ -58,6 +60,17 @@ fixture gained `read1` support to match the transport interface while retaining
 the exact size guard. Scripted transport responses prove request contracts, not
 actual account permissions or profit. Public Demo smoke separately verified
 HTTP 200 ping/time and 289–296ms warm RTT; private smoke remains pending.
+
+P1-B on 2026-10-11: 21+26 intended missing-module RED errors and one missing
+REST symbol field. Open-list tests were isolated from an unrelated missing
+fixture dependency and reproduced two missing-method errors before code. New
+boundary reproductions preceded fixes (money/commission, cursor/schema,
+terminal state, trust/coverage, generation races, WS/REST quota, redaction and
+envelope). Fixture corrections retained all assertions: stale request clock
+moves with receipt, repeated comparisons reuse their own journal writer lease.
+Final **235 app tests GREEN**, including 69 new P1-B cases. Before/after-COMMIT
+crashes use own-venv subprocesses and real SQLite. Public WSS handshake/time/Pong
+passed separately; no authenticated subscription or orders were attempted.
 
 Remaining acceptance gates: actual exchange reconciliation/anchors and PIT
 valuation/seed availability, reset evidence, cross-arm sum,

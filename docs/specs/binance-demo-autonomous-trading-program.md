@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-11. Status: **P0-A/B + P1-A REST foundation / 166 GREEN; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A/B read-only foundations / 235 GREEN; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -74,9 +74,11 @@ core и начальные isolation/startup guards реализованы. P0-B
 atomic outbox/replay/restart и immutable report revisions реализованы.
 P1-A REST: 56 focused tests после RED; безопасные account/orders/fill reads,
 clock/signing/rate guards и реальный public Demo ping/time реализованы.
-Authenticated read smoke, private events и actual anchors/cursors/reconcile
-остаются pending. Следующий приоритет — P1-B через specs/tests/code; order
-sending disabled. Фазы 2–7 planned; готовность заработать не доказана.
+P1-B: 69 new tests после RED; private reader, устойчивые события/cursors и
+diagnostic comparison с financial journal реализованы. Authenticated private
+smoke, exclusive ownership и certified as-of reconcile/anchors pending.
+Следующий приоритет — P2 universe/data/valuation через specs/tests/code;
+order sending disabled. Готовность заработать не доказана.
 
 ## Shared interfaces and ownership
 

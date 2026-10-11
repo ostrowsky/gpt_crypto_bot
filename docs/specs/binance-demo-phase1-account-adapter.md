@@ -1,7 +1,7 @@
 # Binance Demo phase 1: account adapter and capability evidence
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P1-A REST foundation / 56 focused tests GREEN; full P1 incomplete**.
+Status: **P1-A/B read-only foundations / 235 app tests GREEN; full P1 incomplete**.
 Priority: P1, after [phase 0](binance-demo-phase0-financial-contract.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -31,8 +31,9 @@ app root, with its own `.venv`, dependencies/lock, configuration and lifecycle.
 Current source may be studied read-only as a reference; no runtime imports of
 `files/*`, shared current-app clients, configuration or globals are allowed.
 Do not repoint existing endpoints or start/stop old collectors or trading workers.
-P1-A implements only the REST subset documented below; the remaining scope is
-planned. No running authenticated service or private-event reader exists yet.
+P1-A implements REST; P1-B implements private observation, durable recovery and
+diagnostic journal comparison. No authenticated production service has been
+started or verified; certified account readiness and execution remain pending.
 
 Allowed operations: public ping/time/metadata; signed account, order/list,
 fill, commission and account-filter reads; current private stream subscriptions.
@@ -387,3 +388,209 @@ Private requests: 0; matching-engine orders: 0. Unit tests are not authenticated
 account permission evidence. No new-app real credential pair was provisioned or
 read. Authenticated read smoke, PRIVATE_EVENTS, account ownership and full
 ADP-01..11/reconciliation remain pending. Raw logs stay app-local ignored runtime.
+
+## P1-B: private observation and reconciliation contract (2026-10-11)
+
+Implement `private_stream.py` and `account_evidence.py` in the independent app.
+This is a read-only evidence service, not an OMS or automatic financial writer.
+The existing accounting code/frozen journal identity is unchanged. No current
+bot state, process or credential file is consulted. Real authenticated smoke
+still requires explicit provisioning in the new app. A service supervisor/CLI,
+actual account ownership, certified P2 population/valuation and optional order
+validation are later gates; full P1 is not called complete without them.
+
+Sources: [signature subscription](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-api.md#user-data-signature),
+[event schema](https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md),
+[open lists](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/account),
+[websockets sync client](https://websockets.readthedocs.io/en/stable/reference/sync/client.html).
+Pin the WS dependency in the own project/lock; no global installation.
+
+### Private reader public API
+
+* `sign_ws(parameters, secret)` returns an HMAC hex digest of alphabetical
+  `name=value` pairs joined with `&`, UTF-8 without REST percent encoding.
+  Same scalar formatting as REST; reserved signature/duplicate names rejected.
+* `DemoWsTransport(url=canonical)` opens only
+  `wss://demo-ws-api.binance.com/ws-api/v3` (or explicit :443), verified TLS,
+  no inherited proxies, private headers, redirects or arbitrary connect kwargs.
+  Verify the completed handshake Host/path before sending any private payload;
+  reject alternate URI even if the library followed a public handshake redirect.
+  Opening timeout 5s, close 2s, message limit 1MiB, bounded queue 64; disable the
+  library's payload logger with an app-owned logger, without changing global
+  logging. `connect()`, `send(dict)`, `recv(timeout_s)`, `ping(timeout_s)`,
+  `close()`; send allowlist: time, ping, session.subscriptions,
+  userDataStream.subscribe.signature. No order mutations or test orders.
+* `PrivateEventReader(adapter, store, *, transport=None, process_instance_id,
+  background=True)`: `start()`, `poll_once(timeout_s=1)`, `heartbeat()`,
+  `health()`, `close()`. Validate a fresh REST account identity against the
+  store before subscribing. Reserve WS connect/subscription weight in the own
+  REST limiter; one signed subscribe with a unique request ID, recvWindow 5000.
+  No blind resend after missing ACK. Persist the subscription mapping only
+  after matching success ACK (status 200 and integer subscriptionId).
+  Buffer <=64 pre-ACK events with original receipt clocks, then normalize them
+  against that exact session/subscription. Mismatched ACK, auth/ban/rate error,
+  unknown/foreign event, schema failure, overflow or disconnect records an
+  incident, closes transport and invalidates readiness. Never echo wire bodies
+  or error messages. A manual new session retains the prior gap incident.
+  After start, an own bounded reader thread (optional false in deterministic
+  tests) persists received observations while REST recovery runs. SQLite access
+  is serialized within the single store writer lease. Close joins its own
+  thread only; no other bot worker is touched. Heartbeat is an explicit Pong
+  check every 15s, <=5s wait. Silence/timeouts alone are not missing events.
+
+Normalized events: executionReport -> order update plus optional TRADE fill;
+outboundAccountPosition -> partial absolute balances (u), never full snapshot;
+balanceUpdate -> unclassified signed flow, never automatic trading PnL;
+listStatus -> list/order identities; eventStreamTerminated/externalLockUpdate
+-> explicit blocking incident. Unknown types are quarantined as reason/receipt
+metadata only. Preserve E/T/u and actual UTC/monotonic receipt separately.
+No fictitious minute order, inferred trade or arrival-order overwrite.
+TRADE requires positive l/L/Y, nonnegative trade ID, exact commission n/N,
+side and maker flag; non-TRADE updates create no financial fill. Fill money
+identities match REST fields; zero commission has null economic commission
+asset. No raw UID, API values or arbitrary payload fields are persisted.
+Positive commission requires an explicit commission asset; null is permitted
+only for zero economic commission. Normalized event kinds have separate exact
+field sets: a balance/list/flow event cannot smuggle in a TRADE fill. Equal-time
+terminal order conflicts block rather than using arrival order as authority.
+
+### Durable evidence public API
+
+`AccountEvidenceStore(paths, *, account_alias, account_identity, episode_id,
+scope_id, database='account-evidence.sqlite', fault_hook=None)` uses own SQLite
+WAL/FULL/FK and OS writer lease; account_identity is the sanitized 64-hex HMAC
+token, not UID. Frozen metadata contains schema/app/demo/objective/account/
+episode/scope; credential generation belongs to observations/session bindings,
+not an irreversible account reset. Different account/scope/schema fails closed.
+`close()` is idempotent, context manager supported. Append-only source records
+are hashed and verified on reopen; derived cursors are recomputed from immutable
+recovery receipts, not trusted as an unchecked mutable cache. No auto repair.
+
+* `bind_session(session_id, subscription_id, credential_generation)` freezes
+  mapping for that session; reuse/conflict rejected. Persist received/recorded
+  clocks and process provenance; restarting never revives old session health.
+* `record_event(session_id, subscription_id, normalized_event,
+  received_at_ms, received_monotonic_ns, process_instance_id)` saves an immutable
+  event/receipt; same economic trade across REST/WS is one fill, different
+  receipts survive. Conflicting economics block with durable incident. Event
+  dedup is normalized identity/hash; preserve out-of-order facts. No financial
+  projection is modified here. `fills()`, `events()`, `incidents()` expose only
+  sanitized stored facts. Unknown/flow/lock/gap incidents remain unresolved;
+  no later snapshot silently clears them.
+* `record_recovery(result)` accepts only namespace-matching, correctly hashed
+  P1-A myTrades observations for one explicit symbol/cursor. Atomically persist
+  the explicit `symbol` field added to recovery results, including empty tails;
+  deduplicated fills, all page evidence and a recovery receipt; cursor advances
+  only in that same transaction. `cursor(symbol)` is next recovery ID, while
+  `recovery_start(symbol, overlap=100)` replays IDs below it without assuming
+  IDs are contiguous. WS fills never advance a REST recovery cursor. A partial
+  page result is retained as PARTIAL and cannot certify tail exhaustion. A
+  replay starting ahead of the durable cursor records HISTORY_GAP, not success.
+  Initial origin must be explicit ID zero for available-history recovery;
+  arbitrary starting ID remains a history limitation. Unknown global denominator
+  stays null. `before_commit`/`after_commit` fault hooks test real crash recovery.
+* `record_incident(reason)` stores only a recognized stable code/provenance;
+  no raw response or secret text. Append-only and retained across reopen.
+
+`BinanceDemoAdapter.read_open_order_lists()` reads signed GET
+`/api/v3/openOrderList` (weight 6), validates known list enums, complete member
+identity and transaction time. All list IDs/client IDs remain UNATTRIBUTED.
+No optional mutations are added to the transport allowlist.
+
+### Reconciliation public API
+
+`AccountReconciler(store).compare(journal, marks, *, account, orders, lists,
+population_symbols, population_complete=False, owned_client_ids=(),
+stream_health=None, now_ms=None, journal_anchor_ms=...)` produces a diagnostic immutable evidence
+result: every expected/nonzero returned asset's free+locked versus actual
+JournalStore projection, exact Decimal deltas, missing coverage rows, matched
+assets n/N, order/list observations and foreign identities, every post-anchor
+recovered fill absent/conflicting in the journal, per-symbol recovery tails and
+global fill denominator null. The caller must supply an explicit
+`journal_anchor_ms`; fills at/before the opening anchor are not replayed twice
+but cannot certify seed history. Compare journal episode/scope, account token,
+snapshot source hash/endpoint, nonfuture <=30s receipt and all supplied evidence
+namespaces. Stale, incomplete, unknown history/population, unhealthy stream,
+foreign/manual activity, flows or any discrepancy yields ACCOUNT_UNRECONCILED.
+Matching quantities alone yield BALANCES_MATCH diagnostic, never ORDER_SEND
+or certified money. Even a fully matching observation is READ_CHECK_MATCH,
+exchange_reconciled=false: certified as-of cut/ownership and P2 evidence must be
+implemented before readiness. Record input hashes and evidence-store generation;
+new source events make the saved comparison stale. No clearing incidents,
+inventing missing zeroes, overwriting financial opening lots or claiming profit.
+Invalid/untrusted account evidence is quarantined: it cannot yield BALANCES_MATCH
+or a favorable matching ratio. Duplicate balance rows and malformed normalized
+snapshots are schema failures. Freeze evidence generation at check start; new
+events during a check make its report stale. `comparison_stale(id, journal=None,
+marks=None)` checks account-store generation and, when an explicit journal/marks
+pair is provided, the current financial projection hash. Without that pair it
+cannot certify external journal freshness. Recovery next ID must equal the
+maximum observed trade ID +1 (or the starting ID for an empty result); a caller
+cannot skip unobserved IDs by supplying an arbitrary checkpoint.
+Future journal anchors are invalid input. Malformed order/list observations
+yield unknown foreign-order counts, not zero. Unknown dependency error reasons
+are redacted even when an injected transport raises AdapterError; handshake
+cleanup failures cannot expose dependency messages. WS 429/418 closes the shared
+own limiter using the reported retryAfter (absolute UTC ms) or a conservative
+60s fallback; validated WS minute weight counters feed the same conservative
+IP budget. Signed flow quantities preserve exact Decimal input independently
+of the ambient arithmetic context.
+Every durable P1-B record includes the program EventEnvelope namespace,
+event_id, event_type=`PrivateAccountEvidenceRecorded`, actual receipt/recorded
+clocks, process instance, source SHA and nullable causation/model/policy/arm/risk
+identity. A RECOVERY/COMPARISON/SESSION has no invented exchange event time.
+Envelope hashes and namespace are checked on reopen. These observed events
+are distinct from the financial journal's `ExchangeFillRecorded` publication.
+
+`AccountReconciler.recover(adapter, symbols, *, page_size=1000,max_pages=100)`
+queries the explicit complete caller population in sorted order, overlapping
+durable cursors and recording each symbol atomically. It does not infer the
+population from held/open assets. Empty/partial/failed population remains
+uncertified. Caller starts reader before recovery and compares fresh REST
+anchors afterward; concurrent deltas are retained and close readiness rather
+than silently consumed. Automated global bootstrap/entry readiness remains a
+later service until certified population and P2 as-of valuation are available.
+
+### Focused tests before implementation
+
+| ID | P1-B scenarios |
+|---|---|
+| PB-01 | Exact independent WS signing; all host/mutation/logger/TLS/handshake and size guards. |
+| PB-02 | Correct/wrong/missing subscription ACK, events before ACK, clock/rate/auth failure, mapped session only, no automatic resend. |
+| PB-03 | Execution/fill/fees, non-TRADE, partial balances, signed flows/lists, unknown/termination/lock/overflow, receipt clocks and redaction. |
+| PB-04 | Durable identity, single writer, immutable events, duplicate/conflicting REST/WS economics, out-of-order receipts, restart gap. |
+| PB-05 | WAL/FULL, real process crash before/after fill+cursor commit, overlapping cursors, partial pages, omitted origin, tamper failure. |
+| PB-06 | Balance/locked/missing/dust delta, journal fill omission/conflict, foreign orders/lists, stale/future/wrong-scope evidence, n/N/null. |
+| PB-07 | Actual journal integration without writes, empty population, all-symbol recovery, stale comparisons on later evidence and heartbeat limitations. |
+
+Full/changed Truth Harness and regressions remain mandatory. Unit/thread/crash
+tests prove these mechanics only. Public WS handshake/time smoke can establish
+connectivity without sending keys; it cannot establish PRIVATE_EVENTS support.
+
+### P1-B recorded verification (2026-10-11)
+
+SPEC -> 21 private_stream and 26 account_evidence intended missing-module RED
+errors, plus missing symbol reproduction in existing REST tests. Two open-list
+tests independently reproduced the missing REST method after correcting an
+unrelated fixture dependency; implementation followed those RED runs. Added
+boundaries reproduced failures before fixes: cross-kind fill injection, exact
+commission/flow values, terminal-state conflicts, skipped cursor, mixed
+generation pages, untrusted snapshot scores, report source races, dependency
+redaction, shared WS/REST limits and missing program envelopes. No skips/xfail
+or weakened assertions. Stale-snapshot fixture now moves its request-start clock
+along with receipt; its repeated comparison reuses the own journal lease.
+
+Final **235 app tests GREEN**: existing 166 plus 69 new P1-B tests (31 private
+stream, 38 evidence/open-list). Actual own-venv subprocess deaths before/after
+recovery COMMIT prove atomic fill+cursor durability; WAL/FULL, immutable-row and
+tamper/reopen tests use real files. Journal integration includes BNB fee matching;
+the comparison does not write financial events. Root regressions: 27 PASS.
+Full Truth Harness PASS; staged gate remains required before commit.
+
+Public Demo WSS smoke: verified handshake (1560.641ms), time response status
+200 and verified Pong. Private requests/subscriptions: 0; orders sent: 0.
+This proves public transport connectivity only. Credentials were not provisioned
+or read; real signed private smoke, exclusive account ownership, certified
+population/valuation/as-of cut, incident resolutions and OMS remain pending.
+The offline entrypoint is unchanged and starts no service. ORDER_SEND stays
+disabled; PRIVATE_EVENTS cannot become certified through a quiet socket or tests.

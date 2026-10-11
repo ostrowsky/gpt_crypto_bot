@@ -302,6 +302,7 @@ class AdapterCase(unittest.TestCase):
     def test_rest05_fill_commission_and_ownership(self):
         self.reply([trade()])
         result = self.adapter.recover_fills("BTCUSDT", from_id=0)
+        self.assertEqual(result["symbol"], "BTCUSDT")
         value = result["data"][0]
         self.assertEqual(value["commission_quantity"], Decimal("0.001"))
         self.assertEqual(value["commission_asset"], "BNB")

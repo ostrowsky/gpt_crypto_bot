@@ -22,7 +22,7 @@ from .isolation import DemoCredentials
 
 BASE_URL = "https://demo-api.binance.com/api/v3/"
 READ_PATHS = frozenset(("/api/v3/ping", "/api/v3/time", "/api/v3/account",
-                        "/api/v3/openOrders", "/api/v3/order", "/api/v3/myTrades"))
+                        "/api/v3/openOrders", "/api/v3/order", "/api/v3/myTrades", "/api/v3/openOrderList"))
 BODY_LIMIT = 8 * 1024 * 1024
 
 
@@ -604,6 +604,32 @@ class BinanceDemoAdapter:
         except AdapterError:
             raise AdapterError("INVALID_PARAMETERS") from None
 
+    def _order_list(self, row):
+        if (not isinstance(row, dict) or row["contingencyType"] not in {"OCO", "OTO", "OTOCO", "OPO", "OPOCO"}
+                or row["listStatusType"] not in {"RESPONSE", "EXEC_STARTED", "ALL_DONE", "UPDATED"}
+                or row["listOrderStatus"] not in {"EXECUTING", "ALL_DONE", "REJECT"}
+                or not isinstance(row["orders"], list) or not row["orders"]):
+            raise AdapterError("SCHEMA_INVALID")
+        symbol = _text(row["symbol"])
+        orders = [dict(symbol=_text(item["symbol"]), order_id=_integer(item["orderId"]),
+                       client_order_id=_text(item["clientOrderId"])) for item in row["orders"]]
+        if any(o["symbol"] != symbol for o in orders) or len({o["order_id"] for o in orders}) != len(orders):
+            raise AdapterError("SCHEMA_INVALID")
+        return dict(order_list_id=_integer(row["orderListId"]), symbol=symbol,
+                    contingency_type=row["contingencyType"], list_status_type=row["listStatusType"],
+                    list_order_status=row["listOrderStatus"], list_client_order_id=_text(row["listClientOrderId"]),
+                    transaction_time_ms=self._event_time(row["transactionTime"]), orders=orders, ownership="UNATTRIBUTED")
+
+    @_signed_read
+    def read_open_order_lists(self):
+        raw, meta = self._request("/api/v3/openOrderList", {}, signed=True, weight=6)
+        if not isinstance(raw, list):
+            raise AdapterError("SCHEMA_INVALID")
+        data = [self._order_list(row) for row in raw]
+        if len({row["order_list_id"] for row in data}) != len(data):
+            raise AdapterError("SCHEMA_INVALID")
+        return self._observation(data, meta)
+
     def _fill(self, row, symbol):
         if not isinstance(row, dict) or row.get("symbol") != symbol:
             raise AdapterError("SCHEMA_INVALID")
@@ -644,7 +670,7 @@ class BinanceDemoAdapter:
                     exhausted = True
                     break
             result = self._observation([collected[k] for k in sorted(collected)], observations[-1])
-            result.update(tail_exhausted=exhausted, completeness="SYMBOL_TAIL_EXHAUSTED" if exhausted else "PARTIAL",
+            result.update(symbol=symbol, tail_exhausted=exhausted, completeness="SYMBOL_TAIL_EXHAUSTED" if exhausted else "PARTIAL",
                           next_from_id=cursor, starting_from_id=from_id, coverage="QUERIED_SYMBOL_CURSOR_ONLY",
                           page_observations=observations)
             return result
