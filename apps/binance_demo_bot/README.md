@@ -1,4 +1,4 @@
-# Independent Binance Demo bot — P0-A/B and P1-A/B read-only foundations
+# Independent Binance Demo bot — P0/P1 and P2-A read-only foundations
 
 This separate application implements offline Decimal accounting, valuation,
 daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation.
@@ -6,11 +6,14 @@ P1-A adds an explicitly invoked read-only Demo REST adapter. The offline
 entrypoint starts no account client. No order sending or learning workers exist.
 P1-B implements private event collection, durable fill/cursor recovery and
 diagnostic comparison with the journal. Authenticated runtime verification,
-certified account readiness and the remaining P2–P7 services are pending.
+certified account readiness and the remaining P2-B–P7 services are pending.
+P2-A implements all-category public discovery, immutable received-as-of snapshots,
+REST quotes/closed minute features and whole-inventory midpoint valuation.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md),
-[account adapter](../../docs/specs/binance-demo-phase1-account-adapter.md#p1-a-first-read-only-implementation-contract-2026-10-11).
+[account adapter](../../docs/specs/binance-demo-phase1-account-adapter.md#p1-a-first-read-only-implementation-contract-2026-10-11),
+[universe/market data](../../docs/specs/binance-demo-phase2-universe-market-data.md#p2-a-discovery-rest-observations-and-portfolio-marks-2026-10-11).
 Development order: **SPEC → TESTS → CODE**; see [AGENTS.md](AGENTS.md).
 
 From `apps/binance_demo_bot` on this workstation:
@@ -52,7 +55,8 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **235 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **292 tests GREEN**, including 56 REST, 69 private/evidence cases,
+57 public market/universe/valuation cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -106,3 +110,34 @@ Diagnostic READ_CHECK_MATCH still has `exchange_reconciled=false`; actual as-of
 cuts, ownership, P2 valuation and resolution evidence are required for readiness.
 The public Demo WSS handshake/time/Pong smoke passed on 2026-10-11 without keys.
 No authenticated subscription was attempted; startup remains offline.
+
+P2-A library sequence (manual read-only calls, no scheduler):
+
+1. Construct `DemoMarketClient()` without credentials, or explicitly share
+   the new app's `BinanceDemoAdapter` to share its clock and weight reserve.
+   Open `MarketSnapshotStore(AppPaths(own_absolute_root), account_alias=...,
+   episode_id=..., scope_id=...)` under the own runtime; it is separate from
+   the private evidence store and financial journal.
+2. Call `UniverseService(store, client).refresh(account=None)` for
+   PUBLIC_REFERENCE, or pass the new adapter's fresh sanitized account snapshot.
+   All 27 registered permission categories are queried; non-USDT pairs remain
+   monitored. No account means permitted N=null. Execution is never certified.
+3. Use `MarketDataService(store, client).poll_quotes(universe)` for all public
+   books, or explicit symbol batches. `collect_candles(symbol, limit=...)`
+   stores UTC closed/open 1m bars; `poll_candles` rotates through explicitly
+   permitted TRADING pairs within the reserved local budget.
+4. After refreshing quotes, freeze `cutoff_ms=client.clock.wall_ms()`; obtain
+   `feature(symbol, cutoff_ms)` and `availability(universe, cutoff_ms)`.
+   Missing/conflicting/stale bars close readiness. Past reconstruction is
+   REPLAY with its actual computation/publication receipt, never backdated.
+5. `QuoteConversionGraph(store).value(balances, cutoff_ms)` values every free
+   and locked asset using fresh direct/inverse/multileg midpoint routes.
+   The caller must supply/classify balances; these marks cannot certify an
+   account anchor. USDC/fees/dust need prices; one absent leg means null equity.
+   bookTicker event time stays null: OBSERVED_RESPONSE qualifies observation
+   age only, EXCHANGE_EVENT consumers cannot use it. Close store and client.
+
+Public smoke verified 3727 metadata rows, 2010 positive books, BTC/ETH/SOL closed
+bars/features and a hypothetical midpoint valuation. Whole manual run took
+173.67s; continuously bounded processing/lag, market streams, L2 and certified
+account reconciliation remain P2-B. No active trading service was started.

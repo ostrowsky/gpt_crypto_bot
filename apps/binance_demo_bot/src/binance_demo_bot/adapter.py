@@ -15,15 +15,23 @@ import json
 import re
 import ssl
 import time
+import zlib
 from urllib.parse import urlencode, urlsplit
 
 from .isolation import DemoCredentials
 
 
 BASE_URL = "https://demo-api.binance.com/api/v3/"
-READ_PATHS = frozenset(("/api/v3/ping", "/api/v3/time", "/api/v3/account",
+PUBLIC_PATHS = frozenset(("/api/v3/ping", "/api/v3/time", "/api/v3/exchangeInfo",
+                         "/api/v3/ticker/bookTicker", "/api/v3/klines"))
+READ_PATHS = PUBLIC_PATHS | frozenset(("/api/v3/account",
                         "/api/v3/openOrders", "/api/v3/order", "/api/v3/myTrades", "/api/v3/openOrderList"))
 BODY_LIMIT = 8 * 1024 * 1024
+METADATA_LIMIT = 32 * 1024 * 1024
+
+
+def _body_limit(path):
+    return METADATA_LIMIT if path == "/api/v3/exchangeInfo" else BODY_LIMIT
 
 
 class AdapterError(Exception):
@@ -154,14 +162,17 @@ class DemoHttpTransport:
     def request(self, method, path, query, headers, timeout_s):
         if method != "GET" or not isinstance(path, str) or path not in READ_PATHS:
             raise AdapterError("FORBIDDEN_ENDPOINT")
+        allowed_request_headers = {"X-MBX-APIKEY"} | ({"Accept-Encoding"} if path == "/api/v3/exchangeInfo" else set())
         if (not isinstance(query, str) or any(c in query for c in "\r\n?#")
-                or not isinstance(headers, dict) or set(headers) - {"X-MBX-APIKEY"}
+                or not isinstance(headers, dict) or set(headers) - allowed_request_headers
+                or ("Accept-Encoding" in headers and headers["Accept-Encoding"] != "gzip")
                 or any(not isinstance(v, str) or any(c in v for c in "\r\n") for v in headers.values())):
             raise AdapterError("INVALID_PARAMETERS")
         if type(timeout_s) not in (int, float) or not 0 < timeout_s <= 15:
             raise AdapterError("INVALID_PARAMETERS")
         connection = None
         completed = False
+        body_limit = _body_limit(path)
         deadline = time.monotonic() + timeout_s
 
         def remaining():
@@ -190,20 +201,34 @@ class DemoHttpTransport:
                 chunks, size = [], 0
                 while True:
                     connection.sock.settimeout(remaining())
-                    chunk = response.read1(min(65536, BODY_LIMIT + 1 - size))
+                    chunk = response.read1(min(65536, body_limit + 1 - size))
                     if not chunk:
                         break
                     chunks.append(chunk)
                     size += len(chunk)
-                    if size > BODY_LIMIT:
+                    if size > body_limit:
                         raise AdapterError("RESPONSE_TOO_LARGE")
                 body = b"".join(chunks)
             else:
                 # Equivalent bound for simple injected protocol-test responses.
-                body = response.read(BODY_LIMIT + 1)
+                body = response.read(body_limit + 1)
             remaining()
-            if len(body) > BODY_LIMIT:
+            if len(body) > body_limit:
                 raise AdapterError("RESPONSE_TOO_LARGE")
+            response_headers = response.getheaders()
+            encoding = next((v.lower() for k, v in response_headers if k.lower() == "content-encoding"), "identity")
+            if encoding == "gzip" and path == "/api/v3/exchangeInfo":
+                try:
+                    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                    body = decoder.decompress(body, body_limit + 1)
+                    if len(body) > body_limit or decoder.unconsumed_tail:
+                        raise AdapterError("RESPONSE_TOO_LARGE")
+                    if not decoder.eof or decoder.unused_data:
+                        raise AdapterError("SCHEMA_INVALID")
+                except zlib.error:
+                    raise AdapterError("SCHEMA_INVALID") from None
+            elif encoding != "identity":
+                raise AdapterError("SCHEMA_INVALID")
             allowed_headers = {k: v for k, v in response.getheaders()
                                if k.lower() == "retry-after" or k.lower().startswith("x-mbx-used-weight-")}
             completed = True
@@ -219,7 +244,7 @@ class DemoHttpTransport:
                 self.close()
 
 
-def _json(body):
+def _json(body, max_bytes=BODY_LIMIT):
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -232,7 +257,7 @@ def _json(body):
         raise ValueError()
 
     try:
-        if not isinstance(body, bytes) or len(body) > BODY_LIMIT:
+        if not isinstance(body, bytes) or len(body) > max_bytes:
             raise ValueError()
         return json.loads(body, object_pairs_hook=unique, parse_constant=bad_constant)
     except (ValueError, TypeError, UnicodeError, RecursionError):
@@ -287,29 +312,12 @@ def _signed_read(operation):
     return guarded
 
 
-class BinanceDemoAdapter:
-    def __init__(self, credentials, *, account_alias, credential_generation, episode_id,
-                 scope_id, identity_key, transport=None, clock=None, enabled=True, sleep=None):
-        if not isinstance(credentials, DemoCredentials):
-            raise AdapterError("INVALID_CREDENTIALS")
-        for value in (credentials.api_key, credentials.api_secret):
-            if (not isinstance(value, str) or not value or not value.isascii()
-                    or any(c.isspace() or ord(c) < 33 or ord(c) == 127 for c in value)
-                    or "PRIVATE KEY" in value or "-----BEGIN" in value):
-                raise AdapterError("INVALID_CREDENTIALS")
-        try:
-            for value in (account_alias, credential_generation, episode_id, scope_id):
-                _text(value)
-            if not isinstance(identity_key, bytes) or len(identity_key) < 32 or type(enabled) is not bool:
-                raise AdapterError("INVALID_IDENTITY")
-        except AdapterError:
-            raise AdapterError("INVALID_IDENTITY") from None
-        self._credentials = credentials
-        self._identity_key = identity_key
-        self.identity = dict(application_id="binance_demo_bot", environment="BINANCE_SPOT_DEMO",
-                             objective_contract_id="daily_net_equity_pnl_v1", account_alias=account_alias,
-                             credential_generation=credential_generation, account_episode_id=episode_id,
-                             portfolio_scope_id=scope_id)
+class DemoReadClient:
+    """Credential-free GET engine, optionally shared by the private adapter."""
+    def __init__(self, *, transport=None, clock=None, enabled=True, sleep=None):
+        if type(enabled) is not bool:
+            raise AdapterError("INVALID_PARAMETERS")
+        self._credentials = None
         self.transport = transport or DemoHttpTransport()
         self.clock = clock or DemoClock()
         self.enabled = enabled
@@ -319,10 +327,18 @@ class BinanceDemoAdapter:
         self._reservations = deque()
         self._shared_weight = 0
         self._shared_weight_expires_ns = 0
-        self._cap_states = {}
 
-    def __repr__(self):
-        return "<BinanceDemoAdapter read_only=True>"
+    def request_public(self, path, parameters, *, weight):
+        if path not in PUBLIC_PATHS:
+            raise AdapterError("FORBIDDEN_ENDPOINT")
+        if not isinstance(parameters, dict) or set(parameters) & {"signature", "timestamp", "recvWindow"}:
+            raise AdapterError("INVALID_PARAMETERS")
+        _integer(weight, 1, "INVALID_PARAMETERS")
+        return self._request(path, parameters, signed=False, weight=weight)
+
+    def close(self):
+        if hasattr(self.transport, "close"):
+            self.transport.close()
 
     def _guard(self, weight):
         if not self.enabled:
@@ -359,6 +375,8 @@ class BinanceDemoAdapter:
             params = dict(parameters)
             headers = {}
             if signed:
+                if self._credentials is None:
+                    raise AdapterError("PRIVATE_READ_UNAVAILABLE")
                 try:
                     timestamp = self.clock.timestamp_ms()
                 except AdapterError as error:
@@ -371,6 +389,8 @@ class BinanceDemoAdapter:
                 headers["X-MBX-APIKEY"] = self._credentials.api_key
             else:
                 query = urlencode(sorted((k, _value(v)) for k, v in params.items()))
+                if path == "/api/v3/exchangeInfo":
+                    headers["Accept-Encoding"] = "gzip"
             request_wall, request_mono = self.clock.wall_ms(), self.clock.monotonic_ns()
             available = (deadline - request_mono) / 1_000_000_000
             if available <= 0:
@@ -418,7 +438,7 @@ class BinanceDemoAdapter:
                 if 500 <= response.status <= 599:
                     response = None
                 else:
-                    data = _json(response.body)
+                    data = _json(response.body, _body_limit(path))
                     code = data.get("code") if isinstance(data, dict) else None
                     if response.status in (401, 403) or code in (-2014, -2015, -1022):
                         self.blocked = "SIGNATURE_REJECTED" if code == -1022 else "AUTH_DENIED"
@@ -432,7 +452,8 @@ class BinanceDemoAdapter:
                         continue
                     if response.status != 200 or (type(code) is int and code < 0):
                         raise AdapterError("API_REJECTED")
-                    return data, dict(source_endpoint=path, request_started_at_ms=request_wall,
+                    return data, dict({"raw_body_sha256": hashlib.sha256(response.body).hexdigest()} if not signed else {},
+                                      source_endpoint=path, request_started_at_ms=request_wall,
                                       received_at_ms=received_wall, received_monotonic_ns=received_mono,
                                       request_started_monotonic_ns=request_mono)
             if attempt < 2:
@@ -461,6 +482,36 @@ class BinanceDemoAdapter:
                     raise
                 continue
             return {"server_time_ms": server, "clock_uncertainty_ms": self.clock.uncertainty_ms, **meta}
+
+class BinanceDemoAdapter(DemoReadClient):
+    def __init__(self, credentials, *, account_alias, credential_generation, episode_id,
+                 scope_id, identity_key, transport=None, clock=None, enabled=True, sleep=None):
+        if not isinstance(credentials, DemoCredentials):
+            raise AdapterError("INVALID_CREDENTIALS")
+        for value in (credentials.api_key, credentials.api_secret):
+            if (not isinstance(value, str) or not value or not value.isascii()
+                    or any(c.isspace() or ord(c) < 33 or ord(c) == 127 for c in value)
+                    or "PRIVATE KEY" in value or "-----BEGIN" in value):
+                raise AdapterError("INVALID_CREDENTIALS")
+        try:
+            for value in (account_alias, credential_generation, episode_id, scope_id):
+                _text(value)
+            if not isinstance(identity_key, bytes) or len(identity_key) < 32 or type(enabled) is not bool:
+                raise AdapterError("INVALID_IDENTITY")
+        except AdapterError:
+            raise AdapterError("INVALID_IDENTITY") from None
+        self._credentials = credentials
+        self._identity_key = identity_key
+        self.identity = dict(application_id="binance_demo_bot", environment="BINANCE_SPOT_DEMO",
+                             objective_contract_id="daily_net_equity_pnl_v1", account_alias=account_alias,
+                             credential_generation=credential_generation, account_episode_id=episode_id,
+                             portfolio_scope_id=scope_id)
+        super().__init__(transport=transport, clock=clock, enabled=enabled, sleep=sleep)
+        self._credentials = credentials
+        self._cap_states = {}
+
+    def __repr__(self):
+        return "<BinanceDemoAdapter read_only=True>"
 
     def ping(self):
         data, meta = self._request("/api/v3/ping", {}, signed=False, weight=1)

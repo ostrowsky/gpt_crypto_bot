@@ -16,6 +16,9 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 | `test_adapter.py` | 56 P1-A cases: exact REST HMAC bytes, Demo host/GET/TLS guards, persistent connection, clock and actual receipts, redaction, Decimal/schema/UID tokens, permissions, read-only orders, fill pagination, deadline/retry/auth/rolling and shared-IP budget. |
 | `test_private_stream.py` | 31 P1-B cases: WS signing/host/TLS/quiet logger, ACK/session, buffering, normalization, fees/flows/lists, heartbeat/worker stop, shared limits and redaction. |
 | `test_account_evidence.py` | 38 P1-B cases: 36 real durable/reconcile scenarios plus 2 open-list adapter tests; atomic recovery/cursors, actual crashes, hashes/namespace/envelopes, duplicates/conflicts, journal/BNB fees, unknown coverage and report freshness. |
+| `test_public_market_client.py` | 7 P2-A cases: credential-free reads, private refusal, exact raw-body SHA, 32MiB metadata/8MiB private caps, bounded gzip/corruption and narrow header allowlist. |
+| `test_universe.py` | 20 P2-A cases: complete permission query, AND/OR/unknown rights, public/null denominator, scope/freshness/token and persisted Decimal provenance, non-USDT/status/filter population, transitions, stale failures, immutable own WAL/lease/hash/dependencies. |
+| `test_market_data.py` | 30 P2-A cases: books/omissions/invalid/stale responses, reserve/fair rotation, closed/open bars/gaps/revisions/late receipts, immutable cutoff prefixes, incident recovery, exact features and direct/inverse/multileg/stable/dust marks. |
 
 Run from the app directory with its own installed environment:
 
@@ -71,6 +74,20 @@ moves with receipt, repeated comparisons reuse their own journal writer lease.
 Final **235 app tests GREEN**, including 69 new P1-B cases. Before/after-COMMIT
 crashes use own-venv subprocesses and real SQLite. Public WSS handshake/time/Pong
 passed separately; no authenticated subscription or orders were attempted.
+
+P2-A on 2026-10-11: 17 universe and 26 market tests failed for the missing
+intended module; 5 public tests failed for missing client/public paths. Review
+reproductions then preceded fixes for hashes, incident readiness, mutated/future
+membership, episode account token/provenance and schema failures. Two explicit
+gzip cases reproduced missing request header/allowlist before code. The inverse
+fixture changed to finite 1/4 (expected equity assertion unchanged); rounded
+50-digit 1/3 times 3 is not algebraically 1. A fixture queues the real clock-probe
+response after the synthetic 60-second lease expires; no clock guard is skipped.
+Persisted P1 Decimal hash mismatch was reproduced before its fixed-point
+provenance serialization repair. Final **292 app tests GREEN**, 57 new P2-A
+cases, no skips/xfail.
+Public smoke separately verified metadata/books/closed bars/features and a
+hypothetical inventory, not actual permissions/balances or latency readiness.
 
 Remaining acceptance gates: actual exchange reconciliation/anchors and PIT
 valuation/seed availability, reset evidence, cross-arm sum,

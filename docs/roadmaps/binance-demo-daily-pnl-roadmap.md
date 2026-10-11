@@ -1,18 +1,23 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11. Статус: **P0-A/B и P1-A/B read-only foundations реализованы; торговый сервис ещё не включён**.
+Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A read-only foundations реализованы; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
 atomic outbox/restart/replay/report revisions, 110 GREEN после RED.
 P1-A: read-only REST adapter, подпись, clock/TLS/rate guards, account/orders/fills;
 56 focused GREEN после RED. P1-B: private reader, durable evidence/cursors и
-diagnostic reconcile; 69 new GREEN после RED, всего 235 app tests GREEN.
+diagnostic reconcile; 69 new GREEN после RED. P2-A: полный публичный каталог,
+immutable as-of snapshots, REST quotes/closed bars/features и portfolio marks;
+57 новых тестов после RED, всего **292 app tests GREEN**.
 Публичные Demo REST ping/time и WSS time/Pong проверены; signed private smoke,
 certified account cut/ownership и финансовые anchors ещё не подтверждены.
 Фаза 0 ещё требует фактические account anchors/cursors/reconcile integration;
-P1 завершён частично; фазы 2–7 PLANNED. Следующий приоритет — P2 universe/market
-data/valuation и authenticated integration после explicit credential provisioning;
+Публичный P2-A smoke проверил 3727 инструментов, котировки, свечи/признаки
+BTC/ETH/SOL и условную оценку портфеля. Полный ручной прогон занял 173.67s;
+это не сертификация real-time задержек или прав/баланса аккаунта.
+P1/P2 завершены частично; фазы 3–7 PLANNED. Следующий приоритет — P2-B market
+streams/lag/L2/certified valuation и authenticated integration после explicit credential provisioning;
 ORDER_SEND disabled.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот

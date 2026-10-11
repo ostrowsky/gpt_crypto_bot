@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-11. Status: **P0-A/B + P1-A/B read-only foundations / 235 GREEN; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A read-only foundations / 292 GREEN; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -41,10 +41,10 @@ policy plugins, не текущие процессы. Публичные и пр
 withdraw/transfer, автоматическое повышение риска и произвольное изменение
 кода learner в этот scope не входят.
 
-Реализовано отдельное offline financial core с own package/env/isolation kernel.
-Спецификации остальных фаз задают последующий порядок реализации. Вызовы API,
-размещение ордеров, запуск фоновых служб, новые модели и rollout здесь
-не выполняются. Фактический статус этапа меняется вместе с кодом, тестами
+Реализовано отдельное offline financial core с own package/env/isolation kernel,
+P1-A/B read-only account evidence и P2-A REST market foundations. Публичные Demo
+API проверены; authenticated integration, размещение ордеров, фоновый торговый
+сервис, новые модели и rollout ещё не выполнены. Фактический статус этапа меняется вместе с кодом, тестами
 и source-bound evidence, а не по наличию документа.
 
 ## Priority and dependency gates
@@ -77,15 +77,20 @@ clock/signing/rate guards и реальный public Demo ping/time реализ
 P1-B: 69 new tests после RED; private reader, устойчивые события/cursors и
 diagnostic comparison с financial journal реализованы. Authenticated private
 smoke, exclusive ownership и certified as-of reconcile/anchors pending.
-Следующий приоритет — P2 universe/data/valuation через specs/tests/code;
+P2-A: 57 новых тестов после RED, полный registered-category каталог,
+immutable receipt-as-of snapshots, закрытые 1m features и whole-inventory
+midpoint marks. Публичный smoke успешен; полный ручной прогон 173.67s не
+подтверждает непрерывный real-time SLA. Следующий приоритет — P2-B streams,
+lag/L2/certified valuation и authenticated integration;
 order sending disabled. Готовность заработать не доказана.
 
 ## Shared interfaces and ownership
 
 `BinanceDemoAdapter` реализован как P1-A read-only REST foundation.
-Остальные интерфейсы пока планируемые:
-`UniverseService`, `MarketDataService`, `DecisionIntent`,
-`RiskManager`, `OrderManager`, `AccountReconciler`, `DailyPerformanceService`,
+`UniverseService` и `MarketDataService` реализованы в пределах P2-A;
+`AccountReconciler` реализован для P1-B diagnostics, не certified readiness.
+Остальные интерфейсы пока планируемые: `DecisionIntent`,
+`RiskManager`, `OrderManager`, `DailyPerformanceService`,
 `ProfitEvaluator`, `DemoReleaseController`.
 
 Канонический `EventEnvelopeV1`:

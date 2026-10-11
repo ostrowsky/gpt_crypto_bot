@@ -1,6 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
-Registered: 2026-10-10, Europe/Budapest. Status: **PLANNED; specification only**.
+Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
+Status: **P2-A REST/store/features/valuation foundations GREEN; 57 focused tests; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -261,3 +262,196 @@ with fresh universe and rebuilt required streams; never reuse stale L2 silently.
 TH-01..TH-12 apply; source implementation must add/run focused tests, full and
 staged Truth Harness, diff review, commit and push. Scenario IDs are planned,
 not a claim that the functionality or tests already exist.
+
+## P2-A: discovery, REST observations and portfolio marks (2026-10-11)
+
+Deliver the foundations first: full registered-permission discovery, immutable
+as-of membership, whole-universe bid/ask availability, bounded/fair closed-1m
+polling/features, and deterministic midpoint valuation of all free+locked assets.
+P2-B will add continuously supervised market streams, full Tier-A scheduling,
+incremental L2/sequence recovery, signed myFilters/complete execution previews,
+timestamp-certified marks and full UNI/DATA acceptance. This phase does not
+enable decisions, orders, learning or account reconciliation certification.
+Actual account permissions remain unavailable until the separate app's keys
+are provisioned; public discovery is PUBLIC_REFERENCE, never invented account
+authority. Own paths/store/processes only; no old bot/cache/key fallback.
+
+Sources checked 2026-10-11: [REST metadata/klines/book ticker](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md),
+[permission/status registry](https://github.com/binance/binance-spot-api-docs/blob/master/enums.md),
+[filters](https://github.com/binance/binance-spot-api-docs/blob/master/filters.md).
+The frozen permission registry is SPOT, MARGIN, LEVERAGED and TRD_GRP_002..025.
+Ask explicitly for all 27 categories, showPermissionSets=true and no status,
+symbol or pilot filter. Do not use account-only/default SPOT discovery. Empty
+permissionSets has no documented unrestricted interpretation in this parser
+revision; keep it uncertified. New enums trigger a versioned registry update.
+
+Real public preflight: all-category Demo exchangeInfo returned HTTP 200,
+17,769,069 bytes, 3727 symbols, BREAK/TRADING, no empty permissionSets. This
+exceeds P1's 8MiB cap. Retain 8MiB for private/other replies; allow <=32MiB only
+on public /api/v3/exchangeInfo. Gzip on this public endpoint is optional and
+bounded before/after decompression (no zip-bomb or corrupt/trailing fallback).
+Do not weaken host, TLS, timeout, redirect or mutation guards.
+
+### Public interfaces (own package)
+
+* Extract `DemoReadClient(transport=None, clock=None, enabled=True, sleep=None)`
+  from the already-tested P1 read/clock/limiter implementation.
+  `request_public(path, parameters, weight=...)` allows only ping/time,
+  exchangeInfo, bookTicker and klines; it has no credentials and rejects signed
+  account access before dispatch. BinanceDemoAdapter retains exactly its P1
+  contracts as a subclass using the shared implementation. Constructor/method
+  refactoring is behavior-preserving; existing P1 tests remain authoritative.
+* `DemoMarketClient(client=None)` uses a credential-free DemoReadClient by
+  default, or explicitly shares the new app's P1 adapter/clock/budget.
+  `read_exchange_info()`, `read_book_tickers(symbols=None)`,
+  `read_klines(symbol, start_ms=None, end_ms=None, limit=1000)`. GET only,
+  no API headers/signatures for public calls. Weights 20/4/2; initial klines
+  support UTC 1m only. Explicit symbol lists are sorted/deduplicated, <=128 per
+  batch. Record exact request params, actual UTC/monotonic response interval,
+  environment, raw-body/canonical-data hashes and clock quality. Invalid JSON,
+  duplicated keys, inconsistent params or oversized/schema replies fail closed.
+  Reserve 200 of the local 1200 rolling weight for account/protection by checking
+  worst-case three market attempts against <=1000 before dispatch. Aggregate
+  exchange weight may exhaust it; this does not guarantee shared-IP capacity.
+* `MarketSnapshotStore(paths, *, account_alias, episode_id, scope_id,
+  database='market.sqlite')`: own WAL/FULL/FK and OS writer lease, frozen
+  schema/app/demo/objective/account/episode/scope identity. `append(kind, data,
+  received_at_ms, received_monotonic_ns, dependencies=[])`, `as_of(kind,
+  cutoff_ms)`, `records(kind=None)`, `close()`. Kinds UNIVERSE, QUOTES, CANDLES,
+  FEATURE, VALUATION, INCIDENT. Every saved result has EventEnvelope,
+  snapshot/event IDs, source SHA, dependency IDs, actual recorded/receipt clocks,
+  process ID and nullable model/policy/arm/risk provenance. Validate namespace,
+  hashes, dependency existence and availability; resolve own paths before I/O.
+  Rows are immutable and verified on reopen; no automatic tamper repair.
+  Never expose a snapshot before the maximum actual receipt of dependencies.
+  Copies returned to a caller cannot mutate stored or earlier snapshots.
+* `UniverseService(store, client).refresh(account=None)` fetches all categories,
+  validates a fresh <=30s P1 account snapshot when supplied, and persists one
+  row per discovered pair. `current(cutoff_ms)` retrieves the received-as-of
+  snapshot, not today's survivors. Preserve base/quote, all statuses, Spot flag,
+  permission sets, order/list flags, symbol/exchange filters and explicit
+  exclusion reasons. AND across groups, OR within group. Non-USDT quotes stay
+  monitored. Unknown account/permission/schema means UNIVERSE_INCOMPLETE with
+  permitted_total=null; PUBLIC_REFERENCE without account still exposes every
+  public row and discovered n, but cannot claim any permitted denominator.
+  Unknown statuses/filter/order enums block metadata entry previews, not erase
+  rows. Initial preview scope is USDT only; it never shrinks monitoring.
+  Certified execution is always false until P3/account filters/risk.
+  Record ADDED/STATUS_CHANGED/REMOVED as received. Removed pairs remain explicit
+  tombstones for exposure handling; current permitted total excludes only a
+  confirmed removal. Failed refresh records an incident and retains last-good
+  membership as stale without changing its original snapshot or denominator.
+* `MarketDataService(store, client).poll_quotes(universe, symbols=None)` persists
+  per-pair rows, including zero/crossed/malformed/missing/unknown-metadata states.
+  A bad pair never makes the remaining pairs disappear. bookTicker has no event
+  time: retain null and TIMESTAMP_UNVERIFIED; registered time_basis is
+  `OBSERVED_RESPONSE` with convention `observed-book-v1`. This qualifies only
+  observation age, not a fabricated exchange-tick age. EXCHANGE_EVENT consumers
+  cannot use these marks. Explicit omitted expected rows invalidate those
+  rows; stale/invalid newer observations never resurrect earlier healthy data.
+* `collect_candles(symbol, ...)` stores sorted, deduplicated 12-field UTC 1m
+  bars with precise OHLCV/counts and actual receipt. Positive finite prices,
+  consistent high/low, nonnegative volumes/counts, open alignment and exact
+  close=open+59999. Closed iff close < validated server cutoff; in-progress bars
+  are separate observations. Conflicting closed revisions are quarantined;
+  evolving open bars can become a closed bar without false conflict.
+  Downloading a past close does not backdate availability. No interpolation.
+* `feature(symbol, cutoff_ms, lookback=3)` uses only snapshots received by the
+  cutoff; last lookback>=2 closed consecutive minutes, latest close <=90s old,
+  quote observation <=5s and metadata <=15min. Return exact
+  `close_return=(last_close/first_close)-1`, quote_volume_sum and trades_sum,
+  dependency IDs, definition SHA, maximum dependency receipt and reasons.
+  Gaps/conflicts/short history yield FEATURE_UNAVAILABLE/null values, not zeros.
+  Freeze the versioned feature definition. Persist before return with actual
+  compute/publication time; historical prefix reconstruction is labelled replay
+  and cannot masquerade as an earlier real decision. Later data does not change
+  the cutoff's selected values/dependencies.
+* `availability(universe, cutoff_ms)` returns every discovered row's quote/bar
+  status and separate discovered/permitted/quote-ready/feature-ready counts n/N.
+  Missing or zero denominators stay null. quote-ready is not feature-ready.
+  `poll_candles(universe, max_symbols=50)` rotates fairly through explicit
+  permitted TRADING pairs; it never claims unscheduled bars exist. Exceeding
+  budget leaves remaining rows pending, protects account headroom and starts
+  no worker/supervisor. `enabled=False` closes new market collection; stored
+  observations remain available only within their original freshness limits.
+* `QuoteConversionGraph(store).value(balances, cutoff_ms,
+  time_basis='OBSERVED_RESPONSE', max_age_ms=5000)` chooses only metadata/quotes
+  available at cutoff: direct USDT first, then <=3-edge shortest fresh path,
+  lexical tie break, correct inverse orientation. No price-optimizing or future
+  route. Call the unchanged P0 value_portfolio for exact free+locked Decimal
+  midpoint equity/marks. USDT is the sole identity; stable/fee/dust assets need
+  real routes. One missing/stale leg makes overall valuation PENDING/equity=null.
+  Preserve route IDs, universe and leg snapshot IDs, clock convention, age
+  uncertainty, held-assets n/N and reasons. This is midpoint mark evidence,
+  not a liquidation guarantee, historical account anchor or profitable result.
+
+P2-A is read-only and manual/library-driven. P2-B retains timestamp-certified
+marks, live all-pair stream scheduling/lag, L2, reference-price/account filters,
+execution previews and formal as-of financial reconciliation. No active CLI
+service or new trading policy is introduced by this implementation.
+
+### Focused acceptance tests before code
+
+| ID | P2-A observable contract |
+|---|---|
+| P2A-01 | Credential-free/public transport, exact 27-permission query, bounded gzip/32MiB metadata vs 8MiB private, no mutation/production fallback. |
+| P2A-02 | AND/OR, empty/missing/unknown permission, account scope/hash/freshness, public reference/null denominator and non-USDT population. |
+| P2A-03 | Listing/status/removal, failed refresh, as-of immutable membership, filters/unknown enums and own store/lease/tamper/dependencies. |
+| P2A-04 | Book omissions/zero/crossed/malformed rows, null event age, explicit observation basis, cutoff/staleness and fair budget/disabled collection. |
+| P2A-05 | Closed/open bars, sorting/duplicates/conflicts, gaps/late download, prefix invariance, no interpolation, exact math and feature provenance. |
+| P2A-06 | Direct/inverse/multileg/stable/fee/dust valuation, old/future/wrong-venue quote, one stale leg, no false zero or historical repair. |
+
+Record RED/GREEN evidence under own ignored runtime; run P1/P0 regressions,
+full and staged Truth Harness, review/stage only intended source/spec/tests,
+commit and push. Public real smoke validates discovery/quotes/closed bars and
+public hypothetical valuation only; it does not substitute for account rights.
+
+### P2-A review boundaries
+
+Account provenance is retained as a whitelisted P1 snapshot (no arbitrary extra
+fields); the first valid account token binds subsequent snapshots in the same
+episode, including after restart. Unknown token/generation/schema or future
+update time is not a valid permission denominator.
+P1 data Decimal values retain their fixed-point spelling when stored inside the
+provenance object, so its original source SHA verifies after persistence (the
+market store's own normalized hash remains separate). Every consumer verifies
+the supplied universe against its immutable own-store source and receipt cutoff.
+Refresh failures close metadata readiness until a newer successful refresh;
+prior membership/denominators remain visible as stale evidence. Candle schema
+or clock failures leave a per-symbol incident and close feature readiness until
+a newer valid receipt; malformed input cannot silently reuse a prior feature.
+Market budget protects the 200-weight reserve before any network attempt; public
+request metadata includes the actual raw-body SHA and exact parameter convention.
+Arithmetic follows P0's fixed 50-significant-digit Decimal context; recurring
+inverse fractions are rounded at that precision, not claimed algebraically exact.
+Public metadata requests explicitly advertise Accept-Encoding: gzip; this sole
+additional header is allowed only on exchangeInfo with the exact value gzip.
+Private endpoints and other public reads do not inherit it. The 15-second read
+deadline and endpoint-specific decompression caps remain enforced.
+
+### Delivered and verified on 2026-10-11
+
+P2-A is implemented in the own package; 57 focused tests and **292 total app
+tests GREEN** after recorded RED. P0/P1 behavior is retained; 27 repository
+spec/harness regressions and mechanical full Truth Harness PASS. Staged/change
+release verification is required before commit. No trading-policy relaxation.
+Initial 48 cases reproduced missing intended modules/client/public paths. Review
+reproductions preceded fixes for raw-body SHA, stale incident readiness, mutated
+or future membership, account provenance/token, persisted Decimal source hashes
+and schema failure. Gzip tests
+reproduced both missing header and transport allowlist before implementation.
+The inverse fixture uses finite 1/4 with the same expected equity assertion;
+it does not incorrectly demand algebraic exactness from rounded P0 1/3.
+
+Real public Demo smoke: 3727 discovered instruments, 2010/3727 positive valid
+book observations (this is public observation coverage, not account coverage).
+BTCUSDT/ETHUSDT/SOLUSDT each returned 10 minute bars, 9 closed; all three causal
+features were ready at the frozen observation cutoff. A clearly hypothetical
+BTC+USDT inventory had complete midpoint valuation; no actual balance, rights,
+private subscription or orders were used. Initial uncompressed attempt failed
+READ_UNAVAILABLE; bounded gzip succeeded. End-to-end manual run took 173.67s,
+metadata stage 86.53s including validation/persistence. This is not a real-time
+latency qualification. P2-B must profile/bound processing and publication lag,
+implement supervised streams, all-pair scheduling, L2, certified timestamps,
+account/reference-price filters and actual reconciliation. Order sending stays
+disabled; account-permitted N stays null without fresh own account evidence.
