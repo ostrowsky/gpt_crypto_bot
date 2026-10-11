@@ -43,8 +43,12 @@ def _prepared_row(identity, kind, data, wall, mono, dependencies, available):
 
 class _PreparedMarketBatch:
     """Reader-private preparation; one atomic primary insert after validation."""
-    def __init__(self, store):
+    def __init__(self, store, monotonic_ns):
         self.store = store
+        self._now = monotonic_ns
+        self._timing = dict(state="NOT_STARTED", prepare_start_ns=None, prepare_end_ns=None,
+            writer_wait_started_ns=None, writer_acquired_ns=None, begin_finished_ns=None,
+            insert_finished_ns=None, commit_finished_ns=None, failure_at_ns=None)
         self.rows, self.values, self.guards = [], {}, {}
         self._dependency_times = {}
         self.active = False
@@ -54,7 +58,11 @@ class _PreparedMarketBatch:
         if self.store._own_batch() or self.active:
             raise AdapterError("NESTED_MARKET_BATCH")
         self.active = True
+        self._timing.update(state="PREPARING", prepare_start_ns=self._now())
         return self
+
+    @property
+    def timing(self): return dict(self._timing)
 
     def append(self, kind, data, *, received_at_ms, received_monotonic_ns, dependencies=()):
         if not self.active:
@@ -104,23 +112,34 @@ class _PreparedMarketBatch:
 
     def __exit__(self, error_type, error, traceback):
         self.active = False
+        self._timing["prepare_end_ns"] = self._now()
         if error_type is not None:
+            self._timing.update(state="FAILED", failure_at_ns=self._now())
             return
         if not self.rows:
+            self._timing["state"] = "NO_WRITE"
             return
-        with self.store.batch():
-            for symbol,expected in self.guards.items():
-                actual = self.store._con.execute("SELECT COALESCE(MAX(seq),0) FROM snapshots INDEXED BY candle_symbol_seq WHERE kind='CANDLES' AND json_extract(payload_json,'$.data.symbol')=?",(symbol,)).fetchone()[0]
-                if actual != expected:
-                    self.conflict_symbol = symbol
-                    raise AdapterError("CANDLE_SOURCE_CHANGED")
-            # One native SQLite call per chunk avoids repeated binding/GIL handoffs.
-            # All chunks share this transaction, including failures in later chunks.
-            for offset in range(0, len(self.rows), 64):
-                chunk = self.rows[offset:offset+64]
-                sql = "INSERT OR IGNORE INTO snapshots(id,kind,available_ms,payload_json,content_sha256) VALUES "
-                sql += ",".join("(?,?,?,?,?)" for _ in chunk)
-                self.store._con.execute(sql, tuple(value for row in chunk for value in row))
+        self._timing["writer_wait_started_ns"] = self._now()
+        try:
+            with self.store._lock:
+                self._timing["writer_acquired_ns"] = self._now()
+                with self.store.batch():
+                    self._timing["begin_finished_ns"] = self._now()
+                    for symbol,expected in self.guards.items():
+                        actual = self.store._con.execute("SELECT COALESCE(MAX(seq),0) FROM snapshots INDEXED BY candle_symbol_seq WHERE kind='CANDLES' AND json_extract(payload_json,'$.data.symbol')=?",(symbol,)).fetchone()[0]
+                        if actual != expected:
+                            self.conflict_symbol = symbol
+                            raise AdapterError("CANDLE_SOURCE_CHANGED")
+                    for offset in range(0, len(self.rows), 64):
+                        chunk = self.rows[offset:offset+64]
+                        sql = "INSERT OR IGNORE INTO snapshots(id,kind,available_ms,payload_json,content_sha256) VALUES "
+                        sql += ",".join("(?,?,?,?,?)" for _ in chunk)
+                        self.store._con.execute(sql, tuple(value for row in chunk for value in row))
+                    self._timing["insert_finished_ns"] = self._now()
+                self._timing.update(state="COMMITTED", commit_finished_ns=self._now())
+        except BaseException:
+            self._timing.update(state="FAILED", failure_at_ns=self._now())
+            raise
 
 
 class _FairRLock:
@@ -304,8 +323,10 @@ class MarketSnapshotStore:
     def _own_batch(self):
         return self._batch_depth and self._lock._owner == threading.get_ident()
 
-    def prepared_batch(self):
-        return _PreparedMarketBatch(self)
+    def prepared_batch(self, *, monotonic_ns=None):
+        if monotonic_ns is not None and not callable(monotonic_ns):
+            raise AdapterError("INVALID_PARAMETERS")
+        return _PreparedMarketBatch(self, time.monotonic_ns if monotonic_ns is None else monotonic_ns)
 
     def start_checkpointing(self):
         from .market_checkpoint import MarketCheckpointer

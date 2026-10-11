@@ -60,13 +60,14 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **434 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **451 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
 26 WAL concurrency/prepared-write/lifecycle cases,
 22 pinned SQLite/checkpoint/pressure/failure cases,
 12 writer attribution/bulk/dependency/receipt/warmup cases,
+17 durable delivery/evidence/failure cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -269,3 +270,25 @@ Final P2B2-08 observation49.55s: source SHA matched,3727 discovered/1375 active,
 1/6 connected,quotes50/1375,history6/1375 — FAIL. Remaining stalls include
 BEGIN346.22ms and writer hold426.10ms. No controlled speedup or SLA is claimed.
 Next gate: receive/validation/writer-wait/commit latency and bounded handoffs.
+
+P2B2-09 measures steady-state delivery from the oldest actual group receipt
+through durable completion, with collection/reader wait/preparation/writer wait/
+BEGIN/INSERT/commit stages. `reader.health()['latency']` reports explicit scope,
+attempted/durable/passed/failed/late counts and a bounded recent window (default
+4096; diagnostic-only `latency_window=1..4096`). Startup buffer latency is
+explicitly unmeasured. Idle calls create no zero samples; unavailable stages
+are null. A post-commit duration above250ms invalidates/closes the session and
+returns False, preserving primary rows and exact original receipts/hashes.
+Lag incidents retain all in-flight frames, canonical decoded JSON and exact
+wire bytes/hash when observed. Evidence/invalidation storage failures are
+visible, and transport is closed even on storage failure. Failure evidence,
+quote invalidation and incidents are prepared outside the writer and committed
+in one atomic FULL transaction. A failed row rolls back the whole failure group;
+memory still invalidates and at most one volatile evidence group remains.
+Health exposes no payloads. These diagnostics and stricter guards do not qualify production;
+future policy must use current session health and causal source evidence.
+Final P2B2-09 public trial1791737943969095300:52.9277s after35.260s startup,
+0/6 connected,quotes0/1375,closed history8/1375 — FAIL. All six last sessions
+retained lag evidence/invalidation with zero evidence-storage failures. Their
+last-group completion was307.5481..460.2281ms. Timing stages include scheduling;
+no controlled performance uplift or sustained-readiness claim is established.

@@ -6,7 +6,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 434 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 451 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,
@@ -15,6 +15,10 @@ busy/partial/failure diagnostics, restricted maintenance SQL and owned lifecycle
 no SQL/reset telemetry, bounded multi-value inserts, rollback in a later chunk,
 overlapping retry, unlocked/pinned result read, causal dependency cache and
 three-closed-bar warmup with a current open bar.
+`test_market_delivery_latency.py` adds 17 P2B2-09 cases: real SQL phase markers,
+rollback/null commit, idle/no-write/bounded timing, exact250ms/late durable
+completion, preserved raw packets, clock/precision/provenance and failure close,
+one atomic failure commit and rollback on the last failure row.
 
 | Test file | Coverage in this batch |
 |---|---|
@@ -163,3 +167,15 @@ instead of4 before repair. The fake supervisor stays patched through startup/
 stop and an explicit network deny probe remains uncalled. Final **12 new / 434 app
 GREEN**, with actual traced SQL and a real SQLite abort trigger; no skip/xfail
 or weakened assertions. Keep public market verdict separate from unit success.
+
+P2B2-09: 12 initial scenarios reproduced 4 failures/8 missing-interface errors
+RED, including a251ms commit incorrectly returning True. Then implementation
+made12 GREEN. Three failure-boundary cases followed: duplicate attempt counting
+and loss of float-containing rejected wire reproduced 1 failure/1 error before
+repair; negative-clock coverage correctly stayed GREEN. Atomic failure tests
+then reproduced two intended failures: four commits instead of two, and partial
+evidence surviving a later incident abort. Fault injection now uses actual
+SQLite abort triggers for both append/prepared paths; assertions stay intact.
+Final **17 focused /
+451 app GREEN**, with real SQL/rollback and mocked clock delays, no skips or
+weaker assertions. Scripted transports are network-denied and contain no keys.

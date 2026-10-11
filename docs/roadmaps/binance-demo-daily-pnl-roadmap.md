@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 434 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 451 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
@@ -41,6 +41,13 @@ P2B2-08 добавляет bounded bulk INSERT, чтение результат�
 Исправлены pinned return и bootstrap трёх закрытых свечей с текущей открытой.
 Профилирование разделяет SQL wall/CPU и фактические cache spills; данные не
 подменяют сетевую квалификацию. Порог250ms и FULL сохраняются.
+P2B2-09: измерены стадии до durable commit, добавлен строгий post-commit250ms
+guard и lossless lag evidence. 17 новых тестов после RED,451 GREEN.
+Обработка отказа объединена в одну FULL-транзакцию с атомарным откатом.
+Public trial1791737943969095300:52.9277s,0/6 connected,quotes0/1375,
+history8/1375 — FAIL; next gate — SQL/CPU/scheduler и bounded handoffs.
+Отказ сохранения/invalidation виден, транспорт закрывается. Startup SLA и
+full-market qualification ещё не доказаны; технический gate сохраняется.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот
 не дорабатывается и не подключается к новому контуру.

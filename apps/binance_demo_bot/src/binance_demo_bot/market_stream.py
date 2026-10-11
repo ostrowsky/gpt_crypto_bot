@@ -17,6 +17,7 @@ from websockets.sync.client import connect as ws_connect
 from .adapter import AdapterError, _integer, _money, _sha, _json
 from .journal import _digest
 from .market_data import MarketDataService, _symbol
+from .market_delivery import DeliveryMetrics, WirePacket, lag_evidence
 
 WS_URL = "wss://demo-stream.binance.com/stream"
 WS_LIMIT = 1024*1024
@@ -296,11 +297,11 @@ class IncrementalBook:
 
 
 class MarketStreamReader:
-    def __init__(self, store, client, universe, topics, *, transport=None, background=True):
+    def __init__(self, store, client, universe, topics, *, transport=None, background=True, latency_window=4096):
         if type(background) is not bool:
             raise AdapterError("INVALID_PARAMETERS")
         MarketDataService(store,client)._universe(universe,client.clock.wall_ms())
-        self._initialize(store,client,_universe_projection(universe),topics,transport=transport,background=background)
+        self._initialize(store,client,_universe_projection(universe),topics,transport=transport,background=background,latency_window=latency_window)
 
     @classmethod
     def _from_verified_source(cls,store,client,projection,topics,*,transport=None,background=True):
@@ -310,7 +311,10 @@ class MarketStreamReader:
         result._initialize(store,client,projection,topics,transport=transport,background=background)
         return result
 
-    def _initialize(self,store,client,universe,topics,*,transport,background):
+    def _initialize(self,store,client,universe,topics,*,transport,background,latency_window=4096):
+        self._delivery = DeliveryMetrics(latency_window)
+        self._lag_evidence_buffer = None
+        self.invalidation_state = "NOT_OBSERVED"
         selected = _topics(topics)
         symbol_map = {r["symbol"].lower():r["symbol"] for r in universe["data"]["rows"]}
         if len(symbol_map) != len(universe["data"]["rows"]):
@@ -350,23 +354,47 @@ class MarketStreamReader:
 
     def _invalidate_quotes(self, reason):
         rows = [dict(symbol=s,state="QUOTE_INVALID",quote=None,reasons=[reason]) for s in sorted(self.quote_symbols)]
-        if rows:
-            self._save("QUOTES", dict(rows=rows, source="DEMO_COMBINED_STREAM"))
         self._quotes.clear()
         for book in self.books.values():
             book.invalidate(reason)
+        if rows:
+            self._save("QUOTES", dict(rows=rows, source="DEMO_COMBINED_STREAM"))
 
-    def _fail(self, reason):
+    def _fail(self, reason, *, evidence=None):
         safe = reason if reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED","CANDLE_SOURCE_CHANGED"} else "WS_PROTOCOL_ERROR"
         with self._lock:
             self.error, self.connected = safe,False
-            self._invalidate_quotes(safe)
-            self._save("INCIDENT",dict(operation="MARKET_STREAM_FAILED",reason=safe,topics=list(self.topics)))
-            if self._failed_candle_symbol:
-                self._save("INCIDENT",dict(operation="CANDLE_COLLECTION_FAILED",symbol=self._failed_candle_symbol,reason=self._failed_candle_reason))
+            self._quotes.clear()
+            for book in self.books.values():
+                book.invalidate(safe)
+            previous_pending = self._pending_store
+            try:
+                with self.store.prepared_batch(monotonic_ns=self.clock.monotonic_ns) as failure_pending:
+                    self._pending_store = failure_pending
+                    try:
+                        self._invalidate_quotes(safe)
+                        if evidence is not None:
+                            self._save("INCIDENT",evidence)
+                        self._save("INCIDENT",dict(operation="MARKET_STREAM_FAILED",reason=safe,topics=list(self.topics)))
+                        if self._failed_candle_symbol:
+                            self._save("INCIDENT",dict(operation="CANDLE_COLLECTION_FAILED",symbol=self._failed_candle_symbol,reason=self._failed_candle_reason))
+                    finally:
+                        self._pending_store = previous_pending
                 self._failed_candle_symbol = None
                 self._failed_candle_reason = "CANDLE_SCHEMA_INVALID"
-        self.transport.close()
+                self.invalidation_state = "PERSISTED"
+                if evidence is not None:
+                    self._delivery.evidence_state = "PERSISTED"
+                    self._lag_evidence_buffer = None
+            except Exception:
+                self.invalidation_state = "PERSISTENCE_FAILED"
+                if evidence is not None:
+                    self._delivery.evidence_failures += 1
+                    self._delivery.evidence_state = "PERSISTENCE_FAILED"
+                raise
+            finally:
+                self._pending_store = previous_pending
+                self.transport.close()
 
     def _receive(self, timeout=1):
         wire = self.transport.recv(timeout)
@@ -374,7 +402,8 @@ class MarketStreamReader:
         value = wire.encode() if isinstance(wire,str) else wire
         if not isinstance(value,bytes) or len(value) > WS_LIMIT:
             raise AdapterError("WS_BUFFER_OVERFLOW")
-        return _json(value),wall,mono
+        payload = _json(value)
+        return (WirePacket(payload, value) if isinstance(payload, dict) else payload),wall,mono
 
     def start(self):
         with self._lock:
@@ -503,6 +532,9 @@ class MarketStreamReader:
         if not self.connected:
             return False
         pending = None
+        noted = False
+        frames = []
+        collected = acquired = None
         try:
             if self.clock.wall_ms()-self.universe["received_at_ms"] > 900000:
                 raise AdapterError("METADATA_STALE")
@@ -519,9 +551,11 @@ class MarketStreamReader:
                     frames.append(self._receive(0.001))
                 except TimeoutError:
                     break
+            collected = self.clock.monotonic_ns()
             with self._lock:
+                acquired = self.clock.monotonic_ns()
                 if self.connected:
-                    pending = self.store.prepared_batch()
+                    pending = self.store.prepared_batch(monotonic_ns=self.clock.monotonic_ns)
                     try:
                         with pending:
                             self._pending_store = pending
@@ -529,6 +563,18 @@ class MarketStreamReader:
                                 self._process(payload,wall,mono)
                     finally:
                         self._pending_store = None
+                    finished = self.clock.monotonic_ns()
+                    elapsed = finished-min(frame[2] for frame in frames)
+                    reason = None if 0 <= elapsed <= 250_000_000 else "WS_PROCESSING_LAG"
+                    group = self._delivery.note(frames,pending,collected,acquired,finished,reason,
+                        self.universe["snapshot_id"],self.session_id)
+                    noted = True
+                    if reason:
+                        evidence = self._record_lag_evidence(frames,pending,group)
+                        self._fail(reason,evidence=evidence)
+                        return False
+                else:
+                    return False
             return True
         except TimeoutError:
             if self.clock.monotonic_ns()-self.last_ping_ns >= 20_000_000_000:
@@ -543,8 +589,27 @@ class MarketStreamReader:
             if pending is not None and pending.conflict_symbol:
                 self._failed_candle_symbol = pending.conflict_symbol
                 self._failed_candle_reason = "CANDLE_SOURCE_CHANGED"
-            self._fail(error.reason if isinstance(error,AdapterError) else "WS_PROTOCOL_ERROR")
+            reason = error.reason if isinstance(error,AdapterError) else "WS_PROTOCOL_ERROR"
+            with self._lock:
+                evidence = None
+                if frames and not noted:
+                    group = self._delivery.note(frames,pending,collected,acquired,self.clock.monotonic_ns(),reason,
+                        self.universe["snapshot_id"],self.session_id)
+                    if reason=="WS_PROCESSING_LAG": evidence = self._record_lag_evidence(frames,pending,group)
+                if not noted or self.connected:
+                    try: self._fail(reason,evidence=evidence)
+                    except Exception: pass  # In-memory invalidation/close and explicit health failure already set.
             return False
+
+    def _record_lag_evidence(self, frames, pending, group):
+        try:
+            self._lag_evidence_buffer = lag_evidence(frames,pending,group)
+            self._delivery.evidence_state = "PENDING"
+            return self._lag_evidence_buffer
+        except Exception:
+            self._delivery.evidence_failures += 1
+            self._delivery.evidence_state = "PERSISTENCE_FAILED"
+            return None
 
     def _run(self):
         try:
@@ -575,6 +640,8 @@ class MarketStreamReader:
                         processing_lag_p50_ms=sorted(self.processing_lags)[max(0,(len(self.processing_lags)+1)//2-1)] if self.processing_lags else None,
                         processing_lag_p95_ms=sorted(self.processing_lags)[max(0,(len(self.processing_lags)*95+99)//100-1)] if self.processing_lags else None,
                         processing_lag_max_ms=max(self.processing_lags) if self.processing_lags else None,
+                        latency=self._delivery.health(),
+                        invalidation_state=self.invalidation_state,
                         order_send_enabled=False,account_certified=False)
 
     def stop(self):

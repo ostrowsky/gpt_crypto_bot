@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 199 focused tests / 434 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 216 focused tests / 451 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -1151,3 +1151,131 @@ Next gate: attribute receive/validation/writer-wait/commit end-to-end latency
 and bound receiver/writer handoffs using preserved full-population packet
 evidence; do not silently turn late packets into READY or relax freshness.
 P2-C authenticated account cuts/valuation and order sending stay pending.
+
+## P2B2-09: durable latency attribution and post-commit guard (2026-10-11)
+
+Prior full-market verdict stays FAIL. The existing 250ms check runs before
+frame processing; it cannot prove timely durable completion. Add a stricter
+steady-state read_once guard after commit, using the oldest actual frame receipt
+and the same client monotonic clock. Exactly250ms is allowed; >250ms or a negative
+elapsed value fails WS_PROCESSING_LAG, closes/invalidate the session under its
+reader lock and returns False. Primary rows already committed remain immutable;
+the durable invalidation/failure supersedes current readiness. This is not a
+claim of zero interleaving for arbitrary raw DB consumers: later policy must
+use current session/health plus causal inputs, and trading remains disabled.
+Preparation failure still rolls back its whole group. No guard/freshness/FULL
+relaxation, economic-policy change or profitability inference is allowed.
+
+Prepared batches accept optional callable monotonic_ns (default real monotonic)
+for instrumentation; a non-callable is INVALID_PARAMETERS. Expose detached
+timing markers: preparation start/end, writer wait start/acquired, BEGIN finished,
+guard/INSERT finished, commit finished and failure time. COMMITTED requires a
+successful real commit; NO_WRITE is distinct and has null write markers. Failed
+BEGIN/guard/INSERT/commit never gets a successful commit marker. All chunks stay
+in one original WAL/FULL transaction and existing primary hashes/receipts/guards
+remain unchanged. Use this clock only for diagnostics, never to forge input times.
+
+Reader health adds latency with explicit READ_ONCE_STEADY_STATE scope, attempted/
+durable/failed/late group counts and a <=4096-group recent window. Last group
+contains collection, reader-lock wait, preparation, writer wait, BEGIN, guard/
+INSERT, commit and oldest-receipt-to-completion durations; unavailable stages
+are null. Timeout/idle calls do not manufacture zero samples. Negative/invalid
+clock intervals are unknown, never converted into successful zero latency.
+Keep last/max diagnostics detached, Decimal precision independent of ambient
+context, source snapshot/session IDs, original group size and commit status.
+Startup buffer latency is not measured by this slice and is explicitly disclosed.
+An optional latency_window integer1..4096 bounds only diagnostics (default4096);
+booleans/out-of-range/nonintegers are INVALID_PARAMETERS, never policy tuning.
+
+For WS_PROCESSING_LAG with decoded frames, prepare MARKET_GROUP_LAG_EVIDENCE
+after rolling back preparation (or after a completed commit), and commit it
+atomically with failure invalidation. Retain all <=8 frames with original receipt/monotonic timestamps,
+decoded payload/canonical hash and exact UTF-8 wire/hash where observed. Missing
+raw bytes in an injected transport are explicitly unavailable, never reconstructed
+and mislabeled exact. Incident receipt is actual failure time, not backdated.
+Include actual committed snapshot IDs only when commit succeeded. Health contains
+timing/provenance only; it does not echo payloads or raw wire. If evidence saving
+fails, health reports the failure; it never claims complete durable provenance.
+The retained volatile failure buffer is at most one <=8-frame group (each frame
+already capped at1MiB). No global/unbounded queue or extra collector is started.
+
+Specs -> intended RED -> timing/wire evidence/post-commit code -> focused/full
+GREEN -> full-public minimally instrumented run -> full/staged Truth Harness ->
+selective commit/push. Tests: real SQL phase timings/rollback, invalid clock,
+idle/no-write/committed/failing groups, exact250ms and late commit, original wire
+and receipts for rollback/post-commit, bounded/isolated diagnostics and failures.
+Rollback stops only this owned runtime; preserve failed trials and all primary
+evidence. Full P2/account/financial qualification and ORDER_SEND stay pending.
+
+P2B2-09 failure boundaries: one received group increments attempted/durable/late
+counters at most once even if diagnostic invalidation fails afterward. Clear
+in-memory quotes/books and close transport in finally on failure; expose
+invalidation_state=PERSISTENCE_FAILED when durable invalidation is unavailable.
+No error text or payload appears in health. Canonical decoded JSON is retained
+as text (not financial float scalars), with its hash; exact wire bytes additionally
+use base64, optional UTF-8 text and hash. This preserves malformed numeric inputs
+and binary JSON evidence without changing financial number rules. Negative
+monotonic intervals remain null/failed. Reproduce these boundaries before repair.
+
+Observed trial1791736979087470800 stays FAIL: full3727/1375 population, final
+2/6 connected. One late group:379.7431ms end-to-end,347.9342ms writer wait,
+2.4183ms INSERT and2.2922ms commit. Failure handling currently adds separate
+FULL commits for lag evidence, quote invalidation and incident, increasing
+contention during reconnect cascades. This is attribution, not an uplift claim.
+
+Repair: prepare all failure evidence/invalidation/incidents outside the writer
+in one owned prepared group, then commit them atomically in one WAL/FULL
+transaction. Quote/book memory invalidates before this I/O; transport closes
+even if the transaction fails. Evidence/invalidation state is PERSISTED only
+after that whole transaction succeeds. Any failed row rolls back every failure
+row; report PERSISTENCE_FAILED and retain at most the one volatile evidence
+group. No partial durable "evidence saved" claim after atomic rollback.
+Two total commits suffice for a late committed source group (primary+failure).
+Retain primary rows already committed. Existing fault assertions remain, with
+failure injection moved from a call-site mock to actual SQLite abort triggers
+so it remains effective for both append and prepared paths. Add failing commit-
+count/atomic-rollback reproductions before code. FULL and250ms stay unchanged.
+
+### P2B2-09 verification and observed boundary
+
+Test-first evidence: initial12 cases RED (4 failures/8 missing-interface
+errors); failure-boundary3 cases RED (1 failure/1 error, negative-clock case
+correctly GREEN); atomic-failure2 cases RED (4 commits vs2, partial evidence
+after final-row abort). All17 focused then GREEN; full app451 GREEN (59.691s),
+including actual SQL commit tracing and abort-trigger rollback. No skip/xfail
+or weakened assertions. Focused command: own `.venv/Scripts/python.exe -I -m
+unittest discover -s tests -p test_market_delivery_latency.py`; full app uses
+`test_*.py`. Financial/journal/isolation source remains unchanged.
+
+Public all-category observations use a fresh owned market database, no keys,
+no orders, all3727 discovered/1375 active pairs,6 planned shards and source
+SHA reconstruction. Scope is public eligibility, not authenticated permission.
+Sparse >=25ms SQL/lock diagnostics add overhead; neither trial qualifies an SLA
+or establishes a controlled speedup. Observation starts after startup; final
+health reads can extend the requested45s observation. Samples and failures are
+retained under the app's ignored `.runtime/test-evidence/`, not committed.
+
+| Trial | Startup s | Observation s | Final connected n/N | Fresh quotes n/N | Closed history n/N | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| 1791736979087470800, stage telemetry / separate failure writes | 36.247 | 49.5371387 | 2/6 | 132/1375 | 18/1375 | FAIL |
+| 1791737943969095300, atomic failure writes | 35.260 | 52.9277 | 0/6 | 0/1375 | 8/1375 | FAIL |
+
+Final atomic trial: all6 current reader sessions failed WS_PROCESSING_LAG;
+each retained committed primary IDs, lag evidence and failure invalidation
+PERSISTED, zero evidence-storage failures. Their last-group completion was
+307.5481..460.2281ms. One8-frame group:460.2281ms total,17.0978ms preparation,
+0.2475ms writer wait,358.675ms BEGIN-stage wall interval,59.5397ms INSERT-stage
+and23.4632ms commit-stage interval. Stage intervals include thread scheduling
+and handoffs; they cannot be equated to native SQL execution time. Sparse
+observe SQL maxima: BEGIN97.0536ms, INSERT89.4219ms, commit90.7372ms; writer
+hold441.706ms/wait205.7455ms. Startup INSERT332.3262ms is separate. Another
+late group had261.2324ms preparation; multiple stages remain material.
+
+The stricter post-commit guard detects lateness missed by the former
+pre-processing-only check. REST sample1375/1375 and intermediate connected
+1/6 do not override final degradation. No sustained-readiness or PnL uplift
+is demonstrated. Own smoke workers stop/close in finally; old bot is untouched.
+Next gate: attribute native SQL/CPU versus scheduler/serialization handoffs
+on the same full population and test a bounded receiver/writer architecture
+with preserved receipt evidence. Keep FULL/250ms, account certification and
+ORDER_SEND disabled; startup delivery remains explicitly unmeasured here.
