@@ -60,11 +60,12 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **400 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **422 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
 26 WAL concurrency/prepared-write/lifecycle cases,
+22 pinned SQLite/checkpoint/pressure/failure cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -224,4 +225,26 @@ latest observation 46.23s, a point reached 4/6 connected, final 0/6; quotes
 1375/1375 and history 14/1375. SQL profiling isolated observed commit pauses up
 to 400.63ms. Resolve storage/checkpoint latency before qualification. Concurrent
 checkpoint work first requires a fixed SQLite runtime (current 3.50.4), as
-documented in the canonical spec; it has not been enabled here.
+documented in the canonical spec. The following checkpoint slice supersedes
+that storage implementation; the failed trial remains historical evidence.
+
+P2B2-07 uses pinned APSW 3.53.4.0 / SQLite 3.53.4 for market storage only.
+Financial journal keeps its existing engine and accounting fingerprint.
+`runtime.start()` explicitly starts an owned PASSIVE checkpoint worker;
+store construction, imports and offline startup create no maintenance threads.
+Use `checkpoint_background=False` for the baseline autocheckpoint policy.
+Worker checks physical WAL size every second, attempts PASSIVE above 4MiB and
+leaves WAL/FULL durability unchanged. Its connection cannot mutate evidence
+or storage policy. `health()['storage_maintenance']` reports version, actual
+bytes, completed/partial frames, busy/failure counts and recent latency.
+At 256MiB physical WAL, writes fail with MARKET_STORAGE_BACKPRESSURE; stat
+failure gives MARKET_STORAGE_UNAVAILABLE. These gates cover prepared commits
+and recheck under the writer lock. Runtime stop/store close join only this
+worker and restore the writer's previous autocheckpoint policy.
+Tests establish storage contracts, not continuous market availability.
+Final full-public observation 48.25s: 3727 discovered / 1375 active, 2/6
+connected, quotes 151/1375, closed history 1/1375 — FAIL. Checkpoint recorded
+61 attempts, 3 partial and zero errors; four shards still failed processing lag.
+All owned smoke workers stopped. Remaining gate: SQL writer/group contention
+and receiver latency, then authenticated financial cuts. See the canonical
+P2 spec for all failed trials; no profitable/production deployment is claimed.

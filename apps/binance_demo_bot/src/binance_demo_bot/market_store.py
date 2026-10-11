@@ -1,7 +1,7 @@
 """App-local immutable public snapshots; receipt-time, never event-time replay."""
 
 import json
-import sqlite3
+from . import market_sqlite as sqlite3
 import threading
 import time
 import uuid
@@ -163,6 +163,7 @@ class MarketSnapshotStore:
         self._lock = _FairRLock()
         self._lease = _WriterLease(paths.runtime_path(database + ".writer.lock"))
         self._con = None
+        self._checkpoint = None
         self._read_con = None
         self._reader_local = threading.local()
         self._reader_registry_lock = threading.Lock()
@@ -227,6 +228,7 @@ class MarketSnapshotStore:
             raise AdapterError("MARKET_INTEGRITY_FAILED") from None
 
     def append(self, kind, data, *, received_at_ms, received_monotonic_ns, dependencies=()):
+        self._storage_guard()
         _check_append(kind,data,received_at_ms,received_monotonic_ns,dependencies)
         with self._lock:
             dependencies = sorted(set(dependencies))
@@ -239,6 +241,7 @@ class MarketSnapshotStore:
         value,row = _prepared_row(self.identity,kind,data,received_at_ms,received_monotonic_ns,dependencies,available)
         identifier = value["snapshot_id"]
         with self._lock:
+            self._storage_guard()
             standalone = self._batch_depth == 0
             if standalone:
                 self._con.execute("BEGIN IMMEDIATE")
@@ -283,6 +286,23 @@ class MarketSnapshotStore:
 
     def prepared_batch(self):
         return _PreparedMarketBatch(self)
+
+    def start_checkpointing(self):
+        from .market_checkpoint import MarketCheckpointer
+        if self._checkpoint is None: self._checkpoint = MarketCheckpointer(self)
+        self._checkpoint.start()
+
+    def stop_checkpointing(self):
+        if self._checkpoint is not None: self._checkpoint.stop()
+
+    def _storage_guard(self):
+        if self._checkpoint and self._checkpoint.running:
+            try:
+                size = self._checkpoint.wal_bytes()
+            except OSError:
+                raise AdapterError("MARKET_STORAGE_UNAVAILABLE") from None
+            if size>=self._checkpoint.HARD_BYTES:
+                raise AdapterError("MARKET_STORAGE_BACKPRESSURE")
 
     def _thread_reader(self):
         state = getattr(self._reader_local,"state",None)
@@ -347,7 +367,9 @@ class MarketSnapshotStore:
 
     @contextmanager
     def batch(self):
+        self._storage_guard()
         with self._lock:
+            self._storage_guard()
             if self._batch_depth:
                 raise AdapterError("NESTED_MARKET_BATCH")
             self._con.execute("BEGIN IMMEDIATE")
@@ -485,6 +507,7 @@ class MarketSnapshotStore:
         return False
 
     def close(self):
+        self.stop_checkpointing()
         with self._lock:
             with self._reader_registry_lock:
                 for state in self._readers:

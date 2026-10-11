@@ -6,7 +6,11 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 400 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 422 GREEN.
+`test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
+explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
+without writer lock, version/WAL/FULL guards, byte pressure under the writer,
+busy/partial/failure diagnostics, restricted maintenance SQL and owned lifecycle.
 
 | Test file | Coverage in this batch |
 |---|---|
@@ -133,3 +137,14 @@ before code. Pinned WAL snapshot coverage was already GREEN after the first
 read-connection implementation, correctly retained as preserving coverage.
 Full-public trials still FAIL; latest SQL profile isolated commit up to 400.63ms.
 No runtime artifacts, account keys or orders were included in test fixtures.
+
+P2B2-07 checkpoint: initial 15 tests yielded 14 intended missing-interface
+errors RED; existing SQLite file-format compatibility was correctly GREEN.
+After installing the pinned app-only dependency and implementing the adapter/
+worker, 15 GREEN. Five failure-boundary reproductions yielded 3 failures/5
+errors including cleanup consequences before repair; then 20 GREEN. Two
+pressure/busy reproductions yielded 1 failure/1 missing-category error before
+repair. Final **22 focused / 422 app GREEN**, no skip/xfail or weaker assertions.
+One busy case holds a real SQLite write transaction against a second connection.
+The background maintenance worker never proves account permission, earnings
+or full-market SLA. Preserve the separate unsuccessful public observations.

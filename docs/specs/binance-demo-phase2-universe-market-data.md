@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 165 focused tests / 400 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 187 focused tests / 422 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -944,3 +944,100 @@ checkpointer on 3.50.4. [Official WAL performance documentation](https://www.sql
 explains automatic checkpoint pauses; the local measured commit latency alone
 does not prove that every pause was checkpoint rather than disk sync/scheduling.
 P2-C account/financial cuts and trading remain pending/disabled.
+
+## P2-B2 checkpoint slice / P2B2-07 (2026-10-11)
+
+Previous measured observed commits reached 400.6265ms; full-market gate FAIL.
+Implement owned market-only APSW==3.53.4.0 (SQLite 3.53.4, patched WAL-reset),
+with a narrow sqlite3-compatible adapter for existing market store queries.
+Own pyproject/uv.lock freeze wheels/hashes; CPython, legacy bot, financial.py,
+journal.py/isolation.py and their accounting fingerprints remain unchanged.
+Adapter supports named/indexed Row, explicit transactions, no-op commit/rollback
+outside a transaction, readonly URI/query_only, trace expanded SQL, closed/error
+and constraint categories used by the store. Existing database bytes/primary
+payloads/IDs remain compatible, reopen still verifies identity/hashes/triggers.
+No silently chosen stdlib fallback if dependency is missing or version unsafe.
+
+Store construction/import/offline CLI starts no maintenance thread. Explicit
+runtime start (checkpoint_background=True default; bool only) enables an owned
+PASSIVE checkpoint worker. False retains baseline autocheckpoint policy. Disabled
+runtime starts none. Start verifies patched SQLite (>=3.51.3 or fixed 3.50.7/
+3.44.6 backport line), writer WAL/FULL and no active owner transaction before
+turning writer wal_autocheckpoint off; save/restore its original value. Separate
+same-file maintenance connection cannot INSERT/UPDATE/DELETE/DDL/ATTACH; it only
+performs approved pragmas/PASSIVE checkpoint, never a second economic writer.
+
+Worker checks WAL at most once/second, checkpoint when >=4MiB. No FULL/RESTART/
+TRUNCATE or writer lock around checkpoint. An unfinished/busy PASSIVE is partial,
+not completion; failures are visible in health and never qualify production.
+Report SQLite version, worker/running/error, attempts/busy counts, actual WAL
+physical bytes with 256MiB hard bound, log/checkpointed frames and lag window.
+At the hard bound refuse new writes with MARKET_STORAGE_BACKPRESSURE (including
+prepared groups) rather than grow indefinitely; retain existing evidence. A
+physical-size guard is conservative even when WAL pages are already checkpointed.
+No deletion/truncation of WAL files or primary rows. Stop/join only this worker,
+restore automatic checkpoint policy after join; timeout/failure is explicit.
+Runtime health degrades on maintenance failure/backpressure; order sending and
+account/financial certification remain disabled. Store close stops worker before
+closing connections. Failed startup cleans only its own maintenance resources.
+
+Specs → intended RED → dependency/adapter/worker code → GREEN → full-market
+benchmark without weakening FULL/250ms. Tests P2B2-07: version/dependency guard,
+Row/transaction/error/trace/file-format parity, no auto-start, independent worker
+and concurrent writer while checkpoint paused, readonly/economic-write denial,
+busy/error/byte bounds, no in-batch start, restoration/restart/stop/close,
+runtime disabled/opt-out/health/lifecycle. Preserve all failed trials and exact
+n/N; no trading hypothesis, deployment or PnL claim follows from unit success.
+Rollback stops own runtime/worker and restores its prior checkpoint policy;
+keep immutable sources and primary durability. Full/staged Truth Harness and
+selective source/spec/test/dependency commit/push are mandatory.
+
+P2B2-07 failure boundaries: maintenance authorizer permits read-only inspection
+pragmas and PASSIVE only; changing journal/synchronous/autocheckpoint or invoking
+FULL/RESTART/TRUNCATE through SQL is denied. Thread-start failure restores the
+writer policy, closes the maintenance connection and reports not running.
+Unexpected checkpoint exceptions and WAL stat I/O failures are visible as
+CHECKPOINT_FAILED; unknown WAL bytes are null, not zero. A stat failure blocks
+appends/prepared groups with MARKET_STORAGE_UNAVAILABLE. The worker retains
+bounded retries; health remains inspectable. Supervisor stop failure still
+stops its owned checkpointer in finally, while preserving the original error.
+These failure scenarios require intended RED before their implementation.
+Recheck the WAL bound under the economic writer lock immediately before opening
+each transaction; a waiter cannot use an earlier size check to bypass pressure.
+Busy SQLite exceptions retain a distinct OperationalError-compatible category
+and busy_n counts actual busy exceptions separately from other failures.
+
+### P2B2-07 delivery and public qualification
+
+22 new focused tests / 422 app GREEN. Initial 15 cases: 14 intended missing
+interfaces RED and one existing file-format GREEN; then dependency/implementation.
+Five failure-boundary cases reproduced 3 failures/5 errors (including cleanup)
+before repair. Pressure recheck and real busy category reproduced one failure/
+one missing-interface error before repair. No assertions weakened/skipped.
+Own pinned engine, maintenance SQL denial, separate checkpoint, restart/restore,
+hard WAL guard and inspectable failure states are implemented. Root 27 checks
+and full Truth Harness PASS; no financial fingerprint changes or legacy control.
+
+| Trial | Observation s | Final connected | Fresh quotes n/N | Closed history n/N | Verdict |
+|---|---:|---:|---:|---:|---|
+| 1791731429383032500 | 49.099 | 2/6 | 92/1375 | 0/1375 | FAIL; startup/early observation overlapped app tests |
+| 1791731544617913600 | 50.524 | 2/6 | 154/1375 | 2/1375 | FAIL; no parallel test load |
+| 1791731861069924800 | 48.250 | 2/6 | 151/1375 | 1/1375 | FAIL; final code, no parallel test load |
+
+Each discovers 3727 rows / 1375 active public Spot pairs, plans 6 shards and
+reconstructs the exact metadata source SHA. Account-permitted N=null; no keys/
+orders. Full REST point samples reached 1375/1375, but are not continuous stream
+coverage. Last final maintenance: 61 attempts, 3 partial attempts, zero busy/
+errors; frames 2084/2084, physical WAL 30,788,792 bytes / 268,435,456 bound.
+Maintenance maximum 404.8533ms is measured checkpoint elapsed time, not a writer
+mutex hold. Writer observe diagnostics: hold up to 209.5187ms, wait244.5859ms,
+executemany145.1736ms; startup INSERT264.0204ms is separate. Four final shards
+failed WS_PROCESSING_LAG, observed maxima 250.272..357.8415ms. Earlier clean
+trial had executemany296.1041ms. These live timings are diagnostic observations,
+not a controlled performance improvement comparison or a production SLA.
+
+Evidence and own market databases remain under ignored app runtime. All owned
+public workers were stopped in finally; original bot workers untouched.
+Next gate: profile and bound remaining economic writer INSERT/group contention
+and receiver latency while retaining immutable sources, receipt clocks, FULL
+and250ms. Full P2, authenticated account/financial cuts and trading stay pending.

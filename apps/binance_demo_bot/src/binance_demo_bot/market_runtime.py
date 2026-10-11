@@ -20,13 +20,14 @@ def _history_ready(rows, cutoff):
 
 class MarketDataRuntime:
     def __init__(self,store,client,*,account_provider=None,deep_symbols=(),transport_factory=None,
-                 enabled=True,background=False):
-        if type(enabled) is not bool or type(background) is not bool or account_provider is not None and not callable(account_provider):
+                 enabled=True,background=False,checkpoint_background=True):
+        if type(enabled) is not bool or type(background) is not bool or type(checkpoint_background) is not bool or account_provider is not None and not callable(account_provider):
             raise AdapterError("INVALID_PARAMETERS")
         self.store,self.client,self.clock = store,client,client.clock
         self.universe_service,self.service = UniverseService(store,client),MarketDataService(store,client)
         self.account_provider,self.deep_symbols,self.transport_factory = account_provider,tuple(deep_symbols),transport_factory
         self.enabled,self.background = enabled,background
+        self.checkpoint_background=checkpoint_background
         self.universe,self.supervisor = None,None
         self._projection = None
         self.pipeline_state,self.running = "NOT_STARTED",False
@@ -94,7 +95,11 @@ class MarketDataRuntime:
             if error.reason not in {"CLOCK_STALE","CLOCK_UNSYNCED"}:
                 raise
             self.refresh_clock()
-        self._metadata()
+        if self.checkpoint_background: self.store.start_checkpointing()
+        try: self._metadata()
+        except BaseException:
+            self.store.stop_checkpointing()
+            raise
         self.running = True
         self._started_ns = self.clock.monotonic_ns()
         if self.background:
@@ -173,6 +178,9 @@ class MarketDataRuntime:
             cn = sum(r["symbol"] not in failed_candles and _history_ready(bars.get(r["symbol"],{}),now) for r in active)
             states = self.supervisor.health() if self.supervisor else {}
             pipeline_state = self.pipeline_state
+            maintenance = self.store._checkpoint.health() if self.store._checkpoint else None
+            if pipeline_state=="OBSERVING" and maintenance and maintenance["state"] in {"CHECKPOINT_FAILED","STORAGE_BACKPRESSURE"}:
+                pipeline_state="STORAGE_DEGRADED"
             if not self.running:
                 pipeline_state = "STOPPED"
             elif pipeline_state == "OBSERVING" and states.get("connected_shards_n",0) != states.get("planned_shards_N",0):
@@ -186,6 +194,7 @@ class MarketDataRuntime:
                 discovered_pairs_n=self.universe["data"]["counts"]["discovered_pairs_n"],active_public_pairs_N=len(active),
                 status_excluded_n=sum(r["status"]!="REMOVED" for r in rows)-len(active),
                 removed_tombstones_n=sum(r["status"]=="REMOVED" for r in rows),quote_ready_n=qn,closed_history_ready_n=cn,
+                storage_maintenance=maintenance,
                 public_quote_ready_ratio=qr,permitted_pairs_N=denominator,permitted_ready_ratio=pr,
                 observation_window_s=elapsed,incidents_n=self._incidents_n,supervisor=states,
                 processing_tick_recent_n=len(self._tick_lags),processing_tick_window_limit_N=4096,
@@ -212,5 +221,8 @@ class MarketDataRuntime:
                 raise AdapterError("WS_STOP_TIMEOUT")
         with self._lock:
             self.running=False
-            if self.supervisor:
-                self.supervisor.stop()
+            try:
+                if self.supervisor:
+                    self.supervisor.stop()
+            finally:
+                self.store.stop_checkpointing()
