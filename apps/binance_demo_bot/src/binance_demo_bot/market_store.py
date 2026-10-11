@@ -46,6 +46,7 @@ class _PreparedMarketBatch:
     def __init__(self, store):
         self.store = store
         self.rows, self.values, self.guards = [], {}, {}
+        self._dependency_times = {}
         self.active = False
         self.conflict_symbol = None
 
@@ -60,17 +61,20 @@ class _PreparedMarketBatch:
             raise AdapterError("INVALID_PARAMETERS")
         _check_append(kind,data,received_at_ms,received_monotonic_ns,dependencies)
         dependencies = sorted(set(dependencies))
-        available = received_at_ms
-        with self.store._reading() as connection:
-            for dependency in dependencies:
-                if dependency in self.values:
-                    timestamp = self.values[dependency]["available_at_ms"]
-                else:
+        unknown = [dependency for dependency in dependencies
+                   if dependency not in self.values and dependency not in self._dependency_times]
+        if unknown:
+            with self.store._reading() as connection:
+                for dependency in unknown:
                     row = connection.execute("SELECT available_ms FROM snapshots WHERE id=?",(dependency,)).fetchone()
                     if row is None:
                         raise AdapterError("DEPENDENCY_MISSING")
-                    timestamp = row[0]
-                available = max(available,timestamp)
+                    self._dependency_times[dependency] = row[0]
+        available = received_at_ms
+        for dependency in dependencies:
+            timestamp = (self.values[dependency]["available_at_ms"] if dependency in self.values
+                         else self._dependency_times[dependency])
+            available = max(available,timestamp)
         value,row = _prepared_row(self.store.identity,kind,data,received_at_ms,received_monotonic_ns,dependencies,available)
         identifier = value["snapshot_id"]
         existing = self.values.get(identifier) or self.store.get(identifier)
@@ -110,7 +114,13 @@ class _PreparedMarketBatch:
                 if actual != expected:
                     self.conflict_symbol = symbol
                     raise AdapterError("CANDLE_SOURCE_CHANGED")
-            self.store._con.executemany("INSERT OR IGNORE INTO snapshots(id,kind,available_ms,payload_json,content_sha256) VALUES (?,?,?,?,?)",self.rows)
+            # One native SQLite call per chunk avoids repeated binding/GIL handoffs.
+            # All chunks share this transaction, including failures in later chunks.
+            for offset in range(0, len(self.rows), 64):
+                chunk = self.rows[offset:offset+64]
+                sql = "INSERT OR IGNORE INTO snapshots(id,kind,available_ms,payload_json,content_sha256) VALUES "
+                sql += ",".join("(?,?,?,?,?)" for _ in chunk)
+                self.store._con.execute(sql, tuple(value for row in chunk for value in row))
 
 
 class _FairRLock:
@@ -254,8 +264,18 @@ class MarketSnapshotStore:
                 if standalone:
                     self._con.rollback()
                 raise
-            stored = self._con.execute("SELECT payload_json FROM snapshots WHERE id=?",(identifier,)).fetchone()[0]
-        return json.loads(stored)
+        # The committed row is immutable. Large result copies need no writer lock.
+        # An explicit owner batch still routes get() through its staged connection.
+        state = getattr(self._reader_local, "state", None)
+        if standalone and state and state["depth"]:
+            # Preserve the caller's older pinned prefix; this result is a fresh cut.
+            connection = sqlite3.connect(self.path.as_uri()+"?mode=ro", uri=True)
+            try:
+                stored = connection.execute("SELECT payload_json FROM snapshots WHERE id=?", (identifier,)).fetchone()[0]
+            finally:
+                connection.close()
+            return json.loads(stored)
+        return self.get(identifier)
 
     def get(self, identifier):
         with self._reading() as connection:

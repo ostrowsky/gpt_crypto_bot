@@ -156,7 +156,8 @@ class MarketDataRuntime:
                 self._backfill_due[symbol] = now+30_000_000_000
                 attempted += 1
                 try:
-                    self.service.collect_candles(symbol,limit=3)
+                    # Latest-N includes the current open candle; readiness needs 3 closed.
+                    self.service.collect_candles(symbol,limit=4)
                 except AdapterError as error:
                     if error.reason in {"MARKET_RATE_BUDGET","LOCAL_RATE_BUDGET","RATE_LIMITED","IP_BANNED"}:
                         break

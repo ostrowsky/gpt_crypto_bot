@@ -60,12 +60,13 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **422 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **434 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
 26 WAL concurrency/prepared-write/lifecycle cases,
 22 pinned SQLite/checkpoint/pressure/failure cases,
+12 writer attribution/bulk/dependency/receipt/warmup cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -242,9 +243,29 @@ failure gives MARKET_STORAGE_UNAVAILABLE. These gates cover prepared commits
 and recheck under the writer lock. Runtime stop/store close join only this
 worker and restore the writer's previous autocheckpoint policy.
 Tests establish storage contracts, not continuous market availability.
-Final full-public observation 48.25s: 3727 discovered / 1375 active, 2/6
+P2B2-07 full-public observation 48.25s: 3727 discovered / 1375 active, 2/6
 connected, quotes 151/1375, closed history 1/1375 — FAIL. Checkpoint recorded
 61 attempts, 3 partial and zero errors; four shards still failed processing lag.
 All owned smoke workers stopped. Remaining gate: SQL writer/group contention
 and receiver latency, then authenticated financial cuts. See the canonical
 P2 spec for all failed trials; no profitable/production deployment is claimed.
+
+P2B2-08 writes prepared groups with one parameterized multi-value INSERT per
+<=64 rows, keeping all chunks in the same WAL/FULL transaction. A normal eight-
+frame group uses one INSERT. Failed later chunks roll back the whole group;
+immutable retries retain the first primary receipt envelope. Standalone append
+copies/deserializes its returned source after releasing the writer. Prepared
+groups cache only successful immutable dependency availability in that group;
+staged/missing/future dependencies keep their original causal guards.
+`Connection.cache_stats()` exposes connection-local SQLite cache diagnostics
+without SQL or reset. It is for an owner-path profiler; runtime health never
+reads the active writer's status. Counter profiling adds instrumentation cost
+and does not itself qualify an SLA; keep minimally instrumented trials separate.
+An older pinned caller read keeps its prefix while standalone append returns
+the committed envelope through a temporary readonly result connection. Exact
+retries retain the first envelope. Candle bootstrap requests four latest bars
+to obtain three closed bars plus the current open bar; only closed bars qualify.
+Final P2B2-08 observation49.55s: source SHA matched,3727 discovered/1375 active,
+1/6 connected,quotes50/1375,history6/1375 — FAIL. Remaining stalls include
+BEGIN346.22ms and writer hold426.10ms. No controlled speedup or SLA is claimed.
+Next gate: receive/validation/writer-wait/commit latency and bounded handoffs.

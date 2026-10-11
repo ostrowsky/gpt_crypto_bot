@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 187 focused tests / 422 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 199 focused tests / 434 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -1041,3 +1041,113 @@ public workers were stopped in finally; original bot workers untouched.
 Next gate: profile and bound remaining economic writer INSERT/group contention
 and receiver latency while retaining immutable sources, receipt clocks, FULL
 and250ms. Full P2, authenticated account/financial cuts and trading stay pending.
+
+## P2B2-08: writer attribution and bounded latency repair (2026-10-11)
+
+Start from retained full-market FAIL, not assumed checkpoint or disk causality.
+Before tuning, expose market SQLite Connection.cache_stats(): an independent
+dict with nonnegative integer hits_n/misses_n/writes_n/spills_n/used_bytes_n
+from connection-local SQLITE_DBSTATUS counters (reset=False). No SQL, counter
+reset, payload extraction, economic mutation or background service. Closed
+connection raises ProgrammingError. This diagnostic API is called on the
+economic writer's owner path, never by health in contention with an active SQL.
+Tests verify actual writes/dirty spill, monotonic counters, detached snapshots,
+no trace SQL and closed behavior before code. Financial engine unchanged.
+
+An app-local engineering profiler augments SQL wall time with thread CPU time,
+operation payload byte size/group count and before/after cache counter deltas.
+Preserve >=25ms observations in a bounded 10,000-event buffer, separate startup
+and observation, record exact source hashes, full population and n/N. Payloads,
+SQL bindings and keys are not logged. CPU versus wall is diagnostic attribution;
+it cannot prove all residual delay is disk or GIL without further evidence.
+Baseline uses unchanged FULL/250ms and full public market, no concurrent tests.
+Record the proposed repair contract and its failing reproductions only after
+profiling. Keep primary hashes/receipts/atomic publication/readiness guards.
+No policy relaxation, sampled-population qualification or PnL claim is allowed.
+Rollback disables/stops only this owned runtime; preserve all failed trials.
+
+Attribution baseline 1791732603802111200: 3727 discovered/1375 active, final
+1/6 connected, quotes116/1375, history5/1375 over50.667s: FAIL. SQL wall for
+an observed eight-row group reached219.21ms with thread CPU below Windows timer
+resolution and no cache write/spill; no disk/cache-spill explanation is established
+for those calls. Startup19,084,677-byte INSERT had4235 actual spills; that is a
+separate large-input case. Keep the baseline and attribution limits visible.
+
+Repair contract: commit prepared rows using parameterized multi-value INSERT OR
+IGNORE in <=64-row chunks rather than sqlite executemany's repeated statement
+handoffs. Eight normal stream rows require one INSERT statement; a 65-row batch
+uses two, within SQLite's variable limit. Every chunk remains in the same
+WAL/FULL transaction under the existing FIFO writer; no intermediate publication,
+row loss, reordered dependencies, dedup/hash/receipt or candle-guard changes.
+Failure in a later chunk rolls back all earlier chunks and caches see no prefix.
+Concurrent exact retries retain the first primary row/recorded receipt metadata.
+Normal standalone append releases the writer before SELECT/deserialization of
+its immutable returned envelope; an explicit owner batch still sees its staged
+predecessors. Actual traced SQL, chunk failure, retry and owner/prefix parity
+tests must reproduce the missing behavior before implementation. No global
+thread scheduler, durability, quote freshness or processing threshold changes.
+
+The bulk INSERT trial1791732992712724600 also retains full-market FAIL (final
+1/6 connected). Prepared validation still repeats immutable dependency lookups
+for each frame. Cache successful dependency availability only within the owned
+prepared group; query each committed dependency once. Staged predecessors use
+their own actual availability, and missing dependencies are never negatively
+cached. Every row still computes max(its receipt, dependency availabilities);
+no dependency/cutoff is invented, no cross-group or unbounded store cache.
+Skip a redundant read transaction when every dependency is already known or
+there are no dependencies. Actual query-count RED precedes this repair; retain
+passing future-dependency, retry-after-missing and staged-predecessor coverage.
+
+Standalone result reads must also handle a caller holding an older pinned read
+transaction. Append still returns the actual committed immutable envelope;
+the caller's pinned prefix does not advance. In this rare case use a temporary
+read-only result connection outside the writer and close it in finally; do not
+commit/rollback/reuse the caller's pinned connection. Exact retries retain the
+first recorded_at_ms even if that primary row postdates the pinned read. Reproduce
+the null-result regression before repair; normal hot-path readers stay reused.
+
+Warmup correctness found during review: the runtime needs three consecutive
+closed minute bars, but Binance's latest-limit response includes the current
+open bar. Bootstrap therefore requests limit=4 (same endpoint weight) and
+qualifies only the three actual closed bars at its validated cutoff. Never
+mark the current bar closed, interpolate a missing bar or fabricate history.
+A listing with fewer closed bars remains unavailable. Reproduce the latest-
+N response with a current open bar before changing the bootstrap request.
+
+### P2B2-08 delivery and remaining gate
+
+12 new focused tests / 434 app GREEN. Cache API had three intended missing-
+method RED errors. Bulk/chunk/unlocked-return had three RED failures; existing
+rollback and overlapping retry correctly stayed GREEN. Dependency query-count
+was8 rather than1 before repair; missing/staged coverage stayed GREEN. Older
+pinned-read append reproduced a null result before repair. Latest-N warmup
+reproduced limit3 instead of4 before repair; its supervisor mock stays in scope
+for startup/stop and an explicit network deny probe remains uncalled. No weaker
+assertions, skips or xfail. Financial/journal/isolation bytes remain unchanged.
+
+| Trial | Mode / change | Observation s | Final connected | Quotes n/N | History n/N | Verdict |
+|---|---|---:|---:|---:|---:|---|
+| 1791732603802111200 | Baseline CPU/cache profiler | 50.667 | 1/6 | 116/1375 | 5/1375 | FAIL |
+| 1791732992712724600 | Bulk/unlocked result; CPU/cache profiler | 49.805 | 1/6 | 1375/1375 | 0/1375 | FAIL |
+| 1791733446504356100 | Bulk/dependency cache; minimal wall/mutex diagnostics | 45.873 | 0/6 | 0/1375 | 2/1375 | FAIL |
+| 1791734404660931700 | Final code incl. pinned result/4-bar warmup; minimal diagnostics | 49.550 | 1/6 | 50/1375 | 6/1375 | FAIL |
+
+All trials use full public discovery (3727 rows,1375 active Spot pairs),6 shards,
+matched original metadata SHA, no keys/orders and no concurrent test load.
+Account-permitted N=null. Counter profiling itself adds native call overhead;
+these changing live windows do not establish a controlled speedup or SLA.
+Partial/missing history is not scored as ready; complete REST point samples do
+not qualify continuous streams. Runtime evidence/databases remain app-local and
+ignored. Each run stops its own readers/checkpointer/transport in finally.
+
+Final observed writer hold426.0996ms / wait488.7309ms; BEGIN346.2249ms,
+commit167.9608ms and INSERT90.7167ms in observation; startup INSERT441.4048ms
+is separate. Bulk/dependency contracts reduce actual SQL call counts, but
+remaining stalls have not been resolved. Keep full-market FAIL and250ms/FULL.
+Final maintenance:61 attempts,5 partial,zero busy/errors,267/399 frames and
+43,433,072/268,435,456 physical WAL bytes. Five shards failed processing lag,
+observed maxima253.4963..391.3104ms; maintenance partial is not completion.
+Next gate: attribute receive/validation/writer-wait/commit end-to-end latency
+and bound receiver/writer handoffs using preserved full-population packet
+evidence; do not silently turn late packets into READY or relax freshness.
+P2-C authenticated account cuts/valuation and order sending stay pending.

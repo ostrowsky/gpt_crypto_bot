@@ -6,11 +6,15 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 422 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 434 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,
 busy/partial/failure diagnostics, restricted maintenance SQL and owned lifecycle.
+`test_market_writer_latency.py` adds 12 P2B2-08 cases: actual cache writes/spills,
+no SQL/reset telemetry, bounded multi-value inserts, rollback in a later chunk,
+overlapping retry, unlocked/pinned result read, causal dependency cache and
+three-closed-bar warmup with a current open bar.
 
 | Test file | Coverage in this batch |
 |---|---|
@@ -148,3 +152,14 @@ repair. Final **22 focused / 422 app GREEN**, no skip/xfail or weaker assertions
 One busy case holds a real SQLite write transaction against a second connection.
 The background maintenance worker never proves account permission, earnings
 or full-market SLA. Preserve the separate unsuccessful public observations.
+
+P2B2-08 sequence: 3 missing cache_stats errors RED, then actual native-counter
+GREEN; 3 failing bulk/chunk/unlocked-return scenarios RED before repair. Existing
+late-chunk rollback and overlapping retry contracts correctly stayed GREEN.
+Dependency query-count reproduction showed 8 queries instead of 1 before repair;
+the missing/staged dependency case remained GREEN. Pinned-return regression
+reproduced a null envelope before repair; latest-N warmup reproduced limit3
+instead of4 before repair. The fake supervisor stays patched through startup/
+stop and an explicit network deny probe remains uncalled. Final **12 new / 434 app
+GREEN**, with actual traced SQL and a real SQLite abort trigger; no skip/xfail
+or weakened assertions. Keep public market verdict separate from unit success.

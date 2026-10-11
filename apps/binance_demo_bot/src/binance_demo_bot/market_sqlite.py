@@ -103,5 +103,15 @@ class Connection:
         self._check()
         return _call(self.native.wal_checkpoint, "main", apsw.SQLITE_CHECKPOINT_PASSIVE)
 
+    def cache_stats(self):
+        """Connection-local diagnostics; caller owns writer, counters never reset."""
+        self._check()
+        codes = dict(hits_n=apsw.SQLITE_DBSTATUS_CACHE_HIT,
+                     misses_n=apsw.SQLITE_DBSTATUS_CACHE_MISS,
+                     writes_n=apsw.SQLITE_DBSTATUS_CACHE_WRITE,
+                     spills_n=apsw.SQLITE_DBSTATUS_CACHE_SPILL,
+                     used_bytes_n=apsw.SQLITE_DBSTATUS_CACHE_USED)
+        return {name: _call(self.native.status, code, False)[0] for name, code in codes.items()}
+
 
 def connect(filename, **options): return Connection(filename, **options)
