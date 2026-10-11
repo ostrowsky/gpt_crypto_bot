@@ -338,10 +338,12 @@ class MarketStreamReader:
         self.processing_lags = deque(maxlen=4096)
         self.open_candle_packets_n = self.closed_candle_packets_n = 0
         self._failed_candle_symbol = None
+        self._failed_candle_reason = "CANDLE_SCHEMA_INVALID"
+        self._pending_store = None
         self.started_ns = self.last_ping_ns = None
 
     def _save(self, kind, data, wall=None, mono=None, extra=()):
-        return self.store.append(kind, dict(data, session_id=self.session_id),
+        return (self._pending_store or self.store).append(kind, dict(data, session_id=self.session_id),
             received_at_ms=self.clock.wall_ms() if wall is None else wall,
             received_monotonic_ns=self.clock.monotonic_ns() if mono is None else mono,
             dependencies=[self.universe["snapshot_id"],*extra])
@@ -355,14 +357,15 @@ class MarketStreamReader:
             book.invalidate(reason)
 
     def _fail(self, reason):
-        safe = reason if reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED"} else "WS_PROTOCOL_ERROR"
+        safe = reason if reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED","CANDLE_SOURCE_CHANGED"} else "WS_PROTOCOL_ERROR"
         with self._lock:
             self.error, self.connected = safe,False
             self._invalidate_quotes(safe)
             self._save("INCIDENT",dict(operation="MARKET_STREAM_FAILED",reason=safe,topics=list(self.topics)))
             if self._failed_candle_symbol:
-                self._save("INCIDENT",dict(operation="CANDLE_COLLECTION_FAILED",symbol=self._failed_candle_symbol,reason="CANDLE_SCHEMA_INVALID"))
+                self._save("INCIDENT",dict(operation="CANDLE_COLLECTION_FAILED",symbol=self._failed_candle_symbol,reason=self._failed_candle_reason))
                 self._failed_candle_symbol = None
+                self._failed_candle_reason = "CANDLE_SCHEMA_INVALID"
         self.transport.close()
 
     def _receive(self, timeout=1):
@@ -467,7 +470,7 @@ class MarketStreamReader:
                                       wire=wire,source="DEMO_COMBINED_STREAM"),wall,mono)
         elif kind == "kline_1m":
             try:
-                result = MarketDataService(self.store,self.client).record_closed_kline(wire,received_at_ms=wall,received_monotonic_ns=mono)
+                result = MarketDataService(self._pending_store or self.store,self.client).record_closed_kline(wire,received_at_ms=wall,received_monotonic_ns=mono)
             except AdapterError:
                 self._failed_candle_symbol = symbol
                 raise
@@ -499,6 +502,7 @@ class MarketStreamReader:
     def read_once(self):
         if not self.connected:
             return False
+        pending = None
         try:
             if self.clock.wall_ms()-self.universe["received_at_ms"] > 900000:
                 raise AdapterError("METADATA_STALE")
@@ -509,17 +513,22 @@ class MarketStreamReader:
                 self.last_ping_ns = self.clock.monotonic_ns()
             payload,wall,mono = self._receive()
             frames = [(payload,wall,mono)]
-            deadline = time.monotonic()+0.020
-            while len(frames) < 32 and time.monotonic() < deadline:
+            deadline = time.monotonic()+0.002
+            while len(frames) < 8 and time.monotonic() < deadline:
                 try:
                     frames.append(self._receive(0.001))
                 except TimeoutError:
                     break
             with self._lock:
                 if self.connected:
-                    with self.store.batch():
-                        for payload,wall,mono in frames:
-                            self._process(payload,wall,mono)
+                    pending = self.store.prepared_batch()
+                    try:
+                        with pending:
+                            self._pending_store = pending
+                            for payload,wall,mono in frames:
+                                self._process(payload,wall,mono)
+                    finally:
+                        self._pending_store = None
             return True
         except TimeoutError:
             if self.clock.monotonic_ns()-self.last_ping_ns >= 20_000_000_000:
@@ -531,12 +540,18 @@ class MarketStreamReader:
                     self._fail("WS_HEARTBEAT_FAILED")
             return False
         except Exception as error:
+            if pending is not None and pending.conflict_symbol:
+                self._failed_candle_symbol = pending.conflict_symbol
+                self._failed_candle_reason = "CANDLE_SOURCE_CHANGED"
             self._fail(error.reason if isinstance(error,AdapterError) else "WS_PROTOCOL_ERROR")
             return False
 
     def _run(self):
-        while not self._stop.is_set() and self.connected:
-            self.read_once()
+        try:
+            while not self._stop.is_set() and self.connected:
+                self.read_once()
+        finally:
+            self.store.release_thread_reader()
 
     def health(self):
         with self._lock:

@@ -60,10 +60,11 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **374 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **400 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
+26 WAL concurrency/prepared-write/lifecycle cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -205,9 +206,22 @@ cannot resurrect old readiness. Public callers still validate the full envelope.
 
 Full public trials discovered 3727 pairs, with 1375 active Spot pairs over 6
 shards. Source reconstruction hashes matched. Several REST points reached
-1375/1375, but all five stream trials ended 0/6 connected, with
+1375/1375, but the initial five stream trials ended 0/6 connected, with
 WS_PROCESSING_LAG; failure evidence is retained under own runtime. Do not
 interpret those point snapshots as continuous coverage. `STREAMS_DEGRADED`
 and per-symbol candle failures close readiness. Sustained throughput/lag must
 be fixed before production qualification; own account keys/permission cut,
 balances/anchors and OMS are separate pending gates. No orders are enabled.
+
+P2-B2 contention repair adds per-thread read-only WAL snapshots, indexed candle
+lookup, <=8-frame/2ms groups and preparation outside the writer. A short atomic
+insert follows validation; concurrent candle revision aborts with
+`CANDLE_SOURCE_CHANGED`. Reader stop releases its owned connection; shared cache
+updates are serialized independently of source reads. Normal snapshot IDs,
+canonical money, source hashes and original receipts are preserved; FULL stays.
+26 new tests bring the app to 400 GREEN. Full-public latency is still FAIL:
+latest observation 46.23s, a point reached 4/6 connected, final 0/6; quotes
+1375/1375 and history 14/1375. SQL profiling isolated observed commit pauses up
+to 400.63ms. Resolve storage/checkpoint latency before qualification. Concurrent
+checkpoint work first requires a fixed SQLite runtime (current 3.50.4), as
+documented in the canonical spec; it has not been enabled here.

@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 374 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 400 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
@@ -26,6 +26,11 @@ P1/P2 завершены частично; фазы 3–7 PLANNED. Следую�
 полномасштабных задержек P2-B2, затем P2-C certified valuation/
 account filters и authenticated integration после explicit credential provisioning;
 ORDER_SEND disabled.
+P2-B2 contention repair добавляет 26 tests (400 всего): WAL readers, подготовку
+atomic writes вне writer, indexed candle conflict guards и cleanup соединений.
+Последний полный прогон 46.23s: sample 4/6 connected, финал 0/6 — FAIL;
+commit до 400.63ms. Следующий шаг — storage/checkpoint latency; перед
+конкурентным checkpoint нужен исправленный SQLite runtime. FULL/250ms сохраняются.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот
 не дорабатывается и не подключается к новому контуру.

@@ -4,6 +4,10 @@ Specifications: [financial API](../../../docs/specs/binance-demo-phase0-financia
 [isolation kernel](../../../docs/specs/binance-demo-application-isolation.md).
 Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
+`test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
+writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
+plans, receiver lifecycle and detached cache integrity. Current app: 400 GREEN.
+
 | Test file | Coverage in this batch |
 |---|---|
 | `test_financial_valuation.py` | Decimal, free/locked identity, whole inventory, dust/stablecoins, conversion routes, stale/future quote rejection, historical clock protocol, DST/day boundaries. |
@@ -119,3 +123,13 @@ also RED before fixes. 36 new cases / **374 app tests GREEN**. No skip/xfail or 
 Public full-market qualification remains FAIL: 3727 discovered, 1375 active,
 6 shards, all failed processing-lag guards. A complete REST point snapshot
 does not certify sustained stream availability; unsuccessful trials retained.
+
+P2-B2 contention repair: 26 additional tests / **400 app GREEN**. Initial
+12 scenarios had 10 failures/1 missing-connection error before implementation;
+the owner-candle contract remained GREEN. Count/time cap and actual query-plan
+reproductions preceded fixes. Missing prepared batch, reader contention/cache
+interleaving, exact candle guard diagnostics and connection cleanup were RED
+before code. Pinned WAL snapshot coverage was already GREEN after the first
+read-connection implementation, correctly retained as preserving coverage.
+Full-public trials still FAIL; latest SQL profile isolated commit up to 400.63ms.
+No runtime artifacts, account keys or orders were included in test fixtures.

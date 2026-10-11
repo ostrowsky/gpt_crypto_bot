@@ -19,6 +19,100 @@ KINDS = frozenset(("UNIVERSE", "QUOTES", "CANDLES", "FEATURE", "VALUATION", "INC
 PROCESS_ID = uuid.uuid4().hex
 
 
+def _check_append(kind, data, wall, mono, dependencies):
+    if kind not in KINDS or not isinstance(data, dict):
+        raise AdapterError("SCHEMA_INVALID")
+    _integer(wall); _integer(mono)
+    if not isinstance(dependencies, (tuple, list)) or any(not isinstance(d, str) for d in dependencies):
+        raise AdapterError("DEPENDENCY_MISSING")
+
+
+def _prepared_row(identity, kind, data, wall, mono, dependencies, available):
+    data_json = _json(data)
+    basis = dict(identity, kind=kind, data=json.loads(data_json), dependencies=dependencies,
+        event_type="MarketSnapshotRecorded", exchange_event_time_ms=None,
+        received_at_ms=wall, received_monotonic_ns=mono, available_at_ms=available,
+        process_instance_id=PROCESS_ID, source_sha256=hashlib.sha256(data_json.encode()).hexdigest(),
+        causation_id=None, model_id=None, policy_version=None, arm_id=None, risk_contract_id=None)
+    serialize = lambda value: json.dumps(value,sort_keys=True,separators=(",",":"),allow_nan=False)
+    identifier = hashlib.sha256(serialize(basis).encode()).hexdigest()
+    value = dict(basis,event_id=identifier,snapshot_id=identifier,recorded_at_ms=time.time_ns()//1_000_000)
+    payload = serialize(value)
+    return value, (identifier,kind,available,payload,hashlib.sha256(payload.encode()).hexdigest())
+
+
+class _PreparedMarketBatch:
+    """Reader-private preparation; one atomic primary insert after validation."""
+    def __init__(self, store):
+        self.store = store
+        self.rows, self.values, self.guards = [], {}, {}
+        self.active = False
+        self.conflict_symbol = None
+
+    def __enter__(self):
+        if self.store._own_batch() or self.active:
+            raise AdapterError("NESTED_MARKET_BATCH")
+        self.active = True
+        return self
+
+    def append(self, kind, data, *, received_at_ms, received_monotonic_ns, dependencies=()):
+        if not self.active:
+            raise AdapterError("INVALID_PARAMETERS")
+        _check_append(kind,data,received_at_ms,received_monotonic_ns,dependencies)
+        dependencies = sorted(set(dependencies))
+        available = received_at_ms
+        with self.store._reading() as connection:
+            for dependency in dependencies:
+                if dependency in self.values:
+                    timestamp = self.values[dependency]["available_at_ms"]
+                else:
+                    row = connection.execute("SELECT available_ms FROM snapshots WHERE id=?",(dependency,)).fetchone()
+                    if row is None:
+                        raise AdapterError("DEPENDENCY_MISSING")
+                    timestamp = row[0]
+                available = max(available,timestamp)
+        value,row = _prepared_row(self.store.identity,kind,data,received_at_ms,received_monotonic_ns,dependencies,available)
+        identifier = value["snapshot_id"]
+        existing = self.values.get(identifier) or self.store.get(identifier)
+        if existing is not None:
+            return deepcopy(existing)
+        self.rows.append(row)
+        self.values[identifier] = value
+        return deepcopy(value)
+
+    def candle_index(self, cutoff_ms, symbol=None):
+        _integer(cutoff_ms)
+        if symbol is None:
+            raise AdapterError("INVALID_PARAMETERS")
+        result = {}
+        with self.store._reading() as connection:
+            sequence = connection.execute("SELECT COALESCE(MAX(seq),0) FROM snapshots INDEXED BY candle_symbol_seq WHERE kind='CANDLES' AND json_extract(payload_json,'$.data.symbol')=?",(symbol,)).fetchone()[0]
+            self.guards.setdefault(symbol,sequence)
+            query = "SELECT payload_json FROM snapshots INDEXED BY candle_symbol_seq WHERE kind='CANDLES' AND json_extract(payload_json,'$.data.symbol')=? AND available_ms<=? ORDER BY seq"
+            sources = [json.loads(row[0]) for row in connection.execute(query,(symbol,cutoff_ms))]
+        sources.extend(value for value in self.values.values() if value["kind"]=="CANDLES"
+            and value["data"]["symbol"]==symbol and value["available_at_ms"]<=cutoff_ms)
+        for value in sources:
+            reference = {key:item for key,item in value.items() if key!="data"}
+            for item in value["data"]["rows"]:
+                result[item["open_time_ms"]] = (item,reference)
+        return deepcopy(result)
+
+    def __exit__(self, error_type, error, traceback):
+        self.active = False
+        if error_type is not None:
+            return
+        if not self.rows:
+            return
+        with self.store.batch():
+            for symbol,expected in self.guards.items():
+                actual = self.store._con.execute("SELECT COALESCE(MAX(seq),0) FROM snapshots INDEXED BY candle_symbol_seq WHERE kind='CANDLES' AND json_extract(payload_json,'$.data.symbol')=?",(symbol,)).fetchone()[0]
+                if actual != expected:
+                    self.conflict_symbol = symbol
+                    raise AdapterError("CANDLE_SOURCE_CHANGED")
+            self.store._con.executemany("INSERT OR IGNORE INTO snapshots(id,kind,available_ms,payload_json,content_sha256) VALUES (?,?,?,?,?)",self.rows)
+
+
 class _FairRLock:
     """FIFO contenders; reentrancy keeps a bounded group indivisible."""
     def __init__(self):
@@ -69,6 +163,11 @@ class MarketSnapshotStore:
         self._lock = _FairRLock()
         self._lease = _WriterLease(paths.runtime_path(database + ".writer.lock"))
         self._con = None
+        self._read_con = None
+        self._reader_local = threading.local()
+        self._reader_registry_lock = threading.Lock()
+        self._readers = []
+        self._index_lock = threading.RLock()
         self._batch_depth = 0
         self._quote_seq, self._quote_max_ms, self._quote_cache = 0, 0, {}
         self._candle_seq, self._candle_max_ms, self._candle_cache = 0, 0, {}
@@ -95,6 +194,9 @@ class MarketSnapshotStore:
                 if not row or json.loads(row[0]) != self.identity:
                     raise AdapterError("MARKET_IDENTITY_MISMATCH")
             self._verify()
+            self._con.execute("CREATE INDEX IF NOT EXISTS snapshot_kind_seq ON snapshots(kind,seq)")
+            self._con.execute("CREATE INDEX IF NOT EXISTS candle_symbol_seq ON snapshots(kind,json_extract(payload_json,'$.data.symbol'),seq) WHERE kind='CANDLES'")
+            self._read_con = self._thread_reader()["connection"]
         except BaseException:
             self.close()
             raise
@@ -125,15 +227,7 @@ class MarketSnapshotStore:
             raise AdapterError("MARKET_INTEGRITY_FAILED") from None
 
     def append(self, kind, data, *, received_at_ms, received_monotonic_ns, dependencies=()):
-        if kind not in KINDS or not isinstance(data, dict):
-            raise AdapterError("SCHEMA_INVALID")
-        _integer(received_at_ms)
-        _integer(received_monotonic_ns)
-        if not isinstance(dependencies, (tuple, list)) or any(not isinstance(d, str) for d in dependencies):
-            raise AdapterError("DEPENDENCY_MISSING")
-        # Large REST snapshots must not exclude writers during pure CPU work.
-        data_json = _json(data)
-        normalized = json.loads(data_json)
+        _check_append(kind,data,received_at_ms,received_monotonic_ns,dependencies)
         with self._lock:
             dependencies = sorted(set(dependencies))
             available = received_at_ms
@@ -142,24 +236,15 @@ class MarketSnapshotStore:
                 if row is None:
                     raise AdapterError("DEPENDENCY_MISSING")
                 available = max(available, row[0])
-        basis = dict(self.identity, kind=kind, data=normalized, dependencies=dependencies,
-                     event_type="MarketSnapshotRecorded", exchange_event_time_ms=None,
-                     received_at_ms=received_at_ms, received_monotonic_ns=received_monotonic_ns,
-                     available_at_ms=available, process_instance_id=PROCESS_ID,
-                     source_sha256=hashlib.sha256(data_json.encode()).hexdigest(), causation_id=None, model_id=None,
-                     policy_version=None, arm_id=None, risk_contract_id=None)
-        serialize = lambda value: json.dumps(value,sort_keys=True,separators=(",",":"),allow_nan=False)
-        identifier = hashlib.sha256(serialize(basis).encode()).hexdigest()
-        value = dict(basis, event_id=identifier, snapshot_id=identifier, recorded_at_ms=time.time_ns()//1_000_000)
-        payload = serialize(value)
-        content_sha = hashlib.sha256(payload.encode()).hexdigest()
+        value,row = _prepared_row(self.identity,kind,data,received_at_ms,received_monotonic_ns,dependencies,available)
+        identifier = value["snapshot_id"]
         with self._lock:
             standalone = self._batch_depth == 0
             if standalone:
                 self._con.execute("BEGIN IMMEDIATE")
             try:
                 self._con.execute("INSERT OR IGNORE INTO snapshots(id,kind,available_ms,payload_json,content_sha256) VALUES (?,?,?,?,?)",
-                                  (identifier, kind, available, payload, content_sha))
+                                  row)
                 if standalone:
                     self._con.commit()
             except BaseException:
@@ -170,8 +255,8 @@ class MarketSnapshotStore:
         return json.loads(stored)
 
     def get(self, identifier):
-        with self._lock:
-            row = self._con.execute("SELECT payload_json FROM snapshots WHERE id=?", (identifier,)).fetchone()
+        with self._reading() as connection:
+            row = connection.execute("SELECT payload_json FROM snapshots WHERE id=?", (identifier,)).fetchone()
             return json.loads(row[0]) if row else None
 
     def records(self, kind=None, *, cutoff_ms=None):
@@ -184,14 +269,81 @@ class MarketSnapshotStore:
             clauses.append("available_ms<=?")
             args.append(cutoff_ms)
         sql = "SELECT payload_json FROM snapshots" + (" WHERE " + " AND ".join(clauses) if clauses else "") + " ORDER BY seq"
-        with self._lock:
-            return [json.loads(r[0]) for r in self._con.execute(sql, args)]
+        with self._reading() as connection:
+            return [json.loads(r[0]) for r in connection.execute(sql, args)]
 
     def as_of(self, kind, cutoff_ms):
         _integer(cutoff_ms)
-        with self._lock:
-            row = self._con.execute("SELECT payload_json FROM snapshots WHERE kind=? AND available_ms<=? ORDER BY seq DESC LIMIT 1",(kind,cutoff_ms)).fetchone()
+        with self._reading() as connection:
+            row = connection.execute("SELECT payload_json FROM snapshots WHERE kind=? AND available_ms<=? ORDER BY seq DESC LIMIT 1",(kind,cutoff_ms)).fetchone()
             return json.loads(row[0]) if row else None
+
+    def _own_batch(self):
+        return self._batch_depth and self._lock._owner == threading.get_ident()
+
+    def prepared_batch(self):
+        return _PreparedMarketBatch(self)
+
+    def _thread_reader(self):
+        state = getattr(self._reader_local,"state",None)
+        if state is None:
+            with self._reader_registry_lock:
+                if self._con is None:
+                    raise AdapterError("MARKET_INTEGRITY_FAILED")
+                connection = sqlite3.connect(self.path.as_uri()+"?mode=ro",uri=True,
+                    timeout=0,isolation_level=None,check_same_thread=False)
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA query_only=ON")
+                state = dict(connection=connection,lock=threading.RLock(),depth=0)
+                self._readers.append(state)
+                self._reader_local.state = state
+        return state
+
+    def release_thread_reader(self):
+        state = getattr(self._reader_local,"state",None)
+        if state is None:
+            return
+        if state["depth"]:
+            raise AdapterError("INVALID_PARAMETERS")
+        with self._reader_registry_lock:
+            if state in self._readers:
+                with state["lock"]:
+                    state["connection"].close()
+                self._readers.remove(state)
+            del self._reader_local.state
+
+    @contextmanager
+    def _indexed_reading(self):
+        if self._own_batch():
+            yield self._con
+            return
+        with self._index_lock:
+            with self._reading() as connection:
+                yield connection
+
+    @contextmanager
+    def _reading(self):
+        if self._own_batch():
+            # Validator sees its staged predecessors without a writer→reader lock.
+            yield self._con
+            return
+        state = self._thread_reader()
+        connection = state["connection"]
+        with state["lock"]:
+            outer = state["depth"] == 0
+            if outer:
+                connection.execute("BEGIN")
+            state["depth"] += 1
+            try:
+                yield connection
+                if outer:
+                    connection.commit()
+            except BaseException:
+                if outer:
+                    connection.rollback()
+                raise
+            finally:
+                state["depth"] -= 1
 
     @contextmanager
     def batch(self):
@@ -205,9 +357,8 @@ class MarketSnapshotStore:
                 self._con.commit()
             except BaseException:
                 self._con.rollback()
-                self._quote_seq,self._quote_max_ms,self._quote_cache = 0,0,{}
-                self._candle_seq,self._candle_max_ms,self._candle_cache = 0,0,{}
-                self._failure_seq,self._failure_max_ms,self._failure_cache = 0,0,set()
+                # Diagnostic caches only read committed WAL rows; staged owner
+                # reads never publish into them, so rollback cannot contaminate.
                 raise
             finally:
                 self._batch_depth = 0
@@ -215,8 +366,8 @@ class MarketSnapshotStore:
     def validate_snapshot(self, value, kind, cutoff_ms):
         try:
             identifier = value["snapshot_id"]
-            with self._lock:
-                row = self._con.execute("SELECT kind,available_ms,content_sha256 FROM snapshots WHERE id=?",(identifier,)).fetchone()
+            with self._reading() as connection:
+                row = connection.execute("SELECT kind,available_ms,content_sha256 FROM snapshots WHERE id=?",(identifier,)).fetchone()
                 payload = json.dumps(value,sort_keys=True,separators=(",",":"),allow_nan=False)
                 if row is None or row[0] != kind or hashlib.sha256(payload.encode()).hexdigest() != row[2]:
                     raise AdapterError("UNIVERSE_SNAPSHOT_INVALID")
@@ -226,8 +377,8 @@ class MarketSnapshotStore:
             raise AdapterError("UNIVERSE_SNAPSHOT_INVALID") from None
 
     def validate_reference(self, identifier, kind, cutoff_ms):
-        with self._lock:
-            row = self._con.execute("SELECT kind,available_ms FROM snapshots WHERE id=?",(identifier,)).fetchone()
+        with self._reading() as connection:
+            row = connection.execute("SELECT kind,available_ms FROM snapshots WHERE id=?",(identifier,)).fetchone()
             if row is None or row[0] != kind:
                 raise AdapterError("UNIVERSE_SNAPSHOT_INVALID")
             if row[1] > cutoff_ms:
@@ -235,11 +386,11 @@ class MarketSnapshotStore:
 
     def quote_index(self, cutoff_ms):
         _integer(cutoff_ms)
-        with self._lock:
-            if self._batch_depth:
+        with self._indexed_reading() as connection:
+            if self._own_batch():
                 # Do not publish/cache uncommitted groups.
                 raise AdapterError("MARKET_BATCH_NOT_PUBLISHED")
-            for row in self._con.execute("SELECT seq,available_ms,payload_json FROM snapshots WHERE kind='QUOTES' AND seq>? ORDER BY seq",(self._quote_seq,)):
+            for row in connection.execute("SELECT seq,available_ms,payload_json FROM snapshots WHERE kind='QUOTES' AND seq>? ORDER BY seq",(self._quote_seq,)):
                 snapshot = json.loads(row[2])
                 reference = {k:v for k,v in snapshot.items() if k != "data"}
                 for item in snapshot["data"].get("rows",[]):
@@ -259,9 +410,9 @@ class MarketSnapshotStore:
     def candle_index(self, cutoff_ms, symbol=None):
         _integer(cutoff_ms)
         current = False
-        with self._lock:
-            if not self._batch_depth:
-                for row in self._con.execute("SELECT seq,available_ms,payload_json FROM snapshots WHERE kind='CANDLES' AND seq>? ORDER BY seq",(self._candle_seq,)):
+        with self._indexed_reading() as connection:
+            if not self._own_batch():
+                for row in connection.execute("SELECT seq,available_ms,payload_json FROM snapshots WHERE kind='CANDLES' AND seq>? ORDER BY seq",(self._candle_seq,)):
                     snapshot = json.loads(row[2])
                     reference = {k:v for k,v in snapshot.items() if k != "data"}
                     target = self._candle_cache.setdefault(snapshot["data"]["symbol"],{})
@@ -275,7 +426,14 @@ class MarketSnapshotStore:
                     current = True
             if not current:
                 result = {}
-                for snapshot in self.records("CANDLES",cutoff_ms=cutoff_ms):
+                table = "snapshots INDEXED BY candle_symbol_seq" if symbol is not None else "snapshots"
+                sql = "SELECT payload_json FROM "+table+" WHERE kind='CANDLES' AND available_ms<=?"
+                parameters = [cutoff_ms]
+                if symbol is not None:
+                    sql += " AND json_extract(payload_json,'$.data.symbol')=?"
+                    parameters.append(symbol)
+                for stored in connection.execute(sql+" ORDER BY seq",parameters):
+                    snapshot = json.loads(stored[0])
                     name = snapshot["data"]["symbol"]
                     if symbol is not None and name != symbol:
                         continue
@@ -291,8 +449,8 @@ class MarketSnapshotStore:
 
     def candle_failures(self,cutoff_ms):
         _integer(cutoff_ms)
-        with self._lock:
-            if self._batch_depth:
+        with self._indexed_reading() as connection:
+            if self._own_batch():
                 raise AdapterError("MARKET_BATCH_NOT_PUBLISHED")
             sql="SELECT seq,available_ms,kind,json_extract(payload_json,'$.data.symbol'),json_extract(payload_json,'$.data.operation') FROM snapshots WHERE kind IN ('CANDLES','INCIDENT')"
             def apply(rows,target):
@@ -300,18 +458,18 @@ class MarketSnapshotStore:
                     if kind=="CANDLES":target.discard(symbol)
                     elif operation=="CANDLE_COLLECTION_FAILED":target.add(symbol)
                     yield seq,available
-            for seq,available in apply(self._con.execute(sql+" AND seq>? ORDER BY seq",(self._failure_seq,)),self._failure_cache):
+            for seq,available in apply(connection.execute(sql+" AND seq>? ORDER BY seq",(self._failure_seq,)),self._failure_cache):
                 self._failure_seq=seq
                 self._failure_max_ms=max(self._failure_max_ms,available)
             if self._failure_max_ms<=cutoff_ms:
                 return set(self._failure_cache)
             target=set()
-            list(apply(self._con.execute(sql+" AND available_ms<=? ORDER BY seq",(cutoff_ms,)),target))
+            list(apply(connection.execute(sql+" AND available_ms<=? ORDER BY seq",(cutoff_ms,)),target))
             return target
 
     def last_failure(self, operation, success_kind, cutoff_ms, *, symbol=None):
         """Sequence ordering resolves equal clocks; future incidents are excluded."""
-        with self._lock:
+        with self._reading() as connection:
             # Do not deserialize a 50MB universe for every member's readiness.
             sql = "SELECT kind,CASE WHEN kind='INCIDENT' THEN json_extract(payload_json,'$.data.operation') END FROM snapshots WHERE available_ms<=? AND kind IN (?, 'INCIDENT')"
             args = [cutoff_ms, success_kind]
@@ -319,7 +477,7 @@ class MarketSnapshotStore:
                 sql += " AND json_extract(payload_json,'$.data.symbol')=?"
                 args.append(symbol)
             sql += " ORDER BY seq DESC"
-            for kind, recorded_operation in self._con.execute(sql, args):
+            for kind, recorded_operation in connection.execute(sql, args):
                 if kind == success_kind:
                     return False
                 if recorded_operation == operation:
@@ -328,6 +486,12 @@ class MarketSnapshotStore:
 
     def close(self):
         with self._lock:
+            with self._reader_registry_lock:
+                for state in self._readers:
+                    with state["lock"]:
+                        state["connection"].close()
+                self._readers.clear()
+                self._read_con = None
             if self._con is not None:
                 self._con.close()
                 self._con = None

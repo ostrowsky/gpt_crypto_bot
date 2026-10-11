@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 139 focused tests; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 165 focused tests / 400 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -813,3 +813,134 @@ a continuous SLA. All own workers stopped; failed evidence remains local.
 P2-B2 is a diagnostic foundation, not completed production enablement. P2-C
 account/financial integration, actual own credentials, filters/anchors and
 reconcile stay pending; ORDER_SEND remains disabled. No policy/alpha change.
+
+## P2-B2 read/write contention repair (2026-10-11)
+
+Baseline full-public trial `1791725443819122200` retained FAIL, 0/6 shards.
+Operation-level profiling found `quote_index` holding the writer lock for
+1013ms in the observation phase. Separate diagnostic reads from the single
+WAL/FULL writer; do not relax the 250ms guard, change prices/hashes, sample
+events, shrink full discovery or weaken validation. No order/policy change.
+
+* Open an app-local SQLite read-only/query-only connection after primary
+  identity/hash verification. Serialize readers with a separate reentrant lock
+  and pin one WAL read transaction per public read operation. JSON parsing,
+  current caches, historical prefix reconstruction and full-envelope hashing
+  must not hold the writer lock or block an unrelated append. No credentials,
+  external database access, second writer or financial fingerprint changes.
+* Outside the owner transaction, get/records/as_of/reference/index queries see
+  only committed data, including while another thread has a pending write or
+  rollback. Cache cursors advance only across committed primary sequences;
+  rollback cannot publish uncommitted cache entries. Future available_ms still
+  excludes inputs from an earlier cutoff. Current invalid inputs supersede
+  earlier good ones; detached caller mutation remains harmless.
+* The actual writer owner retains read-your-own-writes for candle-conflict and
+  dependency checks inside an atomic batch; those reads use the writer connection
+  and never acquire the diagnostic reader lock. Own quote/failure indices reject
+  publication inside that batch. There must be no writer→reader lock cycle.
+* Add derived `(kind,seq)` and partial candle-symbol/sequence indexes, including
+  on reopening existing stores, without modifying historical payloads/IDs.
+  Within a batch, symbol-specific candle revision checks query only that symbol
+  through the partial index. Primary hash verification still runs on reopen.
+* Closing stops both connections under own lifecycle; double close is harmless.
+  Database remains WAL/FULL, one own writer lease, and immutable evidence.
+
+Acceptance P2B2-06 before code: paused read parsing/hashing allows concurrent
+append; read while a writer is paused excludes uncommitted data; rollback/cache
+and future-prefix correctness; read-only connection rejects writes; owner sees
+its staged candle revision; symbol query uses the derived index; reopen adds
+indexes and retains old snapshots/hashes; namespace/tamper and lifecycle guards.
+Then full app/regression/harness checks and a fresh full-public network trial.
+Report actual denominator, observation duration, lag and faults. A short success
+still does not certify continuous SLA/account/PnL. Rollback stops only this own
+runtime; failed trials and immutable sources remain. Commit/push intended files.
+
+Trial `1791725909959519500` retained FAIL (0/6). WAL separation removed
+diagnostic `quote_index` from the writer-lock holds, but reader batches still
+held it for 331ms. Bound each reader transaction to <=8 frames and recv draining
+to <=2ms (previous 32/20ms). This changes grouping, not topics, receipts, validation
+or event retention; excess queued frames are consumed next iteration, never
+discarded. Confirm all packet IDs persist across successive bounded groups and
+the time cap works independently of the count cap. Candle-symbol lookup uses an
+explicit derived-index hint, verified from the actual traced query plan rather
+than an unrelated manually written SQL query; cutoff/source checks remain.
+
+Trial `1791726183491404800` retained FAIL (final 1/6 connected). Small groups
+still held the writer during parsing/validation/serialization. Add a prepared
+reader group: process/normalize/hash <=8 packets under the reader's health lock,
+without holding the SQLite writer. Commit all immutable prepared snapshots in
+one short WAL/FULL transaction before health is exposed. Failed preparation or
+commit publishes none of the group; existing durable failure handling remains.
+Every original receipt/hash/dependency is retained, no premature READY or drops.
+Use one serialized read-only WAL connection per thread, registered and closed
+by this store, so slow diagnostic parsing cannot hold up the receiver's source
+checks. Keep writer-owner read-your-own-writes separate. Pinned read snapshots
+and primary hash verification remain mandatory. Never access external DBs.
+
+Prepared append must match normal snapshot IDs/source SHA/canonical money,
+resolve preceding prepared dependencies, give callers detached values and
+return existing records on exact retries. Candle checks overlay earlier prepared
+bars on the symbol's committed prefix. Capture the committed candle sequence
+in that same read snapshot and recheck it under the writer at commit: a
+concurrent candle write aborts the group as CANDLE_SOURCE_CHANGED and records a
+symbol failure instead of silently overwriting a revision. No nested prepare
+inside an owned write batch. Rollback preserves primary rows and caches.
+
+Additional P2B2-06 tests before code: concurrent readers do not serialize behind
+another thread's parsing; pinned snapshot excludes a mid-read commit; prepared
+serialization permits unrelated append; failed group/dependency/hash/retry and
+caller-mutation parity; staged candle conflict and concurrent-source guard;
+actual stream uses preparation outside writer; all owned read connections close.
+
+Per-thread read transactions share derived cache cursors only under a separate
+index lock; one reader cannot interleave cache mutation with another's pinned
+cut. This index lock never blocks normal source reads or the prepared receiver
+path. A stream commit candle guard failure is explicitly CANDLE_SOURCE_CHANGED
+in both session diagnostics and the durable per-symbol failure, not a misleading
+schema-error label. Validate both with reproductions before repair.
+An exiting owned background receiver releases its thread's read connection and
+registry entry; reconnects cannot accumulate obsolete reader connections. This
+release is idempotent, does not close other threads' readers or the writer, and
+store close still owns final cleanup. Test both explicit release and real reader
+thread stop with a processed packet before wiring lifecycle code.
+
+### P2-B2 contention repair delivery
+
+26 new focused cases / 400 total app GREEN. Initial WAL scenarios reproduced
+10 failures/1 missing-connection error before code (one existing owner-candle
+contract correctly stayed GREEN). Group count/time cap failures, missing prepared
+API, shared-reader contention, cache interleaving, exact candle guard reason and
+connection cleanup were RED before their repairs. The pinned snapshot scenario
+was legitimately GREEN after the first WAL implementation; no manufactured RED.
+The index-plan test now inspects the actual traced query rather than an unrelated
+manual SQL; the same expected partial-index assertion first remained RED and
+passed after the explicit query hint. No skips/xfail or weakened assertions.
+
+Own full-public trials retain 3727 discovered / 1375 active / 6 planned shards
+and matched original source hashes; no keys or orders:
+
+| Trial | Change/evidence | Final connected | Verdict |
+|---|---|---:|---|
+| 1791725443819122200 | Baseline: quote_index writer hold 1013ms | 0/6 | FAIL |
+| 1791725909959519500 | WAL reads remove diagnostic writer holds; batch hold 331ms | 0/6 | FAIL |
+| 1791726183491404800 | <=8 frames/2ms groups and indexed candle check | 1/6 | FAIL |
+| 1791729042494407500 | Prepared writes/per-thread reads/cache and lifecycle repair | 1/6 | FAIL |
+| 1791729295847478400 | SQL profiling: observed commit up to 400.6265ms; sample reached 4/6 | 0/6 | FAIL |
+
+Last final quote coverage was 1375/1375, closed history 14/1375; this is a point
+snapshot with incomplete warmup and failed continuous streams, not an SLA.
+Evidence is retained in app-local ignored runtime and all own workers stopped.
+Separate actual SQL time from mutex time and startup from observation; timing
+trials are diagnostics, not a controlled uplift/profit comparison.
+
+Next P2-B2 gate is storage/commit/checkpoint latency. Keep synchronous=FULL and
+250ms; do not conceal pauses, drop packets or use async uncommitted READY. Moving
+checkpoint off the writer is a new spec/test-first slice, not part of this delivery.
+The workstation Python reports SQLite **3.50.4**. Current code has one writable
+connection and read-only readers. A concurrent write/checkpoint design must first
+use a fixed SQLite runtime: [official WAL-reset advisory](https://www.sqlite.org/wal.html#the_wal_reset_bug)
+identifies fixes in 3.50.7/3.44.6 backports and 3.51.3+. Do not add a concurrent
+checkpointer on 3.50.4. [Official WAL performance documentation](https://www.sqlite.org/wal.html#performance_considerations)
+explains automatic checkpoint pauses; the local measured commit latency alone
+does not prove that every pause was checkpoint rather than disk sync/scheduling.
+P2-C account/financial cuts and trading remain pending/disabled.

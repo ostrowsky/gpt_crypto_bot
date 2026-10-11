@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B2 foundations / 374 GREEN; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B2 foundations / 400 GREEN; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -88,6 +88,13 @@ closed-candle streams, atomic store/FIFO, coordinator и честные health c
 подключённых shards при 1375 активных парах. Следующий приоритет — устранить
 полномасштабные задержки P2-B2, затем P2-C certified valuation/authenticated integration;
 order sending disabled. Готовность заработать не доказана.
+
+P2-B2 contention repair: ещё 26 тестов, всего 400 GREEN; per-thread WAL reads,
+prepared atomic writes, indexed candle guards и освобождение reader connections.
+Полные прогоны всё ещё FAIL: последний 46.23s достигал 4/6 подключённых shards,
+финал 0/6, закрытая история 14/1375. Измерены commit-паузы до 400.63ms.
+Следующий приоритет — storage/checkpoint latency с FULL и прежним 250ms,
+обновление SQLite перед конкурентным checkpoint, затем P2-C. Не обходить gate.
 
 ## Shared interfaces and ownership
 
