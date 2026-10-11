@@ -4,6 +4,7 @@ from collections import deque
 from copy import deepcopy
 from decimal import Context, Decimal, localcontext
 from functools import wraps
+import time
 import json
 import logging
 import re
@@ -19,7 +20,7 @@ from .market_data import MarketDataService, _symbol
 
 WS_URL = "wss://demo-stream.binance.com/stream"
 WS_LIMIT = 1024*1024
-TOPIC = re.compile(r"(\w{2,64})@(bookTicker|depth@100ms)\Z")
+TOPIC = re.compile(r"(\w{2,64})@(bookTicker|depth@100ms|kline_1m)\Z")
 
 
 def _topics(value):
@@ -30,7 +31,9 @@ def _topics(value):
     return list(value)
 
 
-def stream_plan(universe, deep_symbols=()):
+def stream_plan(universe, deep_symbols=(), *, include_candles=False):
+    if type(include_candles) is not bool:
+        raise AdapterError("INVALID_PARAMETERS")
     if not isinstance(deep_symbols, (list, tuple)) or len(set(deep_symbols)) > 32:
         raise AdapterError("INVALID_PARAMETERS")
     rows = universe["data"]["rows"]
@@ -39,13 +42,21 @@ def stream_plan(universe, deep_symbols=()):
     deep = sorted(set(_symbol(s) for s in deep_symbols))
     if not set(deep) <= population:
         raise AdapterError("UNMAPPED_SYMBOL")
-    topics = sorted([s.lower()+"@bookTicker" for s in population] + [s.lower()+"@depth@100ms" for s in deep])
+    topics = sorted([s.lower()+"@bookTicker" for s in population] + [s.lower()+"@depth@100ms" for s in deep]
+                    + ([s.lower()+"@kline_1m" for s in population] if include_candles else []))
     shards = [dict(shard_id=_digest(dict(universe=universe["snapshot_id"], topics=topics[i:i+512])),
                    topics=topics[i:i+512]) for i in range(0, len(topics), 512)]
     return dict(universe_snapshot_id=universe["snapshot_id"], shards=shards, deep_symbols=deep,
                 discovered_pairs_n=universe["data"]["counts"]["discovered_pairs_n"],
                 permitted_pairs_N=universe["data"]["counts"]["permitted_pairs_N"],
                 subscribed_pairs_n=len(population), registry_version="combined-demo-v1")
+
+
+def _universe_projection(value):
+    result = {k:v for k,v in value.items() if k != "data"}
+    result["data"] = dict(state=value["data"]["state"],counts=dict(value["data"]["counts"]),
+        rows=[{k:r[k] for k in ("symbol","base","quote","status","spot_allowed","permitted")} for r in value["data"]["rows"]])
+    return result
 
 
 class DemoMarketWsTransport:
@@ -289,6 +300,17 @@ class MarketStreamReader:
         if type(background) is not bool:
             raise AdapterError("INVALID_PARAMETERS")
         MarketDataService(store,client)._universe(universe,client.clock.wall_ms())
+        self._initialize(store,client,_universe_projection(universe),topics,transport=transport,background=background)
+
+    @classmethod
+    def _from_verified_source(cls,store,client,projection,topics,*,transport=None,background=True):
+        # Called only with supervisor-owned membership copied after full validation.
+        store.validate_reference(projection["snapshot_id"],"UNIVERSE",client.clock.wall_ms())
+        result=cls.__new__(cls)
+        result._initialize(store,client,projection,topics,transport=transport,background=background)
+        return result
+
+    def _initialize(self,store,client,universe,topics,*,transport,background):
         selected = _topics(topics)
         symbol_map = {r["symbol"].lower():r["symbol"] for r in universe["data"]["rows"]}
         if len(symbol_map) != len(universe["data"]["rows"]):
@@ -296,13 +318,13 @@ class MarketStreamReader:
         if any(TOPIC.fullmatch(t).group(1) not in symbol_map for t in selected):
             raise AdapterError("UNMAPPED_SYMBOL")
         mapped = {t:symbol_map[TOPIC.fullmatch(t).group(1)] for t in selected}
-        allowed = {t for shard in stream_plan(universe, [mapped[t] for t in selected if t.endswith("@depth@100ms")])["shards"] for t in shard["topics"]}
+        allowed = {t for shard in stream_plan(universe, [mapped[t] for t in selected if t.endswith("@depth@100ms")],include_candles=any(t.endswith("@kline_1m") for t in selected))["shards"] for t in shard["topics"]}
         if not set(selected) <= allowed:
             raise AdapterError("UNMAPPED_SYMBOL")
         self.store, self.client, self.clock = store,client,client.clock
-        self.universe, self.topics = deepcopy(universe),tuple(selected)
+        self.universe, self.topics = _universe_projection(universe),tuple(selected)
         self.topic_symbols = mapped
-        self.members = {r["symbol"]:r for r in universe["data"]["rows"]}
+        self.members = {r["symbol"]:r for r in self.universe["data"]["rows"]}
         self.transport, self.background = transport or DemoMarketWsTransport(),background
         self.books = {mapped[t]:IncrementalBook(mapped[t],self.clock) for t in selected if t.endswith("@depth@100ms")}
         self.quote_symbols = {mapped[t] for t in selected if t.endswith("@bookTicker")}
@@ -313,6 +335,9 @@ class MarketStreamReader:
         self._quotes, self._depth_ids = {},{}
         self._blocked_quotes = set()
         self.last_processing_lag_ms = None
+        self.processing_lags = deque(maxlen=4096)
+        self.open_candle_packets_n = self.closed_candle_packets_n = 0
+        self._failed_candle_symbol = None
         self.started_ns = self.last_ping_ns = None
 
     def _save(self, kind, data, wall=None, mono=None, extra=()):
@@ -335,6 +360,9 @@ class MarketStreamReader:
             self.error, self.connected = safe,False
             self._invalidate_quotes(safe)
             self._save("INCIDENT",dict(operation="MARKET_STREAM_FAILED",reason=safe,topics=list(self.topics)))
+            if self._failed_candle_symbol:
+                self._save("INCIDENT",dict(operation="CANDLE_COLLECTION_FAILED",symbol=self._failed_candle_symbol,reason="CANDLE_SCHEMA_INVALID"))
+                self._failed_candle_symbol = None
         self.transport.close()
 
     def _receive(self, timeout=1):
@@ -349,7 +377,7 @@ class MarketStreamReader:
         with self._lock:
             if self.connected or self._thread and self._thread.is_alive():
                 raise AdapterError("WS_ALREADY_CONNECTED")
-            MarketDataService(self.store,self.client)._universe(self.universe,self.clock.wall_ms())
+            self.store.validate_reference(self.universe["snapshot_id"],"UNIVERSE",self.clock.wall_ms())
             if self.clock.wall_ms()-self.universe["received_at_ms"] > 900000:
                 raise AdapterError("METADATA_STALE")
             self.clock.timestamp_ms()
@@ -401,6 +429,7 @@ class MarketStreamReader:
         lag_ns = self.clock.monotonic_ns()-mono
         with localcontext(Context(prec=50)):
             self.last_processing_lag_ms = Decimal(lag_ns)/1_000_000
+        self.processing_lags.append(self.last_processing_lag_ms)
         if not 0 <= lag_ns <= 250_000_000:
             raise AdapterError("WS_PROCESSING_LAG")
         if kind == "bookTicker":
@@ -436,6 +465,16 @@ class MarketStreamReader:
                 self._blocked_quotes.add(symbol)
             self._save("QUOTES", dict(rows=[dict(symbol=symbol,state=state,quote=quote,reasons=reasons)],
                                       wire=wire,source="DEMO_COMBINED_STREAM"),wall,mono)
+        elif kind == "kline_1m":
+            try:
+                result = MarketDataService(self.store,self.client).record_closed_kline(wire,received_at_ms=wall,received_monotonic_ns=mono)
+            except AdapterError:
+                self._failed_candle_symbol = symbol
+                raise
+            if result is None:
+                self.open_candle_packets_n += 1
+            else:
+                self.closed_candle_packets_n += 1
         else:
             book = self.books[symbol]
             view = book.on_diff(wire,received_at_ms=wall,received_monotonic_ns=mono)
@@ -469,9 +508,18 @@ class MarketStreamReader:
                     raise AdapterError("WS_HEARTBEAT_FAILED")
                 self.last_ping_ns = self.clock.monotonic_ns()
             payload,wall,mono = self._receive()
+            frames = [(payload,wall,mono)]
+            deadline = time.monotonic()+0.020
+            while len(frames) < 32 and time.monotonic() < deadline:
+                try:
+                    frames.append(self._receive(0.001))
+                except TimeoutError:
+                    break
             with self._lock:
                 if self.connected:
-                    self._process(payload,wall,mono)
+                    with self.store.batch():
+                        for payload,wall,mono in frames:
+                            self._process(payload,wall,mono)
             return True
         except TimeoutError:
             if self.clock.monotonic_ns()-self.last_ping_ns >= 20_000_000_000:
@@ -507,6 +555,11 @@ class MarketStreamReader:
                         depth_diagnostics={s:{k:v[k] for k in ("event_time_ms","received_at_ms","receipt_age_ms","clock_uncertainty_ms","reasons")} for s,v in views.items()},
                         needs_reconnect=bool(self._blocked_quotes),last_processing_lag_ms=self.last_processing_lag_ms,
                         clock_state=clock_state,
+                        open_candle_packets_n=self.open_candle_packets_n,closed_candle_packets_n=self.closed_candle_packets_n,
+                        processing_lag_recent_n=len(self.processing_lags),processing_lag_window_limit_N=4096,
+                        processing_lag_p50_ms=sorted(self.processing_lags)[max(0,(len(self.processing_lags)+1)//2-1)] if self.processing_lags else None,
+                        processing_lag_p95_ms=sorted(self.processing_lags)[max(0,(len(self.processing_lags)*95+99)//100-1)] if self.processing_lags else None,
+                        processing_lag_max_ms=max(self.processing_lags) if self.processing_lags else None,
                         order_send_enabled=False,account_certified=False)
 
     def stop(self):
@@ -523,12 +576,12 @@ class MarketStreamReader:
 
 class MarketStreamSupervisor:
     def __init__(self, store, client, universe, deep_symbols=(), *, transport_factory=None,
-                 background=False, enabled=True):
+                 background=False, enabled=True, include_candles=False):
         MarketDataService(store,client)._universe(universe,client.clock.wall_ms())
         if type(background) is not bool or type(enabled) is not bool:
             raise AdapterError("INVALID_PARAMETERS")
-        self.store,self.client,self.universe = store,client,deepcopy(universe)
-        self.plan = stream_plan(universe,deep_symbols)
+        self.store,self.client,self.universe = store,client,_universe_projection(universe)
+        self.plan = stream_plan(universe,deep_symbols,include_candles=include_candles)
         self.transport_factory = transport_factory or DemoMarketWsTransport
         self.background,self.enabled = background,enabled
         self.readers, self.attempts, self.slots = {},deque(),{}
@@ -598,7 +651,7 @@ class MarketStreamSupervisor:
                     if reader:
                         reader.stop()
                     self.attempts.append(now)
-                    reader = MarketStreamReader(self.store,self.client,self.universe,shard["topics"],
+                    reader = MarketStreamReader._from_verified_source(self.store,self.client,self.universe,shard["topics"],
                                                 transport=self.transport_factory(),background=True)
                     self.readers[key] = reader
                     try:

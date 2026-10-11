@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B1 read-only foundations GREEN; 103 focused tests; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 139 focused tests; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -610,3 +610,206 @@ full-universe CPU/publication lag, account/reference-price filters and certified
 valuation/reconciliation before P3 enablement. Offline entrypoint remains
 credential-free and starts no service. Staged verification/commit/push complete
 the release cycle; runtime evidence is not a source artifact.
+
+## P2-B2: refresh, closed candles and full-market observation runtime
+
+Registered 2026-10-11. Read-only implementation slice. Signed myFilters,
+reference-price execution previews and certified account/financial as-of cuts
+remain the next P2-C/P1 integration gate; they cannot be established by public
+data or synthetic balances. No decisions/orders/learning/daemon auto-start.
+
+The current full catalog costs 86.53s validation/storage; repeated copies and
+per-message WAL commits prevent credible all-market latency claims. Reduce
+these costs without shrinking registered discovery, losing provenance, changing
+money arithmetic or silently reusing stale inputs. Official UTC 1m kline
+protocol rechecked on 2026-10-11 in the stream source linked above (x closure,
+t/T/E, OHLCV/counts). Keep 512 topics/shard and 20 local attempts/5min.
+
+### Source/performance contracts
+
+* Universe format `universe-v2`: normalized row fields plus `metadata_extra`
+  and original mapped-field presence; no triple copies of permission arrays.
+  `symbol_source(row)` reconstructs the exact original symbol object, including
+  unknown flags/fields and legacy v1 raw rows. Observation retains raw-body and
+  canonical response hashes, all non-symbol response fields and original symbol
+  order (including identical duplicates). `universe_source(snapshot)` reconstructs
+  the original canonical response; removal tombstones are excluded from that
+  source order. Reconstructed hash must equal recorded source SHA. Every filter,
+  flag and timestamp remains accessible; price/step precision is unchanged.
+* Market store canonicalization happens once per append; resulting ID/source/
+  content hashes match the original journal canonical JSON convention exactly.
+  Financial/journal/isolation code fingerprints remain untouched. No destructive
+  migration, modified historical payloads or dropped verification. `as_of`
+  queries only the latest eligible row. `validate_snapshot(value,kind,cutoff)`
+  checks own immutable full envelope/content SHA without reparsing all history;
+  mutation/future/wrong kind/namespace closes it. Stale view compatibility remains
+  only in P2-A availability, not permission to start a new current runtime.
+* `store.batch()` serializes an atomic group of <=32 received frames/reader
+  iteration in one WAL/FULL transaction. A failed group rolls back all new rows;
+  no live quote/book health is exposed before commit (reader/store locks held).
+  Per-frame actual receipts/hashes/dependencies remain distinct. Explicit group
+  rollback is recorded as a stream failure; no counterfeit READY or lost event
+  reported as success. Reopen verifies all primary snapshots. Batch groups are
+  bounded, not silent sampling/drop/thinning. Historical publication certification
+  still belongs to P2-C; raw receipt convention is kept explicit.
+* Readers validate the full source once, then hold copied lightweight membership
+  and immutable source ID/receipt references. Start verifies that own stored
+  reference again; caller mutation cannot alter reader membership. Supervisors
+  retain one verified own full source for constructing readers, no full metadata
+  deepcopy per shard. Source cache never supplies a future snapshot.
+
+### Closed-candle streams
+
+* `stream_plan(..., include_candles=False)` and supervisor flag preserve B1
+  defaults. True adds `<symbol>@kline_1m` for every subscribed pair. No 24h
+  ticker or in-progress bar is substituted for a closed minute.
+* `MarketDataService.record_closed_kline(payload, received_at_ms,
+  received_monotonic_ns)` validates source symbol, interval=1m, bool x, aligned
+  t/T, E, OHLCV/counts and valid clock. x=false yields no feature candle; it
+  cannot refresh the latest close. x=true requires E>T and conservative server
+  cutoff>T. Future/malformed/unknown schema leaves a per-symbol incident and
+  unavailable feature until valid recovery; no blind receipt backdating.
+  REST and WS candle revisions compare normalized economic fields (unused wire
+  field B/spelling of trailing zeros cannot cause false conflict). A genuinely
+  changed closed bar remains quarantined. Every saved close has its wire source,
+  actual receipts, symbol/interval/event timestamp and original hash.
+* Reader batches bounded recv frames and retains real receipts before parsing.
+  Pre-ACK buffering retains B1 <=64/lag guard. Closed bars persist in CANDLES;
+  open packet counts remain diagnostics and are not PIT forecasting inputs.
+  Ready features still need 3 consecutive closed minutes and fresh quotes.
+
+### Coordinator and evidence
+
+* `MarketDataRuntime(store,client, account_provider=None, deep_symbols=(),
+  transport_factory=None, enabled=True, background=False)`, own lifecycle
+  `start/tick/stop/health`. One coordinator exclusively owns REST/clock. Startup
+  fetches all categories, warms clock, creates book+closed-candle shards; default
+  manual tick, background explicitly opt-in. Offline entrypoint stays offline.
+* Refresh metadata every 10min (hard freshness 15min), backoff failed refresh
+  >=30s. Account provider, when explicitly supplied, is own fresh P1 observation
+  only; absent provider gives public reference/permitted N=null. On successful
+  refresh record immutable new source, stop old readers and rebuild source-bound
+  shards under the SAME rolling connection-attempt quota. Listings/status/removal
+  change future membership only. Failed refresh preserves prior denominator as
+  stale and closes qualification; no blind permission expansion.
+* Refresh clock every 30s using a separate candidate DemoClock and bounded public
+  probes; publish valid sample atomically without exposing transient None to
+  healthy readers. A failed refresh is reported, valid old clock remains usable
+  only within its original 60s lease; runtime qualification degrades until recovery.
+* Every 3s bounded REST all-book poll supplies an explicit OBSERVED_RESPONSE
+  fallback for unchanged books; its actual response interval is not fabricated
+  stream/event freshness. Market weight reserve remains 200. Closed-history
+  bootstrap/backfill rotates fairly, <=2 symbols/tick and <=3 bars per request;
+  stream closes naturally warm other pairs. Missing history/gaps stay pending.
+  No quiet coin is discarded to make a coverage percentage look good.
+* Evidence contains discovered/active/subscribed/permitted/quote-ready/candle-
+  ready n/N, status exclusions, session/gap faults, processing-lag count/limit
+  and p50/p95/max (bounded recent window marked as such), source/clock conventions,
+  elapsed observation window and pipeline status. Exact current public denominator
+  is explicit; public readiness is distinct from permitted-account readiness.
+  Quote lookup can incrementally index committed own receipts; past cutoffs
+  always reconstruct the eligible prefix and newer invalid input never resurrects
+  an older good quote. Snapshot/namespace/hash verification remains authoritative.
+* Bounded full-public-market smoke: complete all-category discovery, all active
+  book+kline topics, no keys, 30–60s observation after startup, report actual
+  coverage/faults/lag and any incomplete warmup. A short smoke cannot qualify a
+  sustained production SLA or account/financial readiness. Keep unsuccessful
+  trials and causes. Stop only new workers and retain own evidence.
+
+### P2-B2 focused acceptance before code
+
+| ID | Required scenario |
+|---|---|
+| P2B2-01 | Lossless compact metadata, original source order/duplicates/unknown fields, tombstones, legacy hash/reopen parity and tamper/future reference refusal. |
+| P2B2-02 | Atomic batch commit/rollback/receipt separation, cache/past-prefix correctness and invalid newer input. |
+| P2B2-03 | All-pair kline topics/limits/non-USDT, valid/open/future/malformed/duplicate/revised closed bars and REST/WS economic parity. |
+| P2B2-04 | Metadata rotation/failure/expiry/status/listing, shared connection budget, clock candidate swap/failure and disabled/stop lifecycle. |
+| P2B2-05 | Fair bounded backfill, explicit REST fallback, quota/staleness, separate unknown account denominator, lag/fault/window evidence. |
+
+SPEC → RED → implementation → full own-app/regressions → public smoke →
+full/staged Truth Harness → selective commit/push. Rollback disables/stops only
+the new market runtime, invalidates current readiness, preserves immutable data
+and never cancels exchange protection or changes the old bot. This slice makes
+no trading-policy or profit claim; maximum-history alpha gates remain mandatory
+for later policy changes.
+
+P2-B2 review boundaries: tombstones preserve the last actual symbol source status;
+current removed-row counts are separate from the current discovered denominator.
+UTC/event/receipt comparisons use a fixed Decimal context; future receipts and
+future events are rejected even under a caller's precision=1. A malformed close
+inside a failed batch leaves a durable per-symbol failure after rollback, so old
+closed history cannot silently stay qualified. Clock failures/backoff do not make
+account readiness true. Failed stop/replan never enables orders.
+
+Full-market trial `1791722289478026500` failed: 0/6 connected shards, all
+WS_PROCESSING_LAG, despite pipeline OBSERVING. Keep that failure evidence.
+Supervisor validates the full caller envelope once and copies a private compact
+membership projection. Its readers use that owned projection and revalidate the
+stored source reference; direct public Reader callers still require full envelope
+validation. Runtime REST polling uses its owned projection after reference/TTL
+validation, not a repeated multi-megabyte hash while readers are receiving.
+Stream coverage below planned shards yields STREAMS_DEGRADED (even if REST
+quotes are complete), recovers only when all planned shards connect; stopped
+runtime reports STOPPED. Clock/metadata failures take priority. Lag threshold
+remains 250ms; full population and original receipts remain unchanged. Internal
+projection helpers are private and cannot accept caller-supplied unverified data
+through the public polling/reader interfaces.
+
+Standalone append canonicalization/hash work occurs outside the writer lock;
+only immutable dependency lookup and SQLite insert/commit hold it. Existing
+canonical hashes, duplicate insert results and batch atomicity remain exact.
+A concurrent reference lookup must complete while standalone serialization is
+paused. Batch serialization stays within its bounded atomic group. Public
+diagnostic quote polling preserves P2-A's independent metadata/quote age contract;
+runtime TTL prevents subscribing/using expired membership for qualification.
+
+Trial `1791723226477284600` also failed with 0/6 shards; latency maxima
+251..400ms. A writer cannot repeatedly reacquire ahead of already waiting
+readers. Store uses a FIFO reentrant lock: nested owned operations keep atomic
+groups, contenders acquire in arrival order. Verify deterministic queue order,
+ownership and reentrancy; this fairness contract does not itself prove a SLA.
+
+Runtime history counts exclude any symbol whose latest eligible candle attempt
+failed, until a newer valid collection supersedes it. Bulk failure index uses
+committed receipt-prefix ordering, reconstructs past cutoffs, never publishes
+uncommitted data and resets on rollback. Successful clock refresh clears only
+CLOCK_REFRESH_FAILED; it cannot clear metadata/runtime failure. Reader and tick
+recent latency evidence includes p50/p95/max and n/4096, never a sustained SLA.
+
+Trial `1791723785457912400` retained FAIL and measured writer-lock waits up
+to 1528ms. Deepcopy of current quote/candle indices happens after the lock is
+released: take an atomic shallow cut of internally immutable record objects
+(copy each candle-time map), then give callers a detached deep copy. Caller
+mutation cannot corrupt the cache. Prefix fallback remains under the original
+atomic read contract. Tests pause deepcopy and require concurrent source lookup
+to finish; benchmark still must validate full-market latency, not this proxy.
+Rejected future/invalid receipt incidents use the observer's actual current
+wall/monotonic clocks; an invalid claimed future time cannot postpone quarantine.
+
+### P2-B2 delivery and remaining qualification
+
+36 focused cases / 374 total app GREEN, with recorded intended RED before
+each interface/failure repair. Root spec/harness regressions and mechanical
+Truth Harness are separate gates, not proof of profitable/production operation.
+
+Full public trials (own runtime evidence, no keys/orders):
+
+| Trial ID | Discovered | Active public | Final connected / planned | Result |
+|---|---:|---:|---:|---|
+| 1791722289478026500 | 3727 | 1375 | 0/6 | FAIL, WS_PROCESSING_LAG; original false OBSERVING reproduced |
+| 1791723226477284600 | 3727 | 1375 | 0/6 | FAIL after compact-source/hot-path repair; status corrected |
+| 1791723538395186000 | 3727 | 1375 | 0/6 | FAIL after FIFO lock |
+| 1791723785457912400 | 3727 | 1375 | 0/6 | FAIL with lock timing diagnostics |
+| 1791724080766903200 | 3727 | 1375 | 0/6 | FAIL after detached index copying; window 48.47s |
+
+All reconstructed original source hashes matched. Point REST readiness reached
+1375/1375, but final last trial quote/history/depth readiness was 0/1375,
+0/1375 and 0/3. This is no sustained coverage claim. Actual shard lag maxima
+crossed the unchanged 250ms guard. Lock profiling measured >1s waits/holds;
+remaining parsing/commit contention needs operation-level profiling and a
+bounded publication/writer design before qualification, without dropping events,
+thinning the population or backdating receipts. Short trials also cannot prove
+a continuous SLA. All own workers stopped; failed evidence remains local.
+P2-B2 is a diagnostic foundation, not completed production enablement. P2-C
+account/financial integration, actual own credentials, filters/anchors and
+reconcile stay pending; ORDER_SEND remains disabled. No policy/alpha change.

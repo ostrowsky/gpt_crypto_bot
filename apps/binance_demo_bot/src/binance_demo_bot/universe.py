@@ -10,6 +10,27 @@ PERMISSIONS = ("SPOT", "MARGIN", "LEVERAGED") + tuple(f"TRD_GRP_{n:03d}" for n i
 STATUSES = frozenset(("TRADING", "END_OF_DAY", "HALT", "BREAK", "CANCEL_ONLY"))
 ORDERS = frozenset(("LIMIT", "MARKET", "STOP_LOSS", "STOP_LOSS_LIMIT", "TAKE_PROFIT", "TAKE_PROFIT_LIMIT", "LIMIT_MAKER"))
 FILTERS = frozenset(("PRICE_FILTER", "PERCENT_PRICE", "PERCENT_PRICE_BY_SIDE", "LOT_SIZE", "MIN_NOTIONAL", "NOTIONAL", "ICEBERG_PARTS", "MARKET_LOT_SIZE", "MAX_NUM_ORDERS", "MAX_NUM_ALGO_ORDERS", "MAX_NUM_ICEBERG_ORDERS", "MAX_POSITION", "TRAILING_DELTA", "MAX_NUM_ORDER_AMENDS", "MAX_NUM_ORDER_LISTS"))
+SYMBOL_FIELDS = dict(symbol="symbol",baseAsset="base",quoteAsset="quote",status="status",
+                     isSpotTradingAllowed="spot_allowed",permissionSets="permission_sets",filters="filters",orderTypes="order_types")
+
+
+def symbol_source(row):
+    if "raw" in row:
+        return deepcopy(row["raw"])
+    result = deepcopy(row["metadata_extra"])
+    result.update({key:deepcopy(row[field]) for key,field in SYMBOL_FIELDS.items() if key in row["source_fields"]})
+    result.update(deepcopy(row.get("source_overrides",{})))
+    return result
+
+
+def universe_source(snapshot):
+    data = snapshot["data"]
+    if data.get("format_version") != "universe-v2":
+        return deepcopy(data["observation"]["data"])
+    result = deepcopy(data["observation"]["source_header"])
+    rows = {r["symbol"]:r for r in data["rows"]}
+    result["symbols"] = [symbol_source(rows[s]) for s in data["source_symbol_order"]]
+    return result
 
 
 class UniverseService:
@@ -133,7 +154,9 @@ class UniverseService:
                     reasons.append("ACCOUNT_NOT_PERMITTED" if permitted is False else "ACCOUNT_UNVERIFIED")
                 rows.append(dict(symbol=symbol, base=base, quote=quote, status=status,
                                  spot_allowed=spot, permission_sets=groups, permitted=permitted,
-                                 filters=filters, order_types=orders, raw=source,
+                                 filters=filters, order_types=orders,
+                                 metadata_extra={k:v for k,v in source.items() if k not in SYMBOL_FIELDS},
+                                 source_fields=sorted(set(source)&set(SYMBOL_FIELDS)),
                                  monitored=True, metadata_entry_candidate=not reasons,
                                  execution_certified=False, reasons=reasons))
             previous = self.current(now)
@@ -150,14 +173,18 @@ class UniverseService:
                     if prior["status"] != "REMOVED":
                         transitions.append(dict(symbol=symbol, type="REMOVED"))
                     tombstone = deepcopy(prior)
+                    tombstone.setdefault("source_overrides",{}).setdefault("status",prior["status"])
                     tombstone.update(status="REMOVED", permitted=False, metadata_entry_candidate=False,
                                      reasons=["REMOVED_FROM_METADATA"], execution_certified=False)
                     rows.append(tombstone)
             count = sum(r["permitted"] is True and r["status"] != "REMOVED" for r in rows) if state == "UNIVERSE_READY" else None
-            data = dict(state=state, rows=rows, transitions=transitions, stale=False,
+            compact_observation = {k:v for k,v in observation.items() if k != "data"}
+            compact_observation["source_header"] = {k:v for k,v in raw.items() if k != "symbols"}
+            data = dict(state=state, rows=rows, transitions=transitions, stale=False,format_version="universe-v2",
+                        source_symbol_order=[r["symbol"] for r in raw["symbols"]],
                         counts=dict(discovered_pairs_n=len(seen), permitted_pairs_N=count),
                         permission_registry_version="spot-permissions-2026-10-11",
-                        observation=observation, account_source_sha256=account.get("source_sha256") if isinstance(account, dict) else None,
+                        observation=compact_observation, account_source_sha256=account.get("source_sha256") if isinstance(account, dict) else None,
                         exchange_filters=raw.get("exchangeFilters"), rate_limits=raw.get("rateLimits"))
             account_fields = {"application_id", "environment", "objective_contract_id", "account_alias", "credential_generation", "account_episode_id", "portfolio_scope_id", "schema_version", "data", "source_endpoint", "source_method", "source_sha256", "received_at_ms", "request_started_at_ms", "received_monotonic_ns", "clock_uncertainty_ms", "exchange_reconciled"}
             data["account_observation"] = {k: v for k, v in account.items() if k in account_fields} if isinstance(account, dict) and permissions is not None else None

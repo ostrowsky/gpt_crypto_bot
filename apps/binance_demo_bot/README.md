@@ -1,4 +1,4 @@
-# Independent Binance Demo bot — P0/P1 and P2-A/B1 read-only foundations
+# Independent Binance Demo bot — P0/P1 and P2-A/B2 read-only foundations
 
 This separate application implements offline Decimal accounting, valuation,
 daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation.
@@ -6,11 +6,14 @@ P1-A adds an explicitly invoked read-only Demo REST adapter. The offline
 entrypoint starts no account client. No order sending or learning workers exist.
 P1-B implements private event collection, durable fill/cursor recovery and
 diagnostic comparison with the journal. Authenticated runtime verification,
-certified account readiness and the remaining P2-B2–P7 services are pending.
+certified account readiness and the remaining P2-C–P7 services are pending.
 P2-A implements all-category public discovery, immutable received-as-of snapshots,
 REST quotes/closed minute features and whole-inventory midpoint valuation.
 P2-B1 adds owned combined-stream readers, deterministic shards, reconnect/quota
 supervision and bounded incremental L2. These are explicitly invoked libraries.
+P2-B2 adds metadata refresh, all-pair closed-candle topics, bounded bootstrap,
+atomic store batches and a separate read-only coordinator. Full-market stream
+latency verification is FAIL; this runtime is diagnostic, not production-ready.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md),
@@ -57,9 +60,10 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **338 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **374 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
+36 runtime/refresh/closed-stream/storage cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -143,7 +147,7 @@ P2-A library sequence (manual read-only calls, no scheduler):
 Public smoke verified 3727 metadata rows, 2010 positive books, BTC/ETH/SOL closed
 bars/features and a hypothetical midpoint valuation. Whole manual run took
 173.67s; continuously bounded full-universe processing/lag and certified
-account reconciliation remain P2-B2. No active trading service was started.
+account reconciliation remain P2-B2/P2-C. No active trading service was started.
 
 P2-B1 stream sequence:
 
@@ -173,6 +177,37 @@ Public 20s sample: BTC/ETH/SOL reached READY, final repeated sample 3/3 fresh
 quotes and 3/3 READY books. The first sample ended 2/3 READY; this is preserved
 as a partial point, not rewritten as sustained availability. Neither sample
 qualifies all-market/account readiness or profit. Metadata plan expires after
-15min; P2-B2 adds refresh/scheduling, full-scale lag qualification, financial
-cuts and account/reference-price filters. Incremental books are bounded observed
+15min; P2-B2 adds refresh/scheduling, but full-scale lag qualification is FAIL.
+P2-C retains financial cuts and account/reference-price filters. Incremental books are bounded observed
 levels, never a complete exchange-depth claim. Order sending stays disabled.
+
+P2-B2 diagnostic sequence:
+
+```python
+from binance_demo_bot.market_runtime import MarketDataRuntime
+
+runtime = MarketDataRuntime(store, client, deep_symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+try:
+    runtime.start()  # full public universe; no credential/account fallback
+    runtime.tick()  # repeat while observing; the coordinator exclusively owns REST
+    diagnostic = runtime.health()
+finally:
+    runtime.stop()  # stop these readers before closing store/client
+```
+
+Metadata refreshes every 10min; all active pairs receive book/kline topics,
+clock samples swap atomically, quote fallback is REST OBSERVED_RESPONSE and
+candle bootstrap rotates <=2 symbols/tick. Missing history stays unavailable.
+Lossless `universe_source(snapshot)` reconstructs the exact original API source;
+compact rows and FIFO atomic batches preserve primary hashes/receipt prefixes.
+Past cutoff reconstruction excludes future receipts and later failed inputs
+cannot resurrect old readiness. Public callers still validate the full envelope.
+
+Full public trials discovered 3727 pairs, with 1375 active Spot pairs over 6
+shards. Source reconstruction hashes matched. Several REST points reached
+1375/1375, but all five stream trials ended 0/6 connected, with
+WS_PROCESSING_LAG; failure evidence is retained under own runtime. Do not
+interpret those point snapshots as continuous coverage. `STREAMS_DEGRADED`
+and per-symbol candle failures close readiness. Sustained throughput/lag must
+be fixed before production qualification; own account keys/permission cut,
+balances/anchors and OMS are separate pending gates. No orders are enabled.

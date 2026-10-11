@@ -27,6 +27,11 @@ def _symbol(value):
     return value
 
 
+def _bar_economic(row):
+    return _digest({k:Decimal(str(row[k])) if k not in {"open_time_ms","close_time_ms","trades"} else row[k]
+        for k in ("open_time_ms","close_time_ms","open","high","low","close","base_volume","quote_volume","trades","taker_base_volume","taker_quote_volume")})
+
+
 class DemoMarketClient:
     def __init__(self, client=None):
         self.client = client or DemoReadClient()
@@ -92,24 +97,15 @@ class DemoMarketClient:
 
 
 def _quote_index(store, cutoff):
-    result = {}
-    for snapshot in store.records("QUOTES", cutoff_ms=cutoff):
-        for row in snapshot["data"].get("rows", []):
-            result[row["symbol"]] = (row, snapshot)
-    return result
+    return store.quote_index(cutoff)
 
 
 def _candle_indices(store, cutoff):
-    result = defaultdict(dict)
-    for snapshot in store.records("CANDLES", cutoff_ms=cutoff):
-        symbol = snapshot["data"].get("symbol")
-        for row in snapshot["data"].get("rows", []):
-            result[symbol][row["open_time_ms"]] = (row, snapshot)
-    return result
+    return store.candle_index(cutoff)
 
 
 def _bars_index(store, symbol, cutoff):
-    return _candle_indices(store, cutoff).get(symbol, {})
+    return store.candle_index(cutoff,symbol)
 
 
 def _quote_reasons(row, cutoff, age=5000):
@@ -139,6 +135,9 @@ class MarketDataService:
     def _universe(self, value, cutoff):
         if not isinstance(value, dict) or not isinstance(value.get("snapshot_id"), str):
             raise AdapterError("UNIVERSE_SNAPSHOT_INVALID")
+        if value.get("data",{}).get("state") != "UNIVERSE_REFRESH_FAILED":
+            self.store.validate_snapshot(value,"UNIVERSE",cutoff)
+            return value
         saved = self.store.get(value["snapshot_id"])
         if saved is None or saved["kind"] != "UNIVERSE":
             raise AdapterError("UNIVERSE_SNAPSHOT_INVALID")
@@ -158,6 +157,11 @@ class MarketDataService:
     def poll_quotes(self, universe, symbols=None):
         self._guard()
         self._universe(universe, self.client.clock.wall_ms())
+        return self._poll_quotes(universe,symbols)
+
+    def _poll_quotes(self,universe,symbols=None):
+        self._guard()
+        self.store.validate_reference(universe["snapshot_id"],"UNIVERSE",self.client.clock.wall_ms())
         members = {r["symbol"]: r for r in universe["data"]["rows"] if r["status"] != "REMOVED"}
         if symbols is not None:
             if not isinstance(symbols, (tuple, list)) or not symbols:
@@ -234,6 +238,9 @@ class MarketDataService:
     def _collect_candles(self, symbol, **parameters):
         self._guard()
         observation = self.client.read_klines(symbol, **parameters)
+        return self._record_candles(symbol,observation,parameters)
+
+    def _record_candles(self,symbol,observation,parameters):
         raw = observation["data"]
         if not isinstance(raw, list) or len(raw) > parameters.get("limit", 1000):
             raise AdapterError("CANDLE_SCHEMA_INVALID")
@@ -264,8 +271,8 @@ class MarketDataService:
                              closed=closed < closed_cutoff, valid=True, reasons=[], wire_sha256=_sha(wire))
                 prior = previous.get(opened)
                 conflict = (prior and (not prior[0]["valid"] or
-                            (prior[0]["closed"] and prior[0]["wire_sha256"] != value["wire_sha256"])))
-                if opened in rows and rows[opened]["wire_sha256"] != value["wire_sha256"]:
+                            (prior[0]["closed"] and _bar_economic(prior[0]) != _bar_economic(value))))
+                if opened in rows and _bar_economic(rows[opened]) != _bar_economic(value):
                     conflict = True
                 if conflict:
                     value.update(valid=False, reasons=["CANDLE_CONFLICT"])
@@ -276,6 +283,38 @@ class MarketDataService:
                                  observation=observation, validated_server_cutoff_ms=str(closed_cutoff)),
                                  received_at_ms=observation["received_at_ms"],
                                  received_monotonic_ns=observation["received_monotonic_ns"])
+
+    def record_closed_kline(self,payload,*,received_at_ms,received_monotonic_ns):
+        self._guard()
+        symbol = payload.get("s") if isinstance(payload,dict) else None
+        try:
+            _symbol(symbol)
+            if set(payload) != {"e","E","s","k"} or payload["e"] != "kline":
+                raise ValueError()
+            k = payload["k"]
+            if not isinstance(k,dict) or k.get("s") != symbol or k.get("i") != "1m" or type(k.get("x")) is not bool:
+                raise ValueError()
+            server = self.client.clock.timestamp_ms()
+            event = _integer(payload["E"])
+            if _integer(received_at_ms) > self.client.clock.wall_ms() or _integer(received_monotonic_ns) > self.client.clock.monotonic_ns():
+                raise ValueError()
+            with localcontext(Context(prec=50)):
+                if Decimal(event) > Decimal(server)+self.client.clock.uncertainty_ms:
+                    raise ValueError()
+            if not k["x"]:
+                return None
+            with localcontext(Context(prec=50)):
+                if event <= _integer(k["T"]) or Decimal(server)-self.client.clock.uncertainty_ms <= k["T"]:
+                    raise ValueError()
+            raw = [[k["t"],k["o"],k["h"],k["l"],k["c"],k["v"],k["T"],k["q"],k["n"],k["V"],k["Q"],k.get("B","0")]]
+            observation = dict(data=raw,wire=payload,source_sha256=_sha(payload),source_endpoint="DEMO_COMBINED_STREAM",
+                source_method="STREAM",exchange_event_time_ms=event,received_at_ms=_integer(received_at_ms),
+                received_monotonic_ns=_integer(received_monotonic_ns),clock_uncertainty_ms=self.client.clock.uncertainty_ms)
+            return self._record_candles(symbol,observation,{"limit":1})
+        except (AdapterError,KeyError,TypeError,ValueError,ArithmeticError):
+            self.store.append("INCIDENT",dict(operation="CANDLE_COLLECTION_FAILED",symbol=symbol,reason="CANDLE_SCHEMA_INVALID"),
+                received_at_ms=self.client.clock.wall_ms(),received_monotonic_ns=self.client.clock.monotonic_ns())
+            raise AdapterError("CANDLE_SCHEMA_INVALID") from None
 
     def poll_candles(self, universe, *, max_symbols=50):
         self._guard()

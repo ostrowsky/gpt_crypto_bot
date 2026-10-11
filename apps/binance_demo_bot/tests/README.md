@@ -106,3 +106,16 @@ valuation/seed availability, reset evidence, cross-arm sum,
 account ownership, full process/resource/port isolation and phases P1–P7.
 This is partial FIN-01..12/ISO coverage, not completion of those whole scenarios
 or proof of profitability. The offline entrypoint never enables order sending.
+
+P2-B2 on 2026-10-11: initial 22 cases had 2 failures/19 missing-interface
+errors RED; canonical hash parity was correctly GREEN. Five review failures
+preceded fixes for fixed-context timestamps/future receipts, rolled-back candle
+incident durability, tombstone provenance and current denominators. Three live
+hot-path/degraded-state failures preceded the compact projection/refactor.
+Standalone lock contention and missing FIFO lock were reproduced before fixes;
+four failure-index/clock-recovery/percentile failures preceded repair. Final
+Index-copy contention and delayed quarantine of a rejected future receipt were
+also RED before fixes. 36 new cases / **374 app tests GREEN**. No skip/xfail or weakened assertions.
+Public full-market qualification remains FAIL: 3727 discovered, 1375 active,
+6 shards, all failed processing-lag guards. A complete REST point snapshot
+does not certify sustained stream availability; unsuccessful trials retained.
