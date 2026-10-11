@@ -19,6 +19,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 | `test_public_market_client.py` | 7 P2-A cases: credential-free reads, private refusal, exact raw-body SHA, 32MiB metadata/8MiB private caps, bounded gzip/corruption and narrow header allowlist. |
 | `test_universe.py` | 20 P2-A cases: complete permission query, AND/OR/unknown rights, public/null denominator, scope/freshness/token and persisted Decimal provenance, non-USDT/status/filter population, transitions, stale failures, immutable own WAL/lease/hash/dependencies. |
 | `test_market_data.py` | 30 P2-A cases: books/omissions/invalid/stale responses, reserve/fair rotation, closed/open bars/gaps/revisions/late receipts, immutable cutoff prefixes, incident recovery, exact features and direct/inverse/multileg/stable/dust marks. |
+| `test_market_stream.py` | 46 P2-B1 cases: Demo transport/ACK/TLS/topic guards, sharding/non-USDT/UTF-8, depth weights/reserve, bounded atomic L2 bridge/revisions/gaps/age, actual reader threads, restart/quarantine, heartbeat, quota/backoff/stop barrier and durable receipts. |
 
 Run from the app directory with its own installed environment:
 
@@ -88,6 +89,17 @@ provenance serialization repair. Final **292 app tests GREEN**, 57 new P2-A
 cases, no skips/xfail.
 Public smoke separately verified metadata/books/closed bars/features and a
 hypothetical inventory, not actual permissions/balances or latency readiness.
+
+P2-B1 on 2026-10-11: 31 missing intended stream-module/depth-method errors RED
+before implementation. Four review failures reproduced future snapshot receipt,
+heartbeat under continuous data, quote sequence recovery and runtime backoff;
+missing lag diagnostics reproduced separately before repair. Actual concurrent
+side-replacement barrier yielded an empty side before lock repair; UTF-8/mixed
+source names failed before parser/mapping repair. Clock health and stop barrier
+failures preceded guards. Final **338 total app GREEN**, 46 new cases.
+Public stream smoke separately used an explicitly labelled BTC/ETH/SOL sample:
+all three reached READY, first final point 2/3 and repeated final point 3/3.
+No account keys/orders or full-market sustained qualification were involved.
 
 Remaining acceptance gates: actual exchange reconciliation/anchors and PIT
 valuation/seed availability, reset evidence, cross-arm sum,

@@ -22,7 +22,7 @@ FEATURE_DEFINITION = dict(version="closed-minute-v1", interval_ms=60_000,
 
 
 def _symbol(value):
-    if not isinstance(value, str) or not re.fullmatch(r"[A-Z0-9_]{2,64}", value):
+    if not isinstance(value, str) or not re.fullmatch(r"\w{2,64}", value):
         raise AdapterError("INVALID_PARAMETERS")
     return value
 
@@ -79,6 +79,13 @@ class DemoMarketClient:
                 raise
             self.client.sync_clock()
         return self._read("/api/v3/klines", params, 2)
+
+    def read_depth(self, symbol, *, limit=100):
+        symbol = _symbol(symbol)
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise AdapterError("INVALID_PARAMETERS")
+        weight = 5 if limit <= 100 else 25 if limit <= 500 else 50
+        return self._read("/api/v3/depth", dict(symbol=symbol, limit=limit), weight)
 
     def close(self):
         self.client.close()

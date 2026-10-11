@@ -12,7 +12,7 @@ from .journal import _WriterLease, _json, _digest
 
 FIXED = dict(application_id="binance_demo_bot", environment="BINANCE_SPOT_DEMO",
              objective_contract_id="daily_net_equity_pnl_v1", schema_version=1)
-KINDS = frozenset(("UNIVERSE", "QUOTES", "CANDLES", "FEATURE", "VALUATION", "INCIDENT"))
+KINDS = frozenset(("UNIVERSE", "QUOTES", "CANDLES", "FEATURE", "VALUATION", "INCIDENT", "DEPTH"))
 PROCESS_ID = uuid.uuid4().hex
 
 

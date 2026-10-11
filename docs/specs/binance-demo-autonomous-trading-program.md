@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A read-only foundations / 292 GREEN; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B1 read-only foundations / 338 GREEN; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
@@ -42,7 +42,7 @@ withdraw/transfer, автоматическое повышение риска и
 кода learner в этот scope не входят.
 
 Реализовано отдельное offline financial core с own package/env/isolation kernel,
-P1-A/B read-only account evidence и P2-A REST market foundations. Публичные Demo
+P1-A/B read-only account evidence и P2-A REST / P2-B1 stream/L2 foundations. Публичные Demo
 API проверены; authenticated integration, размещение ордеров, фоновый торговый
 сервис, новые модели и rollout ещё не выполнены. Фактический статус этапа меняется вместе с кодом, тестами
 и source-bound evidence, а не по наличию документа.
@@ -80,8 +80,10 @@ smoke, exclusive ownership и certified as-of reconcile/anchors pending.
 P2-A: 57 новых тестов после RED, полный registered-category каталог,
 immutable receipt-as-of snapshots, закрытые 1m features и whole-inventory
 midpoint marks. Публичный smoke успешен; полный ручной прогон 173.67s не
-подтверждает непрерывный real-time SLA. Следующий приоритет — P2-B streams,
-lag/L2/certified valuation и authenticated integration;
+подтверждает непрерывный real-time SLA. P2-B1: 46 новых тестов после RED,
+потоки/shards/reconnect/atomic L2; bounded sample BTC/ETH/SOL проверен, sustained
+all-market readiness не установлена. Следующий приоритет — P2-B2 refresh/
+scheduling/lag qualification/certified valuation и authenticated integration;
 order sending disabled. Готовность заработать не доказана.
 
 ## Shared interfaces and ownership

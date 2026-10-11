@@ -1,4 +1,4 @@
-# Independent Binance Demo bot — P0/P1 and P2-A read-only foundations
+# Independent Binance Demo bot — P0/P1 and P2-A/B1 read-only foundations
 
 This separate application implements offline Decimal accounting, valuation,
 daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation.
@@ -6,9 +6,11 @@ P1-A adds an explicitly invoked read-only Demo REST adapter. The offline
 entrypoint starts no account client. No order sending or learning workers exist.
 P1-B implements private event collection, durable fill/cursor recovery and
 diagnostic comparison with the journal. Authenticated runtime verification,
-certified account readiness and the remaining P2-B–P7 services are pending.
+certified account readiness and the remaining P2-B2–P7 services are pending.
 P2-A implements all-category public discovery, immutable received-as-of snapshots,
 REST quotes/closed minute features and whole-inventory midpoint valuation.
+P2-B1 adds owned combined-stream readers, deterministic shards, reconnect/quota
+supervision and bounded incremental L2. These are explicitly invoked libraries.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md),
@@ -55,8 +57,9 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **292 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **338 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
+46 stream/L2/supervision cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -139,5 +142,37 @@ P2-A library sequence (manual read-only calls, no scheduler):
 
 Public smoke verified 3727 metadata rows, 2010 positive books, BTC/ETH/SOL closed
 bars/features and a hypothetical midpoint valuation. Whole manual run took
-173.67s; continuously bounded processing/lag, market streams, L2 and certified
-account reconciliation remain P2-B. No active trading service was started.
+173.67s; continuously bounded full-universe processing/lag and certified
+account reconciliation remain P2-B2. No active trading service was started.
+
+P2-B1 stream sequence:
+
+1. Use a fresh immutable own `UniverseSnapshot` and dedicated credential-free
+   `DemoMarketClient`. `stream_plan(universe, deep_symbols=[...])` assigns every
+   active permitted or public-reference Spot pair, including non-USDT/UTF-8,
+   to <=512-topic shards. Keep explicit diagnostics/sample coverage separate
+   from account-permitted coverage; a public source has N=null.
+2. `MarketStreamSupervisor(store, client, universe, deep_symbols=[...])` warms
+   the clock and starts only owned readers. Default coordinator is manual:
+   call `start()`, regularly `tick()`, then `stop()`. `background=True` explicitly
+   opts into its own coordinator. No CLI/service auto-start is added.
+3. Let the coordinator exclusively own REST/clock probes; do not concurrently
+   use the same HTTP client elsewhere. Fresh diff buffers precede REST depth
+   snapshots; 1..1000 levels, weighted reserve and bounded retries are enforced.
+   A standalone `MarketStreamReader` instead needs an already validated clock
+   and explicit `install_depth(symbol, client.read_depth(symbol))` calls.
+4. Inspect `health()`: own subscribed n/N, permitted N, shard failures, clock,
+   receipt/processing age and depth states. READY requires diff continuity and
+   <=1s event/receipt age including clock uncertainty. Snapshot alone or gap
+   cannot qualify. BookTicker remains OBSERVED_RESPONSE/null event clock.
+5. Stop the supervisor/readers before closing store/client. Stop/reconnect
+   invalidates old quote rows; a new session starts without old readiness.
+   Disable supervisor with `enabled=False`; no connection is attempted.
+
+Public 20s sample: BTC/ETH/SOL reached READY, final repeated sample 3/3 fresh
+quotes and 3/3 READY books. The first sample ended 2/3 READY; this is preserved
+as a partial point, not rewritten as sustained availability. Neither sample
+qualifies all-market/account readiness or profit. Metadata plan expires after
+15min; P2-B2 adds refresh/scheduling, full-scale lag qualification, financial
+cuts and account/reference-price filters. Incremental books are bounded observed
+levels, never a complete exchange-depth claim. Order sending stays disabled.

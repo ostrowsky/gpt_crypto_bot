@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A read-only foundations реализованы; торговый сервис ещё не включён**.
+Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B1 read-only foundations реализованы; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
@@ -9,15 +9,19 @@ P1-A: read-only REST adapter, подпись, clock/TLS/rate guards, account/ord
 56 focused GREEN после RED. P1-B: private reader, durable evidence/cursors и
 diagnostic reconcile; 69 new GREEN после RED. P2-A: полный публичный каталог,
 immutable as-of snapshots, REST quotes/closed bars/features и portfolio marks;
-57 новых тестов после RED, всего **292 app tests GREEN**.
+57 новых тестов после RED. P2-B1: потоки, shards/reconnect/quota, incremental
+L2 и atomic receipts; 46 новых тестов после RED, всего **338 app tests GREEN**.
 Публичные Demo REST ping/time и WSS time/Pong проверены; signed private smoke,
 certified account cut/ownership и финансовые anchors ещё не подтверждены.
 Фаза 0 ещё требует фактические account anchors/cursors/reconcile integration;
 Публичный P2-A smoke проверил 3727 инструментов, котировки, свечи/признаки
 BTC/ETH/SOL и условную оценку портфеля. Полный ручной прогон занял 173.67s;
 это не сертификация real-time задержек или прав/баланса аккаунта.
-P1/P2 завершены частично; фазы 3–7 PLANNED. Следующий приоритет — P2-B market
-streams/lag/L2/certified valuation и authenticated integration после explicit credential provisioning;
+Публичный 20s stream/L2 sample BTC/ETH/SOL: все достигли READY; первая финальная
+точка 2/3, повторная 3/3 L2 и 3/3 quotes. Это не sustained all-market readiness.
+P1/P2 завершены частично; фазы 3–7 PLANNED. Следующий приоритет — P2-B2 refresh/
+closed-candle scheduling/full-market lag qualification, certified valuation/
+account filters и authenticated integration после explicit credential provisioning;
 ORDER_SEND disabled.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот

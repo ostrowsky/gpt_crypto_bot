@@ -23,7 +23,7 @@ from .isolation import DemoCredentials
 
 BASE_URL = "https://demo-api.binance.com/api/v3/"
 PUBLIC_PATHS = frozenset(("/api/v3/ping", "/api/v3/time", "/api/v3/exchangeInfo",
-                         "/api/v3/ticker/bookTicker", "/api/v3/klines"))
+                         "/api/v3/ticker/bookTicker", "/api/v3/klines", "/api/v3/depth"))
 READ_PATHS = PUBLIC_PATHS | frozenset(("/api/v3/account",
                         "/api/v3/openOrders", "/api/v3/order", "/api/v3/myTrades", "/api/v3/openOrderList"))
 BODY_LIMIT = 8 * 1024 * 1024

@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A REST/store/features/valuation foundations GREEN; 57 focused tests; full P2 incomplete**.
+Status: **P2-A/B1 read-only foundations GREEN; 103 focused tests; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -385,8 +385,8 @@ Do not weaken host, TLS, timeout, redirect or mutation guards.
   uncertainty, held-assets n/N and reasons. This is midpoint mark evidence,
   not a liquidation guarantee, historical account anchor or profitable result.
 
-P2-A is read-only and manual/library-driven. P2-B retains timestamp-certified
-marks, live all-pair stream scheduling/lag, L2, reference-price/account filters,
+P2-A is read-only and manual/library-driven; the P2-B1 stream/L2 foundation is
+described below. P2-B2 retains certified marks, sustained all-pair scheduling/lag, reference-price/account filters,
 execution previews and formal as-of financial reconciliation. No active CLI
 service or new trading policy is introduced by this implementation.
 
@@ -455,3 +455,158 @@ latency qualification. P2-B must profile/bound processing and publication lag,
 implement supervised streams, all-pair scheduling, L2, certified timestamps,
 account/reference-price filters and actual reconciliation. Order sending stays
 disabled; account-permitted N stays null without fresh own account evidence.
+
+## P2-B1: public stream and bounded incremental L2 (2026-10-11)
+
+Implement the next read-only vertical slice; full P2-B remains incomplete.
+No trading decisions/orders/learning, automatic key provisioning or current-bot
+services. P2-B2 retains the complete market scheduler, closed-candle streams,
+metadata/account-filter/reference-price refresh, certified financial as-of cuts,
+publication-lag optimization and sustained full-universe qualification.
+
+Protocol sources checked today: [Demo hosts](https://github.com/binance/binance-spot-api-docs/blob/master/demo-mode/general-info.md),
+[streams, limits and L2 bridge](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md),
+[depth weights](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md#order-book).
+Only `wss://demo-stream.binance.com/stream` (explicit :443 equivalent) is used;
+TLS verification, no proxy/redirect/fallback, own quiet logger. Existing pinned
+websockets package handles server Ping/Pong. No credentials or signed methods.
+Combined stream subscriptions use lowercase symbols, <=512 topics per shard,
+<=32 explicit deep symbols. Auto-client Ping disabled; proactive health Ping
+at most every 20s. JSON controls <=2/s, leaving room for server Pong; connection
+attempts <=20/rolling 5min locally, exponential reconnect 1..60s and 23h rotation.
+This is not a guarantee about aggregate shared-IP quota or unbounded server pings.
+
+### Interfaces and invariants
+
+* `stream_plan(universe, deep_symbols=())`: every discovered TRADING Spot pair
+  with permitted=true or null public-reference goes to bookTicker shards;
+  denied/removed/stopped pairs stay in the coverage rows. Non-USDT remains.
+  Deep symbols must be explicitly in that received population; plan includes
+  universe ID, registry/counts, deterministic shard IDs/topics and deep list.
+  <=512 topics/shard (official ceiling 1024), <=32 deep symbols. No future
+  membership/shortlist is accepted by a reader; null permission N remains null.
+* `DemoMarketWsTransport`: only combined /stream, credentials absent; SUBSCRIBE
+  <=512 topics and non-null local id, only bookTicker/depth@100ms allowed.
+  No order/private methods. Validated exact handshake path/Host, max_size 1MiB,
+  max_queue 16; static redacted dependency errors. `recv`, `ping`, `close`.
+* `DemoMarketClient.read_depth(symbol, limit=100)`: GET /api/v3/depth only,
+  limit 1..1000, weights 5/25/50 with unchanged 200-weight local reserve,
+  exact parameters/source/receipts/hash; no inferred snapshot exchange time.
+  No 5000-level expensive request in this slice.
+* `IncrementalBook(symbol, clock, max_buffer=1024, max_levels=20000)`:
+  `on_diff(payload, received_at_ms, received_monotonic_ns)` buffers until REST
+  snapshot installed. `install_snapshot(observation)` verifies Demo endpoint,
+  exact symbol/limit params, hash, receipt interval and valid positive/unique
+  price levels/nonnegative quantities. Snapshot alone is BUFFERING, not READY.
+  Discard u<=snapshot.lastUpdateId; first applied diff bridges next expected
+  ID with U<=lastUpdateId+1<=u, then same rule for continuity/overlap. A gap,
+  buffer/level overflow, schema/crossed/empty book, clock jump or unhealthy age
+  clears the usable book and requires a new snapshot. Exact duplicate/stale
+  u<=last_id does not refresh age. Same u with conflicting payload is rejected.
+  Zero quantity deletes, positive quantity replaces (never adds to prior qty).
+  Open partial-depth messages are rejected as diffs. Book levels are bounded
+  observations, not a certified complete exchange book. Top-level exhaustion
+  cannot invent unseen prices. Clock must be valid; event and receipt age <=1s
+  with clock uncertainty; no future event beyond measured uncertainty. Event
+  older than previous accepted event cannot make freshness move backwards.
+  `view()` returns copies, state/reasons/IDs/top bid/ask/known sorted levels and
+  age/uncertainty; never resurrect READY after a gap without rebuild.
+* Market store accepts new immutable kind DEPTH, no destructive DB migration;
+  append wire snapshot/diff plus small derived top-of-book state, never a full
+  book on every diff. Existing P2-A snapshots/hash/schema remain unchanged.
+* `MarketStreamReader(store, client, universe, topics, transport=None,
+  background=True)` verifies own stored immutable universe and selected topics
+  before network. `start()` validates clock, sends one SUBSCRIBE, matches ACK
+  and retains <=64 pre-ACK events with their original receipt clocks. No blind
+  subscribe retry. Every event must match its combined stream/symbol. BookTicker
+  retains null event time and OBSERVED_RESPONSE; strictly increasing u within
+  session, duplicates do not refresh receipt and conflicts/regression close the
+  symbol. Depth uses the bounded book above; persist received diffs before return.
+  Per-event processing lag >250ms prevents readiness. Emit explicit invalid quote
+  rows at session start/disconnect/stop, with universe/session provenance so
+  P2-A feature/valuation consumers cannot resurrect earlier good quotes.
+  Unchanged symbols retain their own receipt, not another symbol's freshness.
+  `install_depth(symbol, observation)` is explicitly caller/supervisor driven;
+  snapshot is persisted before derived state. `read_once()`, `health()`, `stop()`.
+  Session rotation/reconnect resets quote update IDs/L2. Health is connectivity, per-pair
+  quote freshness and per-deep-book readiness; it never certifies account/entry.
+* `MarketStreamSupervisor(store, client, universe, deep_symbols=(),
+  transport_factory=None, background=False)`: own library lifecycle, default
+  manual tick; background opt-in launches only its own coordinator/readers.
+  `start/tick/stop/health`, shared local connection quota/backoff/rotation and
+  explicit per-shard failures. Rest snapshots/clock probes owned by one
+  coordinator, with shared client reserve; no concurrent external REST use.
+  Warm clock before readers; resync on lease expiry. A failed reader invalidates
+  its own subscribed rows and rebuilds depth from new diffs+REST. Snapshot retries
+  bounded by backoff and quota. Stop joins owned threads only; nothing controls
+  old bot workers. Reopen never inherits live socket/L2 readiness from SQLite.
+  This slice freezes a source-bound universe; stale/new metadata requires a new
+  supervisor/plan, not an automatic permission override. No permanently deployed
+  daemon or endpoint/port is introduced. `enabled=False` starts no I/O.
+
+### P2-B1 acceptance before code
+
+| ID | Required focused scenario |
+|---|---|
+| P2B1-01 | Demo/TLS/header/path/method guards, topic caps, credential-free depth/weights/reserve and combined ACK. |
+| P2B1-02 | Full/non-USDT/public-null/denied membership, deterministic shards, future/tampered source and deep outside source rejected. |
+| P2B1-03 | Snapshot+buffer bridge, stale/duplicate/overlap, zero deletion, exact replacement, gap/conflict/overflow/crossed/empty rebuild; partial-depth rejection. |
+| P2B1-04 | Valid clock/event+receipt age/uncertainty, future/stale/out-of-order, null book time, processing lag; no freshness renewal from duplicates or other symbols. |
+| P2B1-05 | Durable receipts/dependencies, pre-ACK receipt preservation, unmapped events, disconnect/stop invalidation, real owned thread shutdown/restart without inherited readiness. |
+| P2B1-06 | Shard supervision, retry budget/backoff/rotation, disable/no I/O, depth recovery and explicit missing coverage. |
+
+Verification: focused RED before implementation, full own-app regressions,
+27 repository regressions, full/staged Truth Harness and selective commit/push.
+Bounded public Demo smoke uses BTC/ETH/SOL streaming+L2 only, no account keys,
+orders or profitability claim. Report coverage/latency and any FAIL explicitly.
+Rollback: stop/disable only the new library readers; persisted rows invalidate
+their own readiness, financial journal/account protection remain separate.
+
+P2-B1 review cases: quote sequence/schema failures quarantine that symbol for
+the remainder of the session (not reset the high watermark). A supervisor sees
+this as reconnect-needed. Runtime disconnections get the same exponential
+backoff as handshake failures, applied once per failed session. Quota includes
+every connection attempt. Snapshot receipt UTC/monotonic values must not be
+future or reversed; clock/metadata failures are not papered over by fresh Pong.
+Health exposes bounded processing/event/receipt age diagnostics. Heartbeat is
+checked even under continuous data, not only on recv timeout. A restored source
+restarts BUFFERING and cannot inherit sequence certification from persisted data.
+Book mutation/snapshot/view are serialized atomically, including when a producer
+temporarily deletes a side's last level before inserting its replacement in the
+same valid diff. A consumer cannot see that transient half-applied state.
+Documented UTF-8 symbol names are accepted without silently shrinking discovery;
+letters/numbers/underscore only, explicit source spelling and lowercase topic
+mapping. Separators/control characters remain forbidden. Mixed-case symbols use
+the actual source symbol, not reconstruction by uppercasing a topic.
+Coordinator stop is checked before each connection/snapshot and immediately
+after a bounded REST request; pending stop prevents subsequent network work.
+
+### P2-B1 delivery evidence
+
+Implemented after 31 intended missing-module/method errors RED. Additional
+reproductions preceded repairs for sequence quarantine, runtime backoff,
+continuous-message heartbeat, future monotonic snapshot receipt, processing lag
+diagnostics, atomic side replacement, UTF-8 source mapping, clock-health gating
+and pending-stop I/O barrier. **46 focused stream tests / 338 total app GREEN**;
+27 repository spec/harness regressions and full Truth Harness PASS. Real
+threads, barriers and immutable SQLite receipts are exercised; no skips/xfail.
+
+Two bounded public 20s Demo stream samples used BTC/ETH/SOL only, with an
+explicitly stored PUBLIC_DIAGNOSTIC_SAMPLE and permitted N=null. All three
+books reached READY in both runs; first final point was 2/3 READY, second 3/3
+READY and 3/3 fresh observed quotes. The last sample had valid measured clock
+uncertainty 148.522ms, receipt ages 85/282/298ms, and last local post-recv
+processing lag 0.1672ms. This last local measurement is not network/event latency
+or a percentile/SLA. One initial engineering sample request was API_REJECTED
+because JSON symbols contained spaces; compact JSON corrected the diagnostic
+request, consistent with the existing client. No account keys/balances/orders.
+327 accumulated DEPTH records across the two sessions remained in own ignored
+runtime. Readers/store/transport were explicitly closed after each bounded run.
+
+No full-market sustained coverage, account certification, historical anchor,
+profitability or automatic trading release is established. Frozen metadata
+expires after 15min; P2-B2 must add versioned refresh/candle scheduling, bound
+full-universe CPU/publication lag, account/reference-price filters and certified
+valuation/reconciliation before P3 enablement. Offline entrypoint remains
+credential-free and starts no service. Staged verification/commit/push complete
+the release cycle; runtime evidence is not a source artifact.
