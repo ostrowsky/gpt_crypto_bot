@@ -3118,6 +3118,7 @@ async def simulate_portfolio(
     top_gainer_score_min: float = 0.0,
     candidate_snapshot: Optional[Tuple[Dict[int, List[ReplayCandidate]], set[int], int]] = None,
     stream_state: Optional[dict] = None,
+    enforce_position_capacity: bool = True,
 ) -> Tuple[List[ReplayTrade], ReplayRunStats]:
     stats = ReplayRunStats()
     if candidate_snapshot is None:
@@ -3327,7 +3328,9 @@ async def simulate_portfolio(
                     and len(same_cluster) < cluster_cap
                 )
                 if not candidate_cluster_exempt and len(same_cluster) >= cluster_cap:
-                    if not enable_replacement:
+                    if not enable_replacement or not enforce_position_capacity:
+                        # Capacity bypass must not turn a replace-only cluster
+                        # allowance into an extra position in that cluster.
                         stats.skipped_cluster_cap += 1
                         continue
                     # A same-cluster replacement keeps exposure flat; cross-cluster replacement would exceed the cap.
@@ -3368,7 +3371,7 @@ async def simulate_portfolio(
             if reserve_slots > 0 and not _is_fresh_priority_mode(candidate.mode):
                 effective_max_positions = max(1, max_open_positions - reserve_slots)
 
-            if len(open_positions) >= effective_max_positions:
+            if enforce_position_capacity and len(open_positions) >= effective_max_positions:
                 if not enable_replacement:
                     stats.skipped_portfolio_full += 1
                     continue
