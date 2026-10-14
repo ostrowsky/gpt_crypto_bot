@@ -21,6 +21,7 @@ metrics, rejected results and approvals are not renamed as new demo profit evide
 
 | Capability | Status | Canonical spec / source | Primary metrics | Next gate |
 |---|---|---|---|---|
+| ML label writer CPU | performance-only scoped serialization; trading unchanged | `docs/specs/ml-label-writer-cpu.md` | semantic parity, atomicity, serialization count and synthetic CPU benchmark | verify main-bot restart and separate live CPU sample |
 | Requested capacity/chase removal | preregistered research; live guards unchanged | `docs/specs/entry-protection-removal-audit.md` | four-arm maximum history, after-cost accounts and preserved violations | causal live parity and independent forward/risk validation before enablement |
 | Binance Demo application isolation | P0-A kernel GREEN; full isolation pending | `docs/specs/binance-demo-application-isolation.md` | forbidden legacy access/control count, own environment/state, resource and ownership boundaries | validate remaining ISO-01..10 before exchange execution |
 | Binance Demo autonomous daily-PnL program | P0-A/B + P1-A/B + P2-A/B2 foundations / 471 app GREEN; all-market latency FAIL | `docs/specs/binance-demo-autonomous-trading-program.md` | daily net equity PnL, fixed-budget return, risk and evidence integrity | resolve remaining SQL writer latency before P2 qualification; P2-C account/ownership/anchors before trading |

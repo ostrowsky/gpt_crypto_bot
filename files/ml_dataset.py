@@ -92,7 +92,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 import numpy as np
 import policy_provenance
@@ -186,6 +186,7 @@ def _rewrite_records(
     mutator,
     *,
     raw_required_tokens: tuple[str, ...] = (),
+    mutation_scope: Callable[[Dict[str, Any]], bool] | None = None,
 ) -> tuple[int, int]:
     if not ML_FILE.exists():
         return 0, 0
@@ -224,6 +225,11 @@ def _rewrite_records(
                         continue
                     if not isinstance(rec, dict):
                         bad_lines += 1
+                        continue
+                    if mutation_scope is not None and not mutation_scope(rec):
+                        # Still validate every row; only skip re-encoding rows
+                        # whose decoded identity cannot be changed by this writer.
+                        destination.write(line if line.endswith("\n") else line + "\n")
                         continue
                     if bool(mutator(rec)):
                         changed_rows += 1
@@ -532,6 +538,7 @@ def fill_pending_from_data(
         _, bad_lines = _rewrite_records(
             _mutate,
             raw_required_tokens=(f'"sym": "{sym}"', f'"tf": "{tf}"'),
+            mutation_scope=lambda rec: rec.get("sym") == sym and rec.get("tf") == tf,
         )
         if bad_lines:
             _pylog.warning("fill_pending_from_data skipped %d malformed jsonl lines", bad_lines)
@@ -591,6 +598,7 @@ def fill_labels(
         _, bad_lines = _rewrite_records(
             _mutate,
             raw_required_tokens=(f'"id": "{record_id}"',),
+            mutation_scope=lambda rec: rec.get("id") == record_id,
         )
         if bad_lines:
             _pylog.warning("fill_labels skipped %d malformed jsonl lines", bad_lines)
@@ -631,6 +639,7 @@ def fill_learning_labels(
         _, bad_lines = _rewrite_records(
             _mutate,
             raw_required_tokens=(f'"id": "{record_id}"',),
+            mutation_scope=lambda rec: rec.get("id") == record_id,
         )
         if bad_lines:
             _pylog.warning("fill_learning_labels skipped %d malformed jsonl lines", bad_lines)
@@ -678,6 +687,7 @@ def fill_forward_label(
         _, bad_lines = _rewrite_records(
             _mutate,
             raw_required_tokens=(f'"id": "{record_id}"',),
+            mutation_scope=lambda rec: rec.get("id") == record_id,
         )
         if bad_lines:
             _pylog.warning("fill_forward_label skipped %d malformed jsonl lines", bad_lines)
