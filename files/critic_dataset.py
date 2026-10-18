@@ -207,7 +207,7 @@ def _atomic_replace_with_retry(tmp: Path, target: Path) -> None:
             time.sleep(_REPLACE_RETRY_SEC)
 
 
-def _scan_mutations(mutator) -> tuple[bool, bool]:
+def _scan_mutations(mutator, *, mutation_scope=None) -> tuple[bool, bool]:
     changed = False
     had_bad_rows = False
     with open_snapshot(CRITIC_FILE,errors="ignore") as source:
@@ -222,11 +222,12 @@ def _scan_mutations(mutator) -> tuple[bool, bool]:
             if not isinstance(rec, dict):
                 had_bad_rows = True
                 continue
-            changed = bool(mutator(rec)) or changed
+            if mutation_scope is None or mutation_scope(rec):
+                changed = bool(mutator(rec)) or changed
     return changed, had_bad_rows
 
 
-def _write_mutated_stream(mutator, tmp: Path) -> tuple[bool, bool]:
+def _write_mutated_stream(mutator, tmp: Path, *, mutation_scope=None) -> tuple[bool, bool]:
     changed = False
     had_bad_rows = False
     ids = set()
@@ -244,6 +245,11 @@ def _write_mutated_stream(mutator, tmp: Path) -> tuple[bool, bool]:
                     continue
                 if not isinstance(rec, dict):
                     had_bad_rows = True
+                    continue
+                if mutation_scope is not None and not mutation_scope(rec):
+                    if rec.get("id"):
+                        ids.add(rec["id"])
+                    destination.write(line if line.endswith("\n") else line + "\n")
                     continue
                 changed = bool(mutator(rec)) or changed
                 if rec.get("id"):
@@ -334,11 +340,11 @@ def get_record(record_id: str) -> Optional[Dict[str, Any]]:
     return get_records({record_id}).get(record_id) if record_id else None
 
 
-def _rewrite_records(mutator, *, strict: bool = False) -> bool:
+def _rewrite_records(mutator, *, strict: bool = False, mutation_scope=None) -> bool:
     if not CRITIC_FILE.exists():
         return False
     try:
-        maybe_changed, maybe_bad_rows = _scan_mutations(mutator)
+        maybe_changed, maybe_bad_rows = _scan_mutations(mutator, mutation_scope=mutation_scope)
         if not (maybe_changed or maybe_bad_rows):
             return False
 
@@ -347,10 +353,12 @@ def _rewrite_records(mutator, *, strict: bool = False) -> bool:
             tmp = CRITIC_FILE.with_name(
                 f"{CRITIC_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp"
             )
-            changed, had_bad_rows = _write_mutated_stream(mutator, tmp)
-            if changed or had_bad_rows:
-                _atomic_replace_with_retry(tmp, CRITIC_FILE)
-            else:
+            try:
+                changed, had_bad_rows = _write_mutated_stream(mutator, tmp, mutation_scope=mutation_scope)
+                if changed or had_bad_rows:
+                    _atomic_replace_with_retry(tmp, CRITIC_FILE)
+            finally:
+                _disk_id_cache.pop(str(tmp.resolve()), None)
                 tmp.unlink(missing_ok=True)
         return bool(changed or had_bad_rows)
     except Exception as e:
@@ -805,6 +813,10 @@ def _fill_pending_record(
     return changed
 
 
+def _needs_forward_labels(rec: Dict[str, Any]) -> bool:
+    return any(rec.get("labels", {}).get(f"ret_{h}") is None for h in (3, 5, 10))
+
+
 def fill_pending_from_data(sym: str, tf: str, t_arr: Any, c_arr: Any, bar_ms: int) -> None:
     if not CRITIC_FILE.exists():
         return
@@ -812,9 +824,14 @@ def fill_pending_from_data(sym: str, tf: str, t_arr: Any, c_arr: Any, bar_ms: in
     def _mutate(rec: Dict[str, Any]) -> bool:
         if rec.get("sym") != sym or rec.get("tf") != tf:
             return False
+        if not _needs_forward_labels(rec):
+            return False
         return _fill_pending_record(rec, t_arr=t_arr, c_arr=c_arr, bar_ms=bar_ms)
 
-    _rewrite_records(_mutate)
+    _rewrite_records(
+        _mutate,
+        mutation_scope=lambda rec: rec.get("sym") == sym and rec.get("tf") == tf and _needs_forward_labels(rec),
+    )
 
 
 def fill_pending_batch(series: Any, *, strict: bool = False) -> None:
@@ -844,11 +861,17 @@ def fill_pending_batch(series: Any, *, strict: bool = False) -> None:
 
     def _mutate(rec: Dict[str, Any]) -> bool:
         payload = by_pair.get((str(rec.get("sym") or ""), str(rec.get("tf") or "")))
-        if payload is None:
+        if payload is None or not _needs_forward_labels(rec):
             return False
         return _fill_pending_record(rec, **payload)
 
-    _rewrite_records(_mutate, strict=strict)
+    _rewrite_records(
+        _mutate, strict=strict,
+        mutation_scope=lambda rec: (
+            (str(rec.get("sym") or ""), str(rec.get("tf") or "")) in by_pair
+            and _needs_forward_labels(rec)
+        ),
+    )
 
 
 def _teacher_local_window(target_day: date, phase: str, tz: ZoneInfo) -> tuple[datetime, datetime]:

@@ -83,17 +83,6 @@ def append_shadow_event(path: Path, event: Mapping[str, object]) -> None:
 
 
 def append_decision_trace(path: Path, event: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    dedup_key = f"{event['sym']}|{event['tf']}|{event['bar_ts']}"
-    seen = set()
-    if path.exists():
-        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            try:
-                row = json.loads(line)
-                seen.add(f"{row.get('sym')}|{row.get('tf')}|{row.get('bar_ts')}")
-            except Exception:
-                continue
-    if dedup_key in seen:
-        return
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(dict(event), ensure_ascii=False) + "\n")
+    from .trace_index import append_unique_trace
+
+    append_unique_trace(path, event)
