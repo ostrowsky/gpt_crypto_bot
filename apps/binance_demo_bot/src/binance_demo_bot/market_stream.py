@@ -18,7 +18,8 @@ from .adapter import AdapterError, _integer, _money, _sha, _json
 from .journal import _digest
 from .market_data import MarketDataService, _symbol
 from .market_delivery import DeliveryMetrics, WirePacket, lag_evidence
-from .ws_audit import AuditedWsTransport, bind_ws_audit, receipt_of
+from .ws_audit import AuditedWsTransport, bind_ws_audit, receipt_of, disposition
+from .operational_audit import OperationalAudit
 
 WS_URL = "wss://demo-stream.binance.com/stream"
 WS_LIMIT = 1024*1024
@@ -430,9 +431,14 @@ class MarketStreamReader:
         receipt = receipt_of(self.transport,self.clock)
         wall, mono = receipt['wall_ms'],receipt['monotonic_ns']
         value = wire.encode() if isinstance(wire,str) else wire
-        if not isinstance(value,bytes) or len(value) > WS_LIMIT:
-            raise AdapterError("WS_BUFFER_OVERFLOW")
-        payload = _json(value)
+        try:
+            if not isinstance(value,bytes) or len(value) > WS_LIMIT:
+                raise AdapterError("WS_BUFFER_OVERFLOW")
+            payload = _json(value)
+            if not isinstance(payload,dict):raise AdapterError('WS_PROTOCOL_ERROR')
+        except AdapterError:
+            disposition(self.transport,receipt['event_id'],'REJECTED',if_healthy=True)
+            raise
         if isinstance(payload,dict):
             payload=WirePacket(payload,value)
             payload.audit_event_id=receipt['event_id']
@@ -465,7 +471,9 @@ class MarketStreamReader:
                     payload,wall,mono = self._receive(min(1,(deadline-self.clock.monotonic_ns())/1e9))
                     if isinstance(payload,dict) and "id" in payload:
                         if payload != {"result":None,"id":request_id}:
+                            disposition(self.transport,getattr(payload,'audit_event_id',None),'REJECTED')
                             raise AdapterError("WS_PROTOCOL_ERROR")
+                        disposition(self.transport,getattr(payload,'audit_event_id',None),'CONTROL_ACK')
                         break
                     buffered.append((payload,wall,mono))
                     if len(buffered) > 64:
@@ -479,6 +487,10 @@ class MarketStreamReader:
                     try:
                         self._process(payload,wall,mono)
                         self._audit_processing([(payload,wall,mono)])
+                    except Exception:
+                        if isinstance(self.transport,AuditedWsTransport) and self.transport.journal._state=='READY':
+                            self._audit_processing([(payload,wall,mono)],outcome='REJECTED')
+                        raise
                     finally:self._audit_snapshot_ids=None
                 if self.background:
                     self._thread = threading.Thread(target=self._run,name="binance-demo-market-reader",daemon=True)
@@ -720,6 +732,24 @@ class MarketStreamSupervisor:
         self.readers, self.attempts, self.slots = {},deque(),{}
         self._lock,self._stop,self._thread = threading.RLock(),threading.Event(),None
         self.running = False
+        self._ops=OperationalAudit(getattr(client.client,'audit',None),client.clock,store,component='STREAM_SUPERVISOR')
+        self._audit_error=None
+        self._audit_cleanup_failures=0
+
+    def _op(self,operation,action,reason,*,population=None,context=None):
+        if population is None:population=[r['symbol'] for r in self.universe['data']['rows']
+            if r['status']=='TRADING' and r['spot_allowed'] is True and r['permitted'] is not False]
+        try:return self._ops.decide(operation,action,reason,source_ids=[self.universe['snapshot_id']],population=population,context=context)
+        except AdapterError as error:
+            self._abort_audit(error.reason)
+            raise
+
+    def _abort_audit(self,reason):
+        if self._audit_error is None:self._audit_error=reason
+        self.running=False
+        self._stop.set()
+        try:self.stop(_join=False)
+        except Exception:self._audit_cleanup_failures+=1
 
     def _prepare_tls(self):
         with self._lock:
@@ -731,9 +761,12 @@ class MarketStreamSupervisor:
 
     def start(self):
         if not self.enabled:
+            self._op('START','BLOCK','MARKET_DATA_DISABLED')
             raise AdapterError("MARKET_DATA_DISABLED")
         if self.running:
+            self._op('START','BLOCK','WS_ALREADY_CONNECTED')
             raise AdapterError("WS_ALREADY_CONNECTED")
+        self._op('START','REFRESH','START_REQUESTED')
         try:
             self.client.clock.timestamp_ms()
         except AdapterError as error:
@@ -750,10 +783,13 @@ class MarketStreamSupervisor:
 
     def tick(self):
         if not self.running or self._stop.is_set():
+            self._op('TICK','WAIT','SUPERVISOR_NOT_RUNNING')
             return
         with self._lock:
+            if not self.running or self._stop.is_set():return
             now = self.client.clock.monotonic_ns()
             if self.client.clock.wall_ms()-self.universe["received_at_ms"] > 900000:
+                self._op('METADATA','BLOCK','METADATA_STALE')
                 for reader in self.readers.values():
                     reader._fail("METADATA_STALE")
                 return
@@ -761,13 +797,18 @@ class MarketStreamSupervisor:
                 self.client.clock.timestamp_ms()
             except AdapterError as error:
                 if error.reason in {"CLOCK_UNSYNCED","CLOCK_STALE"}:
+                    self._op('CLOCK_REFRESH','REFRESH',error.reason)
                     try:
                         self.client.client.sync_clock()
-                    except AdapterError:
+                    except AdapterError as clock_error:
+                        if clock_error.reason.startswith('AUDIT_'):
+                            self._abort_audit(clock_error.reason);raise
+                        self._op('CLOCK_REFRESH','BLOCK',clock_error.reason)
                         for reader in self.readers.values():
                             reader._fail("CLOCK_UNSYNCED")
                         return
                 else:
+                    self._op('CLOCK_REFRESH','BLOCK',error.reason)
                     for reader in self.readers.values():
                         reader._fail(error.reason)
                     return
@@ -779,17 +820,25 @@ class MarketStreamSupervisor:
                 key = shard["shard_id"]
                 slot = self.slots.setdefault(key,dict(next_ns=0,failures=0,depth_next={},failed_session=None))
                 reader = self.readers.get(key)
+                population=sorted({topic.split('@',1)[0].upper() for topic in shard['topics']})
                 if reader and reader.connected and reader.health()["needs_reconnect"]:
+                    self._op('RECONNECT','RECONNECT','INVALID_QUOTES',population=population,context={'shard_id':key})
                     reader._fail("WS_PROTOCOL_ERROR")
                 if reader and reader.connected and now-reader.started_ns >= 23*3600*1_000_000_000:
+                    self._op('RECONNECT','RECONNECT','SESSION_ROTATION',population=population,context={'shard_id':key})
                     reader._fail("WS_ROTATED")
                 if not reader or not reader.connected:
                     if reader and slot["failed_session"] != reader.session_id:
                         slot["failed_session"] = reader.session_id
                         slot["failures"] += 1
                         slot["next_ns"] = now+min(60,2**min(slot["failures"]-1,6))*1_000_000_000
-                    if now < slot["next_ns"] or len(self.attempts) >= 20:
+                    if now < slot["next_ns"]:
+                        self._op('RECONNECT','WAIT','RECONNECT_BACKOFF',population=population,context={'shard_id':key,'next_monotonic_ns':slot['next_ns']})
                         continue
+                    if len(self.attempts) >= 20:
+                        self._op('RECONNECT','WAIT','CONNECT_QUOTA',population=population,context={'attempted_n':len(self.attempts),'limit_N':20})
+                        continue
+                    self._op('RECONNECT','RECONNECT','DISCONNECTED' if reader else 'NO_SESSION',population=population,context={'shard_id':key})
                     if reader:
                         reader.stop()
                     self.attempts.append(now)
@@ -799,20 +848,30 @@ class MarketStreamSupervisor:
                     try:
                         reader.start()
                         slot["depth_next"].clear()
-                    except AdapterError:
+                    except AdapterError as error:
+                        if error.reason.startswith('AUDIT_'):
+                            self._abort_audit(error.reason);raise
+                        self._op('RECONNECT','BLOCK',error.reason,population=population,context={'shard_id':key})
                         slot["failed_session"] = reader.session_id
                         slot["failures"] += 1
                         slot["next_ns"] = now+min(60,2**min(slot["failures"]-1,6))*1_000_000_000
                         continue
+                self._op('RECONNECT','NO_ACTION','SESSION_CONNECTED',population=population,context={'shard_id':key})
                 for symbol,book in reader.books.items():
                     if self._stop.is_set():
                         return
                     view = book.view()
-                    if view["state"] == "READY" or now < slot["depth_next"].get(symbol,0):
+                    if view["state"] == "READY":
+                        self._op('L2_SNAPSHOT','NO_ACTION','L2_READY',population=[symbol])
+                        continue
+                    if now < slot["depth_next"].get(symbol,0):
+                        self._op('L2_SNAPSHOT','WAIT','L2_BACKOFF',population=[symbol])
                         continue
                     # Allow at least one buffered diff before fetching a snapshot.
                     if view["last_update_id"] is not None or not view["buffer_n"]:
+                        self._op('L2_SNAPSHOT','WAIT','L2_DIFF_REQUIRED',population=[symbol])
                         continue
+                    self._op('L2_SNAPSHOT','REFRESH','L2_SNAPSHOT_REQUIRED',population=[symbol])
                     slot["depth_next"][symbol] = now+1_000_000_000
                     try:
                         observation = self.client.read_depth(symbol)
@@ -820,6 +879,9 @@ class MarketStreamSupervisor:
                             return
                         reader.install_depth(symbol,observation)
                     except AdapterError as error:
+                        if error.reason.startswith('AUDIT_'):
+                            self._abort_audit(error.reason);raise
+                        self._op('L2_SNAPSHOT','BLOCK',error.reason,population=[symbol])
                         self.store.append("INCIDENT",dict(operation="L2_SNAPSHOT_READ_FAILED",symbol=symbol,reason=error.reason),
                             received_at_ms=self.client.clock.wall_ms(),received_monotonic_ns=self.client.clock.monotonic_ns())
 
@@ -827,7 +889,10 @@ class MarketStreamSupervisor:
         while not self._stop.wait(0.25):
             try:
                 self.tick()
-            except Exception:
+            except Exception as error:
+                if isinstance(error,AdapterError) and error.reason.startswith('AUDIT_'):
+                    self._abort_audit(error.reason)
+                    break
                 for reader in self.readers.values():
                     reader._fail("WS_PROTOCOL_ERROR")
                 self.running = False
@@ -841,11 +906,15 @@ class MarketStreamSupervisor:
                         permitted_pairs_N=self.plan["permitted_pairs_N"],subscribed_pairs_n=self.plan["subscribed_pairs_n"],
                         ready_depth_n=sum(s["ready_depth_n"] for s in states.values()),deep_pairs_N=len(self.plan["deep_symbols"]),
                         connection_attempts_n=len(self.attempts),connection_attempt_limit_N=20,shards=states,
+                        audit=self._ops.health(),audit_error=self._audit_error,audit_cleanup_failures_n=self._audit_cleanup_failures,
                         order_send_enabled=False,account_certified=False)
 
-    def stop(self):
+    def stop(self,*,_join=True):
+        try:self._ops.decide('STOP','BLOCK','STOP_REQUESTED',source_ids=[self.universe['snapshot_id']])
+        except AdapterError as error:
+            if self._audit_error is None:self._audit_error=error.reason
         self._stop.set()
-        if self._thread is not None and self._thread is not threading.current_thread():
+        if _join and self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(20)
             if self._thread.is_alive():
                 raise AdapterError("WS_STOP_TIMEOUT")

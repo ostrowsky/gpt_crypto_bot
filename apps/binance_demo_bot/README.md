@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **547 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **575 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -73,6 +73,7 @@ Verified: **547 tests GREEN**, including 56 REST, 69 private/evidence cases,
 24 common writer/durable ACK/backpressure/uncertainty/lifecycle cases,
 27 REST/decision audit/redaction/crash/coverage cases,
 25 WSS audit/receipt/linkage/failure cases,
+28 operational-decision/frozen-prefix/cleanup cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -348,7 +349,8 @@ requires all REST/WSS attempts/errors and decisions, correlation, redaction,
 completeness and decision->fill->daily net PnL analysis. AUD-A now implements
 explicit opt-in durable REST attempts and a causal decision-recording API.
 AUD-B1 adds automatic WSS application capture for readers sharing that journal.
-Protocol-level controls/all-runtime decisions and archive integration remain required before
+AUD-B2 covers coordinator/supervisor branch decisions and recorded-prefix gaps.
+Protocol-level controls, future OMS/policy decisions and archive integration remain required before
 autonomous execution/learning; snapshots/incidents do not constitute full audit.
 P2B2-12 public trial1791744230720272600:47.555206s, startup6/6 then0/6;
 final0/6 connected,REST quotes1375/1375,history18/1375 — FAIL. Writer accepted/
@@ -413,4 +415,26 @@ is claimed. Journal failure closes and invalidates the reader, including after
 normalized commit. Reader health exposes audit state/counters without payloads.
 `protocol_controls_observed=False`: automatic low-level control frames consumed
 inside the WebSocket library are outside this application boundary. Full audit,
-all operational decisions and archives remain required before autonomy.
+remaining operational integrations and archives remain required before autonomy.
+
+AUD-B2 logs decisions of the current read-only market coordinator and stream
+supervisor before network/scheduling effects: metadata/clock/quote refresh,
+not-due waits, history-ready/cooldown/backfill and work limits, reconnect/backoff/
+rotation/quota, connected sessions and L2 ready/buffer/snapshot decisions.
+Records include actual store-resolved source availability, considered symbols,
+explicit unknown initial population, cutoff/component/versions and independent
+decision expected/ACKed/gap counts. These are OPERATIONAL decisions, not BUY/SELL
+signals. Journal failure marks AUDIT_FAILED even before another tick; abort
+preserves its first reason and closes owned resources without joining a
+coordinator blocked on the same lock. External stop then joins normally.
+
+`audit.processing_report()` or `audit.processing_report(through_seq=N)` scans a
+verified frozen prefix with bounded Python memory. It partitions durable RECV
+records into processed/rejected/control-ACK/unknown/conflict counts, checks bad
+references and returns a prefix chain tip and report hash. Zero messages stay
+UNKNOWN; late markers cannot change an older frozen report. The denominator is
+explicitly DURABLE_COMPLETED_RECV. Capture coverage remains UNKNOWN: successful
+saved rows cannot reconstruct all physical traffic. Compare transport and audit
+submission counters separately. No report sets `full_audit_complete=True`.
+Default journal disk cap remains finite; archive/retention must be implemented
+before sustained deployment. The previous full-market latency FAIL is unchanged.

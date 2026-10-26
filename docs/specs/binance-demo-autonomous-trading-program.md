@@ -1,12 +1,14 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-26. Status: **P0-A/B + P1-A/B + P2-A/B2 + AUD-A/B1 foundations / 547 GREEN; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-26. Status: **P0-A/B + P1-A/B + P2-A/B2 + AUD-A/B1/B2 foundations / 575 GREEN; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 Полный [аудит Binance и решений](binance-demo-interaction-decision-audit.md)
 обязателен до автономного исполнения/learning. AUD-A: durable opt-in REST attempts
 и explicit causal decisions implemented; AUD-B1 пишет WSS application calls/raw
-messages и causal snapshot links. Protocol controls/all-runtime decisions и
-archive integration ещё не завершены; полный audit не объявляется готовым.
+messages и causal snapshot links. AUD-B2 добавляет coordinator/supervisor
+decisions и frozen-prefix processing coverage; capture coverage остаётся UNKNOWN.
+Protocol controls, future policy/OMS decisions и archive integration ещё не
+завершены; полный audit не объявляется готовым.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
 TH-01..TH-12 из [Truth Harness](truth-harness.md) обязательны.

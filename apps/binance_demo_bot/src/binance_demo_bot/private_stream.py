@@ -13,7 +13,7 @@ import uuid
 from websockets.sync.client import connect as ws_connect
 
 from .adapter import AdapterError, BinanceDemoAdapter, _value, _integer, _text, _json, _money
-from .ws_audit import AuditedWsTransport, bind_ws_audit, receipt_of
+from .ws_audit import AuditedWsTransport, bind_ws_audit, receipt_of, disposition
 from .market_delivery import WirePacket
 from .account_evidence import AccountEvidenceStore, INCIDENTS
 
@@ -151,9 +151,14 @@ class PrivateEventReader:
         wall, mono = receipt['wall_ms'],receipt['monotonic_ns']
         if isinstance(value, str):
             value = value.encode("utf-8")
-        if not isinstance(value, bytes) or len(value) > WS_LIMIT:
-            raise AdapterError("WS_BUFFER_OVERFLOW")
-        payload=_json(value)
+        try:
+            if not isinstance(value, bytes) or len(value) > WS_LIMIT:
+                raise AdapterError("WS_BUFFER_OVERFLOW")
+            payload=_json(value)
+            if not isinstance(payload,dict):raise AdapterError('WS_PROTOCOL_ERROR')
+        except AdapterError:
+            disposition(self.transport,receipt['event_id'],'REJECTED',if_healthy=True)
+            raise
         if isinstance(payload,dict):
             payload=WirePacket(payload,value)
             payload.audit_event_id=receipt['event_id']
@@ -215,20 +220,7 @@ class PrivateEventReader:
                         raise AdapterError("WS_BUFFER_OVERFLOW")
                     pending.append((data, wall, mono))
                     continue
-                if not isinstance(data, dict) or data.get("id") != request_id:
-                    raise AdapterError("WS_PROTOCOL_ERROR")
-                self._observe_limits(data)
-                if data.get("status") in (401, 403):
-                    raise AdapterError("WS_AUTH_DENIED")
-                if data.get("status") == 429:
-                    raise AdapterError("WS_RATE_LIMITED")
-                if data.get("status") == 418:
-                    raise AdapterError("WS_BANNED")
-                if data.get("status") != 200 or not isinstance(data.get("result"), dict):
-                    raise AdapterError("WS_PROTOCOL_ERROR")
-                self.subscription_id = _integer(data["result"]["subscriptionId"])
-                self.session_id = uuid.uuid4().hex
-                self.store.bind_session(self.session_id, self.subscription_id, self.adapter.identity["credential_generation"])
+                self._accept_ack(data,request_id)
                 break
             self._stop.clear()
             self._connected, self._error = True, None
@@ -250,6 +242,22 @@ class PrivateEventReader:
         except Exception:
             self._fail("WS_PROTOCOL_ERROR")
             raise AdapterError("WS_PROTOCOL_ERROR") from None
+
+    def _accept_ack(self,data,request_id):
+        try:
+            if not isinstance(data,dict) or data.get('id')!=request_id:raise AdapterError('WS_PROTOCOL_ERROR')
+            self._observe_limits(data)
+            if data.get('status') in (401,403):raise AdapterError('WS_AUTH_DENIED')
+            if data.get('status')==429:raise AdapterError('WS_RATE_LIMITED')
+            if data.get('status')==418:raise AdapterError('WS_BANNED')
+            if data.get('status')!=200 or not isinstance(data.get('result'),dict):raise AdapterError('WS_PROTOCOL_ERROR')
+            self.subscription_id=_integer(data['result']['subscriptionId'])
+            self.session_id=uuid.uuid4().hex
+            self.store.bind_session(self.session_id,self.subscription_id,self.adapter.identity['credential_generation'])
+            disposition(self.transport,getattr(data,'audit_event_id',None),'CONTROL_ACK')
+        except Exception:
+            disposition(self.transport,getattr(data,'audit_event_id',None),'REJECTED',if_healthy=True)
+            raise
 
     def _normalize(self, raw):
         if not isinstance(raw, dict):
@@ -299,6 +307,12 @@ class PrivateEventReader:
         raise AdapterError("UNKNOWN_EVENT")
 
     def _accept(self, data, wall, mono):
+        try:return self._accept_record(data,wall,mono)
+        except Exception:
+            disposition(self.transport,getattr(data,'audit_event_id',None),'REJECTED',if_healthy=True)
+            raise
+
+    def _accept_record(self, data, wall, mono):
         if not isinstance(data, dict) or type(data.get("subscriptionId")) is not int or data["subscriptionId"] != self.subscription_id:
             raise AdapterError("UNMAPPED_SUBSCRIPTION")
         try:
@@ -316,8 +330,10 @@ class PrivateEventReader:
     def poll_once(self, timeout_s=1):
         if not self._connected:
             raise AdapterError("WS_UNAVAILABLE")
+        payload=None
         try:
-            return self._accept(*self._receive(timeout_s))
+            payload,wall,mono=self._receive(timeout_s)
+            return self._accept(payload,wall,mono)
         except TimeoutError:
             return None
         except AdapterError as error:

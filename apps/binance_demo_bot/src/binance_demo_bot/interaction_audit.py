@@ -119,7 +119,7 @@ class AuditJournal:
             account_episode_id=episode_id,portfolio_scope_id=scope_id)
         package=Path(__file__).resolve().parent
         self.source_code_sha256=_sha({n:hashlib.sha256((package/n).read_bytes()).hexdigest()
-                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py')})
+                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py')})
         self.path=paths.runtime_path(database)
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.max_bytes,self.fault_hook=max_bytes,fault_hook
@@ -128,6 +128,7 @@ class AuditJournal:
         self._slots=threading.BoundedSemaphore(max_inflight)
         self._expected,self._acked=Counter(),Counter()
         self._state,self._closed='READY',False
+        self._failure_reason=None
         self._con,self._lease=None,None
         self._tip='0'*64
         try:
@@ -178,8 +179,10 @@ class AuditJournal:
         except (ValueError,KeyError,TypeError,sqlite3.Error):
             raise AdapterError('AUDIT_INTEGRITY_FAILED') from None
 
-    def _failed(self):
-        with self._metrics_lock:self._state='FAILED'
+    def _failed(self,reason):
+        with self._metrics_lock:
+            self._state='FAILED'
+            if self._failure_reason is None:self._failure_reason=reason
 
     def _disk_bytes(self):
         return sum(p.stat().st_size for p in (self.path,self.path.with_name(self.path.name+'-wal')) if p.exists())
@@ -188,7 +191,7 @@ class AuditJournal:
         if kind not in KINDS or not isinstance(data,dict):raise AdapterError('AUDIT_INVALID')
         with self._metrics_lock:self._expected[kind]+=1
         if not self._slots.acquire(blocking=False):
-            self._failed();raise AdapterError('AUDIT_BACKPRESSURE')
+            self._failed('AUDIT_BACKPRESSURE');raise AdapterError('AUDIT_BACKPRESSURE')
         try:
             with self._lock:
                 if self._closed or self._state!='READY':raise AdapterError('AUDIT_UNAVAILABLE')
@@ -216,12 +219,12 @@ class AuditJournal:
                     with self._metrics_lock:self._acked[kind]+=1
                     return value['event_id']
                 except BaseException as error:
-                    self._failed()
                     try:self._con.rollback()
                     except Exception:pass
-                    if isinstance(error,(KeyboardInterrupt,SystemExit)):raise
                     reason=('AUDIT_COMMIT_UNKNOWN' if phase=='COMMIT' else
                             error.reason if isinstance(error,AdapterError) else 'AUDIT_WRITE_FAILED')
+                    self._failed(reason)
+                    if isinstance(error,(KeyboardInterrupt,SystemExit)):raise
                     raise AdapterError(reason) from None
         finally:self._slots.release()
 
@@ -258,9 +261,52 @@ class AuditJournal:
                 last_seq=self._last_seq,rows_n=self._last_seq,chain_tip=self._tip)
             return dict(value,manifest_sha256=_sha(value))
 
+    def processing_report(self,*,through_seq=None):
+        """Bounded Python memory; durable-prefix coverage is not transport coverage."""
+        with self._lock:
+            self._verify()
+            cutoff=self._last_seq if through_seq is None else through_seq
+            if type(cutoff) is not int or not 0<=cutoff<=self._last_seq:raise AdapterError('AUDIT_INVALID')
+            tip=self._con.execute('SELECT content_sha256 FROM records WHERE seq=?',(cutoff,)).fetchone()
+            result=dict(prefix_last_seq=cutoff,prefix_chain_tip=tip[0] if tip else '0'*64,
+                recorded_receipts_N=0,processed_n=0,rejected_n=0,control_ack_n=0,unknown_n=0,conflict_n=0,
+                invalid_marker_n=0,denominator_basis='DURABLE_COMPLETED_RECV',capture_coverage='UNKNOWN',
+                full_audit_complete=False)
+            links="""WITH links AS (
+                SELECT m.seq AS marker_seq,m.payload_json AS marker_json,j.value AS receipt_id
+                FROM records m,json_each(m.payload_json,'$.data.receipt_event_ids') j
+                WHERE m.kind='WS_PROCESSING' AND m.seq<=?) """
+            query=links+"""SELECT r.seq,COUNT(l.marker_seq),MAX(json_extract(l.marker_json,'$.data.outcome')),
+                SUM(CASE WHEN l.marker_seq<=r.seq OR
+                    json_type(l.marker_json,'$.data.receipt_event_ids')!='array' OR
+                    json_extract(l.marker_json,'$.data.connection_id') IS NOT json_extract(r.payload_json,'$.data.connection_id') OR
+                    json_extract(l.marker_json,'$.data.outcome') NOT IN ('PROCESSED','REJECTED','CONTROL_ACK')
+                    THEN 1 ELSE 0 END)
+                FROM records r LEFT JOIN links l ON l.receipt_id=r.id
+                WHERE r.kind='WS_END' AND r.seq<=? AND json_extract(r.payload_json,'$.data.operation')='RECV'
+                    AND json_extract(r.payload_json,'$.data.outcome')='COMPLETED'
+                GROUP BY r.seq ORDER BY r.seq"""
+            for _,count,outcome,invalid in self._con.execute(query,(cutoff,cutoff)):
+                result['recorded_receipts_N']+=1
+                if count==0:category='unknown_n'
+                elif count!=1 or invalid or outcome not in ('PROCESSED','REJECTED','CONTROL_ACK'):category='conflict_n'
+                else:category={'PROCESSED':'processed_n','REJECTED':'rejected_n','CONTROL_ACK':'control_ack_n'}[outcome]
+                result[category]+=1
+            query=links+"""SELECT COUNT(*) FROM links l LEFT JOIN records r ON r.id=l.receipt_id
+                WHERE r.seq IS NULL OR r.seq> ? OR r.seq>=l.marker_seq OR r.kind!='WS_END'
+                    OR json_extract(r.payload_json,'$.data.operation')!='RECV'
+                    OR json_extract(r.payload_json,'$.data.outcome')!='COMPLETED'"""
+            result['invalid_marker_n']=self._con.execute(query,(cutoff,cutoff)).fetchone()[0]
+            empty=self._con.execute("SELECT COUNT(*) FROM records WHERE kind='WS_PROCESSING' AND seq<=? AND COALESCE(json_array_length(payload_json,'$.data.receipt_event_ids'),0)=0",(cutoff,)).fetchone()[0]
+            result['invalid_marker_n']+=empty
+            result['state']=('FAIL' if result['conflict_n'] or result['invalid_marker_n'] else
+                'UNKNOWN' if not result['recorded_receipts_N'] or result['unknown_n'] else 'RESOLVED_RECORDED_PREFIX')
+            return dict(result,report_sha256=_sha(result))
+
     def health(self):
         with self._metrics_lock:
             value=dict(state=self._state,scope='REST_ATTEMPTS_AND_EXPLICIT_DECISIONS',full_audit_complete=False,
+                error=self._failure_reason,
                 counter_basis='PROCESS_SUBMISSIONS',run_id=self.run_id,process_instance_id=self.process_id,
                 channels={k:dict(expected_N=self._expected[k],recorded_n=self._acked[k],gap_n=self._expected[k]-self._acked[k]) for k in KINDS})
         with self._lock:

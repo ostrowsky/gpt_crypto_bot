@@ -244,3 +244,15 @@ weaker assertions, credentials discovery, real exchange calls or foreign worker
 control. Wire-level automatic controls, all runtime decisions and archive
 qualification are explicitly outside this completed slice; full Harness FAIL
 TH-11 remains separate from unit-test success.
+
+AUD-B2:18 intended missing-module/interface RED ->18 GREEN /565 initial full
+GREEN. Three added boundaries plus stronger exact-reason coverage reproduced4
+failures before repair. Next five cases and stricter malformed-marker checks
+reproduced4 failures (an unrelated missing fixture base was fixed first and
+does not count as RED). Two blocked coordinator-thread probes then reproduced
+skipped cleanup before repair. Final28 focused /575 app GREEN;14 root spec +13
+harness tests GREEN. Actual own SQLite aborts, source timestamps, frozen/reopen
+prefix SQL, real thread joins and synthetic network protocols; no keys/network,
+skip/xfail or weakened assertions. Test counters concern saved application
+messages, not unseen exchange traffic. Full Harness TH-11 and full-market
+latency remain FAIL independently of these implementation tests.

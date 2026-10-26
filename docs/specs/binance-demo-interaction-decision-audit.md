@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
-Дата: 2026-10-11, обновлено 2026-10-26. Статус: **AUD-A + AUD-B1 implemented;
-52 audit focused / 547 app GREEN; full interaction audit incomplete**.
+Дата: 2026-10-11, обновлено 2026-10-26. Статус: **AUD-A/B1/B2 implemented;
+80 audit focused / 575 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -235,3 +235,82 @@ remains FAIL TH-11 (old replay source hash); no policy relaxation or financial
 claim. No new full-market latency trial; previous FAIL remains authoritative.
 Next AUD-B2: wire-level control observation, runtime-wide decisions and
 completeness/processing-gap analysis; archive/retention integration remains open.
+
+## AUD-B2: coordinator decisions and recorded-prefix processing coverage
+
+Implemented after spec-first tests, 2026-10-26. Scope: current read-only market
+coordinator and stream supervisor, plus public/private incoming-message
+dispositions. Policy/OMS/learning do not yet exist and cannot claim coverage.
+Protocol-level automatic controls and retained archives remain separate gates.
+Rollback: explicit absence of journal keeps diagnostic libraries UNCONFIGURED;
+it cannot qualify autonomous execution. No financial kernel/trading changes.
+
+- B201: `OperationalAudit` records each covered branch before its network or
+  scheduling side effect: START/STOP, metadata/clock/quote refresh, not-due waits,
+  per-symbol history-ready/cooldown/backfill, bounded-work/quota blocks, shard
+  reconnect/backoff/rotation, L2 readiness/buffering/snapshot and known failures.
+  A NO_ACTION/WAIT is a real decision, not a synthetic trading signal. Each
+  record has component/operation/reason, cutoff, exact considered population,
+  explicit population state, versions and safe structured context. Independent
+  helper expected/ACKed/gap counters identify their component/process scope.
+- B202: universe/history source IDs resolve against the owned store; use the
+  actual stored available_at, never a supplied fictitious timestamp. Any source
+  after cutoff or foreign audit/store namespace is denied before side effects.
+  Unknown initial population is NOT_DISCOVERED, not an empty successful market.
+- B203: decision-write failure latches AUDIT_FAILED and aborts new work, stops
+  owned readers/maintenance/writer where applicable, preserves the exact safe
+  audit reason and reports cleanup failures. Stop is attempted even when its own
+  decision cannot persist. Background handlers cannot overwrite an audit failure
+  with a generic runtime error or keep a fresh-data readiness verdict.
+  An audit abort inside the coordinator lock must release owned resources
+  without waiting on its own coordinator thread blocked on that same lock;
+  a subsequent external stop joins the stopped coordinator normally.
+- B204: every completed application RECV receives one final disposition when
+  known: CONTROL_ACK after validated subscribe response, PROCESSED after derived
+  ACK (including open/no-write candle), or REJECTED after schema/normalization/
+  subscription failure. Failure to persist a disposition remains UNKNOWN;
+  never create a second marker to hide an ambiguous commit. Pre-ACK buffers keep
+  original receipt IDs/clocks. Broken/missing normalization remains visible.
+- B205: `AuditJournal.processing_report(through_seq=None)` is a read-only frozen
+  prefix report. Categories received_N = processed_n + rejected_n + control_ack_n
+  + unknown_n + conflict_n. Duplicate/conflicting/future/foreign references are
+  failures, not extra successes. Return invalid_marker_n and fixed prefix seq/
+  chain tip/digest. A bounded SQL scan streams results; no all-log Python list.
+  Older prefix results remain identical after later markers arrive or restart.
+- B206: denominator basis is DURABLE_COMPLETED_RECV, not all exchange traffic.
+  Capture coverage stays UNKNOWN; independent transport/submission counts are
+  reported separately, never reconstructed from saved rows. Zero received rows
+  yield UNKNOWN. Even RESOLVED_RECORDED_PREFIX cannot set full_audit_complete or
+  enable trading. Health exposes audit failure/counters with no payloads; health
+  reads themselves do not generate decisions or mutate the journal.
+
+Acceptance: SPEC -> RED tests for branch provenance/side-effect ordering,
+causal history/source rejection, per-symbol WAIT/NO_ACTION, reconnect/quota/L2,
+intent failure/owned cleanup and background reason preservation; actual reader
+ACK/malformed/private rejection and ambiguity; frozen prefix/late marker/zero/
+duplicates/foreign IDs and native SQL denominator tests. Then implementation,
+full regression and staged Harness, selective commit/push. No live keys/orders
+or profitability/market-latency claims. Full Harness TH-11 remains independently
+FAIL until current-source historical evidence is regenerated.
+
+### AUD-B2 verification
+
+18 intended missing-module/interface errors RED ->18 GREEN; an initial full
+565-test regression was GREEN. Three new boundaries plus a stronger original
+failure-reason assertion then reproduced4 failures: leaked SQL error, lost
+foreground REST audit reason, cleanup overwriting reason, and fresh-looking
+health after an external journal failure. After repair21 focused GREEN.
+Next five cases plus stronger malformed-marker checks reproduced4 failures:
+unclassified pre-ACK event/invalid subscription ID, a missing connected-session
+NO_ACTION, and invalid marker schema counted as processed. One fixture
+inheritance mistake produced unrelated setup errors; these are not behavioral
+RED and were corrected before reproducing the actual failures.26 then GREEN.
+Finally two real blocked-coordinator join probes reproduced skipped cleanup in
+runtime and supervisor; abort now closes resources without joining under its
+own lock.28 focused GREEN; final575 app,14 root spec and13 harness tests GREEN.
+No skips/xfail or weaker assertions. Own SQLite abort triggers, stored source
+cutoffs, real threads, frozen-prefix/reopen SQL and synthetic REST/WSS establish
+these mechanics; no real keys or network calls. Full Harness remains FAIL TH-11
+for the historical replay hash. No full-market rerun or earnings claim. Next:
+automatic protocol-control capture and retained archive/export lifecycle;
+market latency and account/ownership qualification still precede execution.

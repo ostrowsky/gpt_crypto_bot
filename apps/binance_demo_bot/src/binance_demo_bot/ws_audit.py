@@ -138,3 +138,9 @@ def receipt_of(transport,clock):
     if isinstance(transport,AuditedWsTransport) and transport.last_receipt is not None:
         return dict(transport.last_receipt)
     return dict(event_id=None,wall_ms=clock.wall_ms(),monotonic_ns=clock.monotonic_ns())
+
+
+def disposition(transport,identifier,outcome,*,if_healthy=False):
+    if not isinstance(transport,AuditedWsTransport) or not identifier:return
+    if if_healthy and transport.journal._state!='READY':return
+    return transport.processing([identifier],outcome=outcome)

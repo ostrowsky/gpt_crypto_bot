@@ -69,8 +69,12 @@ REST BEGIN/END, redaction, causal decision API, independent counts/crash gaps;
 27 focused /522 app GREEN. AUD-B1 добавил WSS application boundary: все явные
 calls/messages, исходные receipt clocks, redaction signature echoes, durable
 snapshot/private-record linkage и fail-closed cleanup;25 новых /547 app GREEN.
-Полный protocol-control/runtime audit и archives ещё не готовы. Следующий
-приоритет AUD-B2; он не заменяет latency/account gates.
+AUD-B2 добавляет coordinator/supervisor decisions до side effects, causal
+source refs, independent gap counts и frozen processing reports;28 новых /575
+app GREEN. Сохранены неизвестные результаты и исходные ошибки, исправлен
+cleanup при блокировке coordinator thread на собственном lock. Protocol controls,
+future OMS/policy audit и archives ещё не готовы. Следующий приоритет —
+protocol/retention/export; далее latency/account gates перед исполнением.
 P2B2-12: common bounded writer/coalesced FULL commits/durable ACK, independent
 group guards/failures, no blind retry при unknown commit и owned lifecycle.
 24 new после RED,495 GREEN; исходные receipts/FULL/250ms сохранены.
