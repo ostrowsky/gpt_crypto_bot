@@ -217,3 +217,16 @@ reproduced1 failure before repair. Final24 new/495 app GREEN (51.694s full),
 no skips/xfail or weakened assertions. Native SQL/abort triggers and foreign
 readers verify persistence; scheduling gates only arrange arrivals. Failed
 pre-repair clock probe cleanup cannot make its assertions pass. No keys/network.
+
+AUD-A (2026-10-26): specification first,18 missing-interface RED ->18 GREEN;
+six boundaries then RED with1 failure/2 errors, three preserving cases GREEN;
+counter-basis field RED plus already-passing actual OS-exit recovery, then
+encoded sensitive-key leak RED before repair. Final27 focused /522 app GREEN.
+App-owned fixtures, native SQLite, foreign readonly connections and abort
+triggers verify durable intent/terminal, sticky failures, bounded admission,
+unknown commits, redaction, exact public bytes, private omission, causal
+WAIT/NO_ACTION and frozen paginated manifests. No skip/xfail, relaxed assertions,
+real credential read or network. Default sandbox temp/junction restrictions
+are tooling failures, not accepted RED/GREEN; the full successful run used
+permissions for the existing own-fixture junction test. Root14 spec +13 harness
+tests pass; complete runtime audit and financial/latency gates remain separate.

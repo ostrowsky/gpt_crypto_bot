@@ -15,6 +15,7 @@ import json
 import re
 import ssl
 import time
+import uuid
 import zlib
 from urllib.parse import urlencode, urlsplit
 
@@ -314,7 +315,7 @@ def _signed_read(operation):
 
 class DemoReadClient:
     """Credential-free GET engine, optionally shared by the private adapter."""
-    def __init__(self, *, transport=None, clock=None, enabled=True, sleep=None):
+    def __init__(self, *, transport=None, clock=None, enabled=True, sleep=None, audit=None):
         if type(enabled) is not bool:
             raise AdapterError("INVALID_PARAMETERS")
         self._credentials = None
@@ -327,6 +328,60 @@ class DemoReadClient:
         self._reservations = deque()
         self._shared_weight = 0
         self._shared_weight_expires_ns = 0
+        if audit is not None:
+            from .interaction_audit import AuditJournal
+            if not isinstance(audit, AuditJournal):
+                raise AdapterError('AUDIT_IDENTITY_MISMATCH')
+        self.audit = audit
+        self._transport_counts = dict(attempted_n=0,responses_n=0,errors_n=0)
+
+    def audit_health(self):
+        result = (self.audit.health() if self.audit is not None else
+                  dict(state='UNCONFIGURED',full_audit_complete=False))
+        return dict(result,transport=dict(self._transport_counts))
+
+    def _transport_attempt(self, path, query, headers, params, signed, deadline, request_id, attempt):
+        """Intent ACK before send; receipt captured before terminal audit latency."""
+        audit, parent, terminal = self.audit, None, None
+        attempt_id = uuid.uuid4().hex
+        secrets = (() if self._credentials is None else
+                   (self._credentials.api_key,self._credentials.api_secret))
+        if audit is not None:
+            parent = audit.append('REST_BEGIN',dict(request_id=request_id,attempt_id=attempt_id,
+                attempt_number=attempt+1,method='GET',endpoint=path,parameters=params,private=signed),
+                wall_ms=self.clock.wall_ms(),monotonic_ns=self.clock.monotonic_ns(),secrets=secrets)
+        response, error = None, None
+        wall, mono = self.clock.wall_ms(), self.clock.monotonic_ns()
+        sent = False
+        try:
+            available = (deadline-mono)/1_000_000_000
+            if available<=0:raise AdapterError('READ_UNAVAILABLE')
+            self._transport_counts['attempted_n']+=1
+            sent=True
+            response=self.transport.request('GET',path,query,headers,min(15,available))
+            self._transport_counts['responses_n']+=1
+        except BaseException as caught:
+            error=caught
+            if sent:self._transport_counts['errors_n']+=1
+            raise
+        finally:
+            received_wall, received_mono = self.clock.wall_ms(), self.clock.monotonic_ns()
+            if audit is not None:
+                from .interaction_audit import response_payload, rate_headers
+                valid=isinstance(response,HttpResponse)
+                outcome=('RESPONSE' if error is None else 'TIMEOUT' if isinstance(error,(TimeoutError,OSError))
+                         else 'CANCELLED' if isinstance(error,(KeyboardInterrupt,SystemExit)) or not sent
+                         else 'TRANSPORT_ERROR')
+                terminal = audit.append('REST_END',dict(request_id=request_id,attempt_id=attempt_id,parent_event_id=parent,
+                    outcome=outcome,method='GET',endpoint=path,private=signed,
+                    status=response.status if valid and type(response.status) is int else None,
+                    headers=rate_headers(response.headers) if valid else {},
+                    sent_at_ms=wall if sent else None,sent_monotonic_ns=mono if sent else None,
+                    received_at_ms=received_wall,received_monotonic_ns=received_mono,
+                    latency_ns=received_mono-mono if sent and received_mono>=mono else None,
+                    payload=response_payload(response.body,private=signed,secrets=secrets) if valid else None),
+                    wall_ms=received_wall,monotonic_ns=received_mono,secrets=secrets)
+        return response,wall,mono,received_wall,received_mono,attempt_id,parent,terminal
 
     def request_public(self, path, parameters, *, weight):
         if path not in PUBLIC_PATHS:
@@ -365,6 +420,7 @@ class DemoReadClient:
 
     def _request(self, path, parameters, *, signed, weight, deadline_ns=None):
         started = self.clock.monotonic_ns()
+        request_id = uuid.uuid4().hex
         deadline = deadline_ns or started + 15_000_000_000
         resynced = False
         for attempt in range(3):
@@ -396,10 +452,13 @@ class DemoReadClient:
             if available <= 0:
                 raise AdapterError("READ_UNAVAILABLE")
             try:
-                response = self.transport.request("GET", path, query, headers, min(15, available))
+                response,request_wall,request_mono,received_wall,received_mono,attempt_id,audit_parent,audit_end = self._transport_attempt(
+                    path,query,headers,params,signed,deadline,request_id,attempt)
             except (TimeoutError, OSError):
                 response = None
             except AdapterError as error:
+                if error.reason.startswith('AUDIT_') or error.reason=='READ_UNAVAILABLE':
+                    raise
                 if error.reason in ("REDIRECT_BLOCKED", "RESPONSE_TOO_LARGE", "FORBIDDEN_ENDPOINT", "INVALID_PARAMETERS"):
                     raise
                 if error.reason == "TRANSPORT_UNAVAILABLE":
@@ -408,7 +467,8 @@ class DemoReadClient:
                     raise AdapterError("TRANSPORT_FAILURE") from None
             except Exception:
                 raise AdapterError("TRANSPORT_FAILURE") from None
-            received_wall, received_mono = self.clock.wall_ms(), self.clock.monotonic_ns()
+            if response is None:
+                received_wall, received_mono = self.clock.wall_ms(), self.clock.monotonic_ns()
             if received_mono > deadline or received_mono < request_mono:
                 raise AdapterError("READ_UNAVAILABLE")
             if response is not None:
@@ -453,6 +513,8 @@ class DemoReadClient:
                     if response.status != 200 or (type(code) is int and code < 0):
                         raise AdapterError("API_REJECTED")
                     return data, dict({"raw_body_sha256": hashlib.sha256(response.body).hexdigest()} if not signed else {},
+                                      **(dict(audit_request_id=request_id,audit_attempt_id=attempt_id,
+                                              audit_begin_event_id=audit_parent,audit_end_event_id=audit_end) if self.audit is not None else {}),
                                       source_endpoint=path, request_started_at_ms=request_wall,
                                       received_at_ms=received_wall, received_monotonic_ns=received_mono,
                                       request_started_monotonic_ns=request_mono)
@@ -485,7 +547,7 @@ class DemoReadClient:
 
 class BinanceDemoAdapter(DemoReadClient):
     def __init__(self, credentials, *, account_alias, credential_generation, episode_id,
-                 scope_id, identity_key, transport=None, clock=None, enabled=True, sleep=None):
+                 scope_id, identity_key, transport=None, clock=None, enabled=True, sleep=None, audit=None):
         if not isinstance(credentials, DemoCredentials):
             raise AdapterError("INVALID_CREDENTIALS")
         for value in (credentials.api_key, credentials.api_secret):
@@ -506,7 +568,10 @@ class BinanceDemoAdapter(DemoReadClient):
                              objective_contract_id="daily_net_equity_pnl_v1", account_alias=account_alias,
                              credential_generation=credential_generation, account_episode_id=episode_id,
                              portfolio_scope_id=scope_id)
-        super().__init__(transport=transport, clock=clock, enabled=enabled, sleep=sleep)
+        super().__init__(transport=transport, clock=clock, enabled=enabled, sleep=sleep,audit=audit)
+        if audit is not None and any(audit.identity.get(k)!=self.identity[k]
+                for k in ('account_alias','account_episode_id','portfolio_scope_id')):
+            raise AdapterError('AUDIT_IDENTITY_MISMATCH')
         self._credentials = credentials
         self._cap_states = {}
 
