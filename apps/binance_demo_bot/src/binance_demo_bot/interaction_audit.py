@@ -1,7 +1,8 @@
-"""AUD-A: explicit app-local durable REST and decision evidence, never an OMS.
+"""AUD-A/B1: app-local durable interaction/decision evidence, never an OMS.
 
-WSS/automatic policy coverage is not provided by this slice. No credential
-discovery, arbitrary endpoint capture, async backlog or automatic log deletion.
+The ws_audit bridge supplies application-level WSS observations. Hidden protocol
+controls and automatic policy coverage remain incomplete. No credential discovery,
+arbitrary endpoint capture, async backlog or automatic log deletion.
 """
 import base64
 from collections import Counter
@@ -20,7 +21,7 @@ from .adapter import AdapterError
 from .isolation import AppPaths
 from .journal import _WriterLease
 
-KINDS = ('RUN_BEGIN', 'RUN_END', 'REST_BEGIN', 'REST_END', 'DECISION')
+KINDS = ('RUN_BEGIN', 'RUN_END', 'REST_BEGIN', 'REST_END', 'DECISION','WS_BEGIN','WS_END','WS_PROCESSING')
 MAX_EVENT_BYTES = 48*1024*1024
 SENSITIVE = re.compile(r'api[-_ ]?key|api[-_ ]?secret|signature|authorization|cookie|listen[-_ ]?key|access[-_ ]?token|password|secret|token', re.I)
 REDACTED = '[REDACTED]'
@@ -118,7 +119,7 @@ class AuditJournal:
             account_episode_id=episode_id,portfolio_scope_id=scope_id)
         package=Path(__file__).resolve().parent
         self.source_code_sha256=_sha({n:hashlib.sha256((package/n).read_bytes()).hexdigest()
-                                      for n in ('interaction_audit.py','adapter.py')})
+                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py')})
         self.path=paths.runtime_path(database)
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.max_bytes,self.fault_hook=max_bytes,fault_hook
@@ -149,6 +150,7 @@ class AuditJournal:
                 except BaseException:
                     self._con.rollback();raise
             self._verify()
+            self._con.execute("CREATE INDEX IF NOT EXISTS audit_ws_operation ON records(kind,json_extract(payload_json,'$.data.operation_id'))")
             self.append('RUN_BEGIN',dict(scope='REST_ATTEMPTS_AND_EXPLICIT_DECISIONS'))
         except BaseException:
             self._state='FAILED'
@@ -264,8 +266,9 @@ class AuditJournal:
         with self._lock:
             if not self._closed:
                 unresolved=self._con.execute("SELECT COUNT(*) FROM records b WHERE b.kind='REST_BEGIN' AND NOT EXISTS (SELECT 1 FROM records e WHERE e.kind='REST_END' AND json_extract(e.payload_json,'$.data.attempt_id')=json_extract(b.payload_json,'$.data.attempt_id'))").fetchone()[0]
+                unresolved_ws=self._con.execute("SELECT COUNT(*) FROM records b WHERE b.kind='WS_BEGIN' AND NOT EXISTS (SELECT 1 FROM records e WHERE e.kind='WS_END' AND json_extract(e.payload_json,'$.data.operation_id')=json_extract(b.payload_json,'$.data.operation_id'))").fetchone()[0]
                 incomplete=self._con.execute("SELECT COUNT(*) FROM records b WHERE b.kind='RUN_BEGIN' AND json_extract(b.payload_json,'$.run_id')!=? AND NOT EXISTS (SELECT 1 FROM records e WHERE e.kind='RUN_END' AND json_extract(e.payload_json,'$.run_id')=json_extract(b.payload_json,'$.run_id'))",(self.run_id,)).fetchone()[0]
-                self._last_gaps=dict(unresolved_attempts_n=unresolved,incomplete_prior_runs_n=incomplete)
+                self._last_gaps=dict(unresolved_attempts_n=unresolved,unresolved_ws_operations_n=unresolved_ws,incomplete_prior_runs_n=incomplete)
             value.update(getattr(self,'_last_gaps',dict(unresolved_attempts_n=None,incomplete_prior_runs_n=None)))
         return value
 

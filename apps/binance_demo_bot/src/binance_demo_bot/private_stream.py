@@ -13,6 +13,8 @@ import uuid
 from websockets.sync.client import connect as ws_connect
 
 from .adapter import AdapterError, BinanceDemoAdapter, _value, _integer, _text, _json, _money
+from .ws_audit import AuditedWsTransport, bind_ws_audit, receipt_of
+from .market_delivery import WirePacket
 from .account_evidence import AccountEvidenceStore, INCIDENTS
 
 
@@ -131,6 +133,8 @@ class PrivateEventReader:
             raise AdapterError("INVALID_PARAMETERS")
         self.adapter, self.store = adapter, store
         self.transport = transport or DemoWsTransport()
+        self.transport = bind_ws_audit(self.transport,adapter.audit,adapter.clock,store.identity,
+            private=True,credentials=lambda:adapter._credentials)
         self.process_id, self.background = process_instance_id, background
         self.session_id, self.subscription_id = None, None
         self._connected, self._last_pong_ns = False, None
@@ -143,22 +147,29 @@ class PrivateEventReader:
 
     def _receive(self, timeout):
         value = self.transport.recv(timeout)
-        wall, mono = self.adapter.clock.wall_ms(), self.adapter.clock.monotonic_ns()
+        receipt=receipt_of(self.transport,self.adapter.clock)
+        wall, mono = receipt['wall_ms'],receipt['monotonic_ns']
         if isinstance(value, str):
             value = value.encode("utf-8")
         if not isinstance(value, bytes) or len(value) > WS_LIMIT:
             raise AdapterError("WS_BUFFER_OVERFLOW")
-        return _json(value), wall, mono
+        payload=_json(value)
+        if isinstance(payload,dict):
+            payload=WirePacket(payload,value)
+            payload.audit_event_id=receipt['event_id']
+        return payload, wall, mono
 
     def _fail(self, reason):
-        safe_reason = reason if reason in INCIDENTS else "WS_PROTOCOL_ERROR"
+        safe_reason = reason if reason.startswith('AUDIT_') or reason in INCIDENTS else "WS_PROTOCOL_ERROR"
         self._error, self._connected = safe_reason, False
         self._stop.set()
         try:
             self.transport.close()
         except Exception:
             pass
-        self.store.record_incident(safe_reason)
+        # Evidence store keeps its established incident vocabulary. The precise
+        # audit failure remains in reader/transport health and journal gaps.
+        self.store.record_incident('STREAM_GAP' if safe_reason.startswith('AUDIT_') else safe_reason)
 
     def _observe_limits(self, data):
         for limit in data.get("rateLimits", []):
@@ -230,7 +241,7 @@ class PrivateEventReader:
             return self.health()
         except AdapterError as error:
             self._fail(error.reason)
-            safe = error.reason if error.reason in INCIDENTS | {
+            safe = error.reason if error.reason.startswith('AUDIT_') or error.reason in INCIDENTS | {
                 "ADAPTER_DISABLED", "AUTH_DENIED", "SIGNATURE_REJECTED", "CLOCK_UNSYNCED", "CLOCK_STALE",
                 "CLOCK_QUALITY", "CLOCK_JUMP", "READ_UNAVAILABLE", "API_REJECTED", "TIMESTAMP_REJECTED",
                 "LOCAL_RATE_BUDGET", "RATE_LIMITED", "IP_BANNED", "HANDSHAKE_TARGET_MISMATCH",
@@ -292,8 +303,13 @@ class PrivateEventReader:
             raise AdapterError("UNMAPPED_SUBSCRIPTION")
         try:
             event = self._normalize(data["event"])
-            return self.store.record_event(self.session_id, self.subscription_id, event,
+            seq = self.store.record_event(self.session_id, self.subscription_id, event,
                         received_at_ms=wall, received_monotonic_ns=mono, process_instance_id=self.process_id)
+            receipt=getattr(data,'audit_event_id',None)
+            if receipt and isinstance(self.transport,AuditedWsTransport):
+                self.transport.processing([receipt],normalized_record_seq=seq,store_identity=self.store.identity,
+                    database=self.store.path.name)
+            return seq
         except (KeyError, TypeError, ValueError, ArithmeticError):
             raise AdapterError("SCHEMA_INVALID") from None
 
@@ -306,7 +322,7 @@ class PrivateEventReader:
             return None
         except AdapterError as error:
             self._fail(error.reason)
-            safe = error.reason if error.reason in INCIDENTS else "WS_PROTOCOL_ERROR"
+            safe = error.reason if error.reason.startswith('AUDIT_') or error.reason in INCIDENTS else "WS_PROTOCOL_ERROR"
             raise AdapterError(safe) from None
         except Exception:
             self._fail("WS_UNAVAILABLE")
@@ -317,9 +333,10 @@ class PrivateEventReader:
             if not self._connected or not self.transport.ping(5):
                 raise AdapterError("WS_HEARTBEAT_FAILED")
             self._last_pong_ns = self.adapter.clock.monotonic_ns()
-        except Exception:
-            self._fail("WS_HEARTBEAT_FAILED")
-            raise AdapterError("WS_HEARTBEAT_FAILED") from None
+        except Exception as error:
+            reason=error.reason if isinstance(error,AdapterError) and error.reason.startswith('AUDIT_') else 'WS_HEARTBEAT_FAILED'
+            self._fail(reason)
+            raise AdapterError(reason) from None
 
     def _run(self):
         while not self._stop.is_set():
@@ -337,6 +354,7 @@ class PrivateEventReader:
         return dict(connected=self._connected, transport_healthy=self._connected and age is not None and 0 <= age <= 30_000_000_000,
                     private_events_certified=False, exchange_reconciled=False, order_send_enabled=False,
                     session_id=self.session_id, subscription_id=self.subscription_id, error_reason=self._error,
+                    audit=self.transport.health() if isinstance(self.transport,AuditedWsTransport) else dict(state='UNCONFIGURED',full_audit_complete=False),
                     reader_alive=self._thread is not None and self._thread.is_alive())
 
     def close(self):

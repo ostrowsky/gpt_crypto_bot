@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **522 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **547 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -72,6 +72,7 @@ Verified: **522 tests GREEN**, including 56 REST, 69 private/evidence cases,
 10 owned TLS reuse/verification/failure cases,
 24 common writer/durable ACK/backpressure/uncertainty/lifecycle cases,
 27 REST/decision audit/redaction/crash/coverage cases,
+25 WSS audit/receipt/linkage/failure cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -346,7 +347,8 @@ Full [Binance interaction/decision audit](../../docs/specs/binance-demo-interact
 requires all REST/WSS attempts/errors and decisions, correlation, redaction,
 completeness and decision->fill->daily net PnL analysis. AUD-A now implements
 explicit opt-in durable REST attempts and a causal decision-recording API.
-WSS/all-runtime decisions and archive integration remain required before
+AUD-B1 adds automatic WSS application capture for readers sharing that journal.
+Protocol-level controls/all-runtime decisions and archive integration remain required before
 autonomous execution/learning; snapshots/incidents do not constitute full audit.
 P2B2-12 public trial1791744230720272600:47.555206s, startup6/6 then0/6;
 final0/6 connected,REST quotes1375/1375,history18/1375 — FAIL. Writer accepted/
@@ -394,3 +396,21 @@ Health keeps process expected/ACKed/gap counts and persistent crash unknowns
 separate. `full_audit_complete` is always false at this stage. A client with no
 explicit journal exposes UNCONFIGURED and cannot qualify autonomous operation.
 No sustained-latency, account certification or PnL result follows from these tests.
+
+AUD-B1: a journal on the wrapped `DemoReadClient` or private adapter is also
+bound to the readers' default/injected WebSocket transport, after checking its
+store namespace. CONNECT/SEND/RECV/PING/CLOSE each get correlated durable
+BEGIN/END and independent physical-call counters. Open candles, malformed
+messages, subscribe ACKs, timeouts and negative Pong results are retained.
+Public message bytes are exact when safe; private messages and signed subscribe
+requests are sanitized, including a later text echo of the generated signature.
+Receipt clocks are captured before audit writes and reused by normalization and
+the unchanged250ms guard. A slow audit write can therefore invalidate a session.
+Processing records link raw receipt IDs to confirmed snapshot IDs or private
+evidence record sequence/namespace. Raw and normalized databases have separate
+commits: missing processing markers remain unknown; no cross-database atomicity
+is claimed. Journal failure closes and invalidates the reader, including after
+normalized commit. Reader health exposes audit state/counters without payloads.
+`protocol_controls_observed=False`: automatic low-level control frames consumed
+inside the WebSocket library are outside this application boundary. Full audit,
+all operational decisions and archives remain required before autonomy.

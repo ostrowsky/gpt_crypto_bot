@@ -230,3 +230,17 @@ real credential read or network. Default sandbox temp/junction restrictions
 are tooling failures, not accepted RED/GREEN; the full successful run used
 permissions for the existing own-fixture junction test. Root14 spec +13 harness
 tests pass; complete runtime audit and financial/latency gates remain separate.
+
+AUD-B1:18 missing-module RED tests first; initial code found precise private
+audit failure replaced by INVALID_INCIDENT, repaired before18 GREEN. Added six
+boundaries: five preserving contracts already GREEN, private heartbeat reason
+RED; public timeout/heartbeat reason added a second RED reproduction. Final25
+focused /547 app GREEN (47.463s), root14 spec +13 harness tests PASS.
+Actual own SQLite triggers/reopen, synthetic public/private transport and
+original-clock delay injection cover raw/open/malformed/subscribe messages,
+signature echoes, bounded independent counters, startup/closed-candle/private
+fill linkage, failures before/after commit and physical close. No skips/xfail,
+weaker assertions, credentials discovery, real exchange calls or foreign worker
+control. Wire-level automatic controls, all runtime decisions and archive
+qualification are explicitly outside this completed slice; full Harness FAIL
+TH-11 remains separate from unit-test success.

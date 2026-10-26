@@ -66,8 +66,11 @@ streams0/6,REST quotes1375/1375,history14/1375 — FAIL.1 market TLS build
 correlation IDs, source clocks и версии, redaction secrets, completeness и
 decision->fill->daily net PnL. AUD-A (2026-10-26): explicit journal + durable
 REST BEGIN/END, redaction, causal decision API, independent counts/crash gaps;
-27 focused /522 app GREEN. Полный WSS/runtime audit и archive integration ещё
-не готовы. Следующий приоритет AUD-B; он не заменяет latency/account gates.
+27 focused /522 app GREEN. AUD-B1 добавил WSS application boundary: все явные
+calls/messages, исходные receipt clocks, redaction signature echoes, durable
+snapshot/private-record linkage и fail-closed cleanup;25 новых /547 app GREEN.
+Полный protocol-control/runtime audit и archives ещё не готовы. Следующий
+приоритет AUD-B2; он не заменяет latency/account gates.
 P2B2-12: common bounded writer/coalesced FULL commits/durable ACK, independent
 group guards/failures, no blind retry при unknown commit и owned lifecycle.
 24 new после RED,495 GREEN; исходные receipts/FULL/250ms сохранены.

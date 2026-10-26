@@ -18,6 +18,7 @@ from .adapter import AdapterError, _integer, _money, _sha, _json
 from .journal import _digest
 from .market_data import MarketDataService, _symbol
 from .market_delivery import DeliveryMetrics, WirePacket, lag_evidence
+from .ws_audit import AuditedWsTransport, bind_ws_audit, receipt_of
 
 WS_URL = "wss://demo-stream.binance.com/stream"
 WS_LIMIT = 1024*1024
@@ -344,6 +345,8 @@ class MarketStreamReader:
         self.topic_symbols = mapped
         self.members = {r["symbol"]:r for r in self.universe["data"]["rows"]}
         self.transport, self.background = transport or DemoMarketWsTransport(),background
+        self.transport = bind_ws_audit(self.transport,getattr(client.client,'audit',None),self.clock,store.identity)
+        self._audit_snapshot_ids = None
         self.books = {mapped[t]:IncrementalBook(mapped[t],self.clock) for t in selected if t.endswith("@depth@100ms")}
         self.quote_symbols = {mapped[t] for t in selected if t.endswith("@bookTicker")}
         self._lock = threading.RLock()
@@ -361,10 +364,22 @@ class MarketStreamReader:
         self.started_ns = self.last_ping_ns = None
 
     def _save(self, kind, data, wall=None, mono=None, extra=()):
-        return (self._pending_store or self.store).append(kind, dict(data, session_id=self.session_id),
+        result = (self._pending_store or self.store).append(kind, dict(data, session_id=self.session_id),
             received_at_ms=self.clock.wall_ms() if wall is None else wall,
             received_monotonic_ns=self.clock.monotonic_ns() if mono is None else mono,
             dependencies=[self.universe["snapshot_id"],*extra])
+        if self._audit_snapshot_ids is not None:self._audit_snapshot_ids.append(result['snapshot_id'])
+        return result
+
+    def _audit_processing(self,frames,pending=None,*,outcome='PROCESSED'):
+        if not isinstance(self.transport,AuditedWsTransport):return
+        receipts=[getattr(frame[0],'audit_event_id',None) for frame in frames]
+        receipts=[identifier for identifier in receipts if identifier is not None]
+        confirmed=pending is not None and pending.timing['state']=='COMMITTED'
+        identifiers=list(pending.values) if confirmed else self._audit_snapshot_ids or []
+        if outcome=='REJECTED' and not confirmed:identifiers=[]
+        return self.transport.processing(receipts,snapshot_ids=identifiers,outcome=outcome,
+            store_identity=self.store.identity,session_id=self.session_id)
 
     def _invalidate_quotes(self, reason):
         rows = [dict(symbol=s,state="QUOTE_INVALID",quote=None,reasons=[reason]) for s in sorted(self.quote_symbols)]
@@ -375,7 +390,7 @@ class MarketStreamReader:
             self._save("QUOTES", dict(rows=rows, source="DEMO_COMBINED_STREAM"))
 
     def _fail(self, reason, *, evidence=None):
-        safe = reason if reason in WRITER_FAILURES or reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED","CANDLE_SOURCE_CHANGED"} else "WS_PROTOCOL_ERROR"
+        safe = reason if reason.startswith('AUDIT_') or reason in WRITER_FAILURES or reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED","CANDLE_SOURCE_CHANGED"} else "WS_PROTOCOL_ERROR"
         with self._lock:
             self.error, self.connected = safe,False
             self._quotes.clear()
@@ -412,12 +427,16 @@ class MarketStreamReader:
 
     def _receive(self, timeout=1):
         wire = self.transport.recv(timeout)
-        wall, mono = self.clock.wall_ms(),self.clock.monotonic_ns()
+        receipt = receipt_of(self.transport,self.clock)
+        wall, mono = receipt['wall_ms'],receipt['monotonic_ns']
         value = wire.encode() if isinstance(wire,str) else wire
         if not isinstance(value,bytes) or len(value) > WS_LIMIT:
             raise AdapterError("WS_BUFFER_OVERFLOW")
         payload = _json(value)
-        return (WirePacket(payload, value) if isinstance(payload, dict) else payload),wall,mono
+        if isinstance(payload,dict):
+            payload=WirePacket(payload,value)
+            payload.audit_event_id=receipt['event_id']
+        return payload,wall,mono
 
     def start(self):
         with self._lock:
@@ -456,7 +475,11 @@ class MarketStreamReader:
                 self.connected = True
                 self.started_ns = self.last_ping_ns = self.clock.monotonic_ns()
                 for payload,wall,mono in buffered:
-                    self._process(payload,wall,mono)
+                    self._audit_snapshot_ids=[]
+                    try:
+                        self._process(payload,wall,mono)
+                        self._audit_processing([(payload,wall,mono)])
+                    finally:self._audit_snapshot_ids=None
                 if self.background:
                     self._thread = threading.Thread(target=self._run,name="binance-demo-market-reader",daemon=True)
                     self._thread.start()
@@ -521,6 +544,7 @@ class MarketStreamReader:
                 self.open_candle_packets_n += 1
             else:
                 self.closed_candle_packets_n += 1
+                if self._audit_snapshot_ids is not None:self._audit_snapshot_ids.append(result['snapshot_id'])
         else:
             book = self.books[symbol]
             view = book.on_diff(wire,received_at_ms=wall,received_monotonic_ns=mono)
@@ -547,6 +571,7 @@ class MarketStreamReader:
             return False
         pending = None
         noted = False
+        audit_noted = False
         frames = []
         collected = acquired = None
         try:
@@ -577,6 +602,8 @@ class MarketStreamReader:
                                 self._process(payload,wall,mono)
                     finally:
                         self._pending_store = None
+                    audit_noted=True
+                    self._audit_processing(frames,pending)
                     finished = self.clock.monotonic_ns()
                     elapsed = finished-min(frame[2] for frame in frames)
                     reason = None if 0 <= elapsed <= 250_000_000 else "WS_PROCESSING_LAG"
@@ -596,14 +623,19 @@ class MarketStreamReader:
                     if not self.transport.ping(5):
                         raise AdapterError("WS_HEARTBEAT_FAILED")
                     self.last_ping_ns = self.clock.monotonic_ns()
-                except Exception:
-                    self._fail("WS_HEARTBEAT_FAILED")
+                except Exception as error:
+                    reason=error.reason if isinstance(error,AdapterError) and error.reason.startswith('AUDIT_') else 'WS_HEARTBEAT_FAILED'
+                    self._fail(reason)
             return False
         except Exception as error:
             if pending is not None and pending.conflict_symbol:
                 self._failed_candle_symbol = pending.conflict_symbol
                 self._failed_candle_reason = "CANDLE_SOURCE_CHANGED"
             reason = error.reason if isinstance(error,AdapterError) else "WS_PROTOCOL_ERROR"
+            if frames and not audit_noted:
+                audit_noted=True
+                try:self._audit_processing(frames,pending,outcome='REJECTED')
+                except AdapterError as audit_error:reason=audit_error.reason
             with self._lock:
                 evidence = None
                 if frames and not noted:
@@ -656,6 +688,7 @@ class MarketStreamReader:
                         processing_lag_p95_ms=sorted(self.processing_lags)[max(0,(len(self.processing_lags)*95+99)//100-1)] if self.processing_lags else None,
                         processing_lag_max_ms=max(self.processing_lags) if self.processing_lags else None,
                         latency=self._delivery.health(),
+                        audit=self.transport.health() if isinstance(self.transport,AuditedWsTransport) else dict(state='UNCONFIGURED',full_audit_complete=False),
                         invalidation_state=self.invalidation_state,
                         order_send_enabled=False,account_certified=False)
 

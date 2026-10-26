@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
-Дата: 2026-10-11, обновлено 2026-10-26. Статус: **AUD-A implemented;
-27 focused / 522 app GREEN; full interaction audit incomplete**.
+Дата: 2026-10-11, обновлено 2026-10-26. Статус: **AUD-A + AUD-B1 implemented;
+52 audit focused / 547 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -162,3 +162,76 @@ remains **FAIL TH-11**: canonical portfolio evidence references an old
 No full-market speedup, current private permission or financial improvement is
 claimed. Next: AUD-B WSS/control/raw-invalid/open-candle capture and causal
 snapshot linkage, operational-decision integration, then archive/export policy.
+
+## AUD-B1: WSS application-boundary capture (2026-10-26)
+
+Implemented after spec-first tests. Explicit journal on the shared REST client also
+enables public market and private readers; no journal means UNCONFIGURED.
+Identity must match the reader's snapshot/evidence store before connect. No
+changes to financial kernel, trade policy, FULL/250ms guards or order authority.
+Rollback: omit journal only for diagnostic read-only libraries; no autonomous
+qualification. Full audit remains incomplete until protocol-level controls,
+all runtime operational decisions and retained archives are implemented.
+
+- B01: own `AuditedWsTransport` wraps default and injected application transports.
+  Every connect/send/recv/ping/close attempt gets durable WS_BEGIN and WS_END,
+  correlation/operation/connection IDs, operation sequence, actual clocks and
+  fixed safe outcome. No third-party exception text. Failed connect, timeout,
+  malformed/open/duplicate messages, rejected subscribe ACK and false Pong are
+  retained; no sampling. Each reconnect gets a new connection ID. Health counts
+  physical calls/results/errors/frames independently of durable journal ACKs.
+- B02: raw public application-message bytes (<=1MiB) are exact when safe; private
+  messages are sanitized/omitted. Signed subscribe auth is redacted, including
+  its signature echoed in later text. Safe normalized subscription method is
+  explicit; no credentials are loaded by public readers. Automatic wire-level
+  ping/pong/close control frames consumed inside websockets are NOT observed by
+  this boundary: `protocol_controls_observed=False`, never full coverage.
+- B03: capture original receipt wall/mono immediately after physical recv and
+  before journal serialization/commit. Reader normalization and latency guards
+  use that original receipt, including startup buffered events. Disk delay may
+  invalidate a session; timestamps must not be moved forward to conceal it.
+- B04: no connect/send/recv/ping after audit intent failure. A terminal journal
+  failure closes/invalidate reader and never returns successful normalized data.
+  Physical close is always attempted even if audit is broken; repeated close is
+  idempotent, cleanup errors are safe and health/gaps stay visible. WS_BEGIN
+  without WS_END after crash is an unresolved WSS operation, not a successful
+  connection. Disk/queue limits and unknown commit remain sticky.
+- B05: audit processing records reference raw receipt IDs and confirmed market
+  snapshot IDs after the prepared group's durable ACK, or the private evidence
+  store namespace/database/record sequence after its ACK. Open candles may have
+  no snapshots; raw evidence still exists. Public startup buffered frames also
+  get linkage. Snapshot failure has no fabricated confirmed IDs. Distinct WAL
+  databases are NOT one transaction: raw receipt survives a derived failure;
+  missing processing marker after crash is UNKNOWN, not processed. Post-commit
+  audit failure invalidates the session even when normalized rows already exist.
+- B06: health exposes bounded detached counters, audit state and explicit scope;
+  source-code hash includes the audit bridge and both readers. ACK evidence does
+  not certify private permissions, exchange reconciliation, all-market latency,
+  archive completeness or PnL. No production service starts in these tests.
+
+Acceptance: real journal and store commits with synthetic public/private
+transports; malformed/open/raw/ACK capture, secret echo and nested redaction,
+original clocks under commit delay, connection lifecycle and failed heartbeat,
+intent/terminal/processing abort triggers, foreign identity, independent n/N,
+durable linkage/failed snapshot and unresolved WSS at restart. SPEC -> tests
+RED -> implementation -> focused/full GREEN -> staged Truth Harness -> commit/push.
+
+### AUD-B1 verification
+
+18 new intended missing-interface RED cases preceded implementation. First
+implementation run exposed private audit failure being replaced by
+INVALID_INCIDENT; repair keeps precise audit reason in health and records a
+STREAM_GAP in the established private-evidence vocabulary.18 then GREEN.
+Six added boundaries: startup/closed-candle linkage, persistent WSS unknowns,
+private receipt clocks and committed-fill survival already GREEN; heartbeat
+audit reason was RED. Public timeout/heartbeat added a second RED reproduction.
+Both now retain the original audit failure. Final25 new /547 app GREEN,
+47.463s final full suite; root14 spec +13 harness tests PASS. No skip/xfail,
+weakened assertions, real keys, exchange requests or production processes.
+Actual SQLite aborts/foreign file reads/reopen verify durability. Distinct WAL
+journals are not claimed atomic, and a durable fill can survive a failed
+processing marker while the reader correctly stops. Mandatory full Harness
+remains FAIL TH-11 (old replay source hash); no policy relaxation or financial
+claim. No new full-market latency trial; previous FAIL remains authoritative.
+Next AUD-B2: wire-level control observation, runtime-wide decisions and
+completeness/processing-gap analysis; archive/retention integration remains open.
