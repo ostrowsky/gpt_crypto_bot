@@ -9,6 +9,9 @@ Depends on: [P0 money](binance-demo-phase0-financial-contract.md),
 [P2 data](binance-demo-phase2-universe-market-data.md),
 [P3 OMS](binance-demo-phase3-order-management-risk.md).
 Ledger capture внедряется до первой демо-сделки, хотя полный отчёт — фаза 5.
+Все взаимодействия Binance и решения обязательны по
+[контракту полного аудита](binance-demo-interaction-decision-audit.md),
+включая retries/errors/no-action и причинную связь с daily net PnL.
 
 ## Problem
 

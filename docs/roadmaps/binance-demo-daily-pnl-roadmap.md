@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 471 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 495 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
@@ -61,6 +61,16 @@ reuse при reconnect, unsafe/mutated context refusal;10 new после RED,
 Trial1791741563868852000:startup6/6, после tick0/6; final48.0524598s,
 streams0/6,REST quotes1375/1375,history14/1375 — FAIL.1 market TLS build
 подтверждён; следующий gate — scheduling/serialization/writer handoffs.
+После P2B2-12 writer: [полный аудит взаимодействий и решений](../specs/binance-demo-interaction-decision-audit.md),
+обязательный до execution/learning: все attempts/errors/WS/no-action,
+correlation IDs, source clocks и версии, redaction secrets, completeness и
+decision->fill->daily net PnL. Сейчас SPECIFIED; реализация не объявляется готовой.
+P2B2-12: common bounded writer/coalesced FULL commits/durable ACK, independent
+group guards/failures, no blind retry при unknown commit и owned lifecycle.
+24 new после RED,495 GREEN; исходные receipts/FULL/250ms сохранены.
+Trial1791744230720272600:47.555206s,streams0/6,REST1375/1375,history18/1375
+— FAIL. Writer1914 groups/1166 commit ACKs,zero failures; полный аудит next,
+latency qualification отдельно. Автономное исполнение остаётся выключенным.
 Реализация — **самостоятельное приложение `apps/binance_demo_bot`**, со своими
 package, зависимостями, `.env`, ledger, runtime, UI и запуском. Текущий бот
 не дорабатывается и не подключается к новому контуру.

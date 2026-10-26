@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **471 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **495 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -70,6 +70,7 @@ Verified: **471 tests GREEN**, including 56 REST, 69 private/evidence cases,
 17 durable delivery/evidence/failure cases,
 10 preparation read-prefix/handoff/lease cases,
 10 owned TLS reuse/verification/failure cases,
+24 common writer/durable ACK/backpressure/uncertainty/lifecycle cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -323,3 +324,29 @@ logging guards, actual receipts, FULL and250ms remain.10 new tests after RED,
 Public trial1791741563868852000:1 REST plus1 market TLS build, startup6/6
 connected, first post-tick0/6; final48.0524598s,0/6 connected,REST quotes1375/1375,
 history14/1375 — FAIL. TLS reuse works; sustained stream latency remains open.
+
+P2B2-12 adds a store-owned common writer for prepared groups and standalone
+appends (explicit owner transactions remain direct under the same FIFO lock).
+The runtime starts it before metadata/streams and drains it after producers.
+Queue+active work is capped at8 groups/64MiB, each request at256 rows. Collect
+nominally <=2ms after writer acquisition, <=64 rows/4MiB per common transaction;
+a larger head runs alone, SQL chunks <=64 rows. Guard-free groups bulk insert
+and share FULL commit. Guarded groups isolate candle conflicts with savepoints;
+confirmed pre-commit constraint rollback allows one bounded isolation fallback.
+ACK follows commit. Commit uncertainty stops the service, returns no success
+and never silently retries. Already ACKed fallback commits retain their outcome.
+Health counters/limits are detached and payload-free. Overflow/failure keeps
+the session invalid and its original raw evidence; uncertain commit is null
+with candidate IDs. Runtime `group_writer_enabled=False` rolls back on a fresh
+store; stopped/failed services are never bypassed. FULL/250ms stay unchanged.
+24 new tests followed RED,495 app GREEN; full-market readiness remains separate.
+
+Full [Binance interaction/decision audit](../../docs/specs/binance-demo-interaction-decision-audit.md)
+is specified for all REST/WSS attempts/errors and decisions, correlation,
+redaction, completeness and decision->fill->daily net PnL analysis. It is the
+next implementation priority, required before autonomous execution/learning;
+current snapshots/incidents do not yet constitute this complete audit.
+P2B2-12 public trial1791744230720272600:47.555206s, startup6/6 then0/6;
+final0/6 connected,REST quotes1375/1375,history18/1375 — FAIL. Writer accepted/
+committed1914 groups in1166 commit ACKs,zero rejected/failed/unconfirmed/pending.
+Coalescing works; last failed groups still took269.6732..453.4159ms.

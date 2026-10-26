@@ -36,6 +36,8 @@ class DeliveryMetrics:
         timing = pending.timing if pending else {}
         first = min(frame[2] for frame in frames)
         group = dict(frames_N=len(frames), source_snapshot_id=source_id, session_id=session_id,
+            writer_attempts_n=timing.get('writer_attempts_n'),coalesced_groups_N=timing.get('coalesced_groups_N'),
+            commit_unconfirmed=bool(timing.get('unconfirmed')),
             commit_state=timing.get("state", "NOT_STARTED"), failure_reason=reason,
             collection_ms=_duration(collected, first), reader_wait_ms=_duration(acquired, collected),
             prepare_ms=_duration(timing.get("prepare_end_ns"), timing.get("prepare_start_ns")),
@@ -63,8 +65,9 @@ class DeliveryMetrics:
             evidence_failures_n=self.evidence_failures, last_evidence_state=self.evidence_state)
 
 
-def lag_evidence(frames, pending, group):
-    committed = pending is not None and pending.timing["state"]=="COMMITTED"
+def lag_evidence(frames, pending, group, *, reason='WS_PROCESSING_LAG'):
+    unconfirmed=pending is not None and pending.timing.get('unconfirmed',False)
+    committed = None if unconfirmed else pending is not None and pending.timing["state"]=="COMMITTED"
     records = []
     for payload, wall, mono in frames:
         raw = getattr(payload, "raw_wire", None)
@@ -76,7 +79,8 @@ def lag_evidence(frames, pending, group):
             raw_utf8=text, wire_base64=base64.b64encode(raw).decode("ascii") if raw is not None else None,
             wire_sha256=hashlib.sha256(raw).hexdigest() if raw is not None else None,
             exact_wire_observed=raw is not None))
-    return dict(operation="MARKET_GROUP_LAG_EVIDENCE", reason="WS_PROCESSING_LAG",
+    return dict(operation="MARKET_GROUP_LAG_EVIDENCE" if reason=='WS_PROCESSING_LAG' else 'MARKET_GROUP_WRITE_EVIDENCE', reason=reason,
         frames_N=len(records), frames=records, timing=group, committed=committed,
         committed_snapshot_ids=list(pending.values) if committed else [],
+        candidate_snapshot_ids=list(pending.values) if unconfirmed else [],
         order_send_enabled=False, production_qualified=False)

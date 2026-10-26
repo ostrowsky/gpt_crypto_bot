@@ -6,7 +6,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 471 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 495 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,
@@ -25,6 +25,9 @@ foreign writer/candle conflict, caller pins and non-LIFO success/error leases.
 `test_market_tls_reuse.py` adds10 P2B2-11 cases: default owner/standalone context
 reuse, independent owner boundaries, custom/disabled paths, unsafe/mutated TLS,
 redacted creation failure before attempts and unchanged Demo handshake guards.
+`test_market_group_writer.py` adds24 P2B2-12 cases with real SQLite commits:
+coalescing/FIFO, no ACK before FULL, constraints/guards/fallback uncertainty,
+capacity/bytes/rows, raw failure evidence, preserved pins, worker/runtime lifecycle.
 
 | Test file | Coverage in this batch |
 |---|---|
@@ -203,3 +206,14 @@ assertions. Contexts are real SSLContext with configured verification; network
 handshakes are mocked and a deny probe remains uncalled. The intentional TLS1.1
 refusal case emits the stdlib deprecation warning; it is rejected, never used
 for real transport. Mock success is not proof of server trust-chain acceptance.
+
+P2B2-12 test-first sequence: initial14 RED (1 failure/13 missing-interface
+errors), then14 GREEN. Six boundaries added: pressure/unknown evidence and
+shared-phase diagnostics reproduced2 failures/1 error before code, three
+preserving size/crash/timeout cases correctly GREEN. Three lifecycle cases
+then RED (3 failures/1 cleanup error): diagnostic-clock stranding, failure-state
+erasure and coordinator-start cleanup. Finally later fallback uncertainty
+reproduced1 failure before repair. Final24 new/495 app GREEN (51.694s full),
+no skips/xfail or weakened assertions. Native SQL/abort triggers and foreign
+readers verify persistence; scheduling gates only arrange arrivals. Failed
+pre-repair clock probe cleanup cannot make its assertions pass. No keys/network.

@@ -21,6 +21,7 @@ from .market_delivery import DeliveryMetrics, WirePacket, lag_evidence
 
 WS_URL = "wss://demo-stream.binance.com/stream"
 WS_LIMIT = 1024*1024
+WRITER_FAILURES = frozenset(('MARKET_WRITER_BACKPRESSURE','MARKET_WRITER_UNAVAILABLE','MARKET_WRITER_FAILED','MARKET_WRITER_COMMIT_UNKNOWN'))
 TOPIC = re.compile(r"(\w{2,64})@(bookTicker|depth@100ms|kline_1m)\Z")
 
 
@@ -374,7 +375,7 @@ class MarketStreamReader:
             self._save("QUOTES", dict(rows=rows, source="DEMO_COMBINED_STREAM"))
 
     def _fail(self, reason, *, evidence=None):
-        safe = reason if reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED","CANDLE_SOURCE_CHANGED"} else "WS_PROTOCOL_ERROR"
+        safe = reason if reason in WRITER_FAILURES or reason in {"WS_UNAVAILABLE","WS_PROTOCOL_ERROR","WS_BUFFER_OVERFLOW","WS_HEARTBEAT_FAILED","WS_PROCESSING_LAG","WS_STOPPED","WS_ROTATED","METADATA_STALE","CLOCK_STALE","CLOCK_UNSYNCED","CLOCK_JUMP","CLOCK_QUALITY","WS_RATE_LIMITED","CANDLE_SOURCE_CHANGED"} else "WS_PROTOCOL_ERROR"
         with self._lock:
             self.error, self.connected = safe,False
             self._quotes.clear()
@@ -608,15 +609,16 @@ class MarketStreamReader:
                 if frames and not noted:
                     group = self._delivery.note(frames,pending,collected,acquired,self.clock.monotonic_ns(),reason,
                         self.universe["snapshot_id"],self.session_id)
-                    if reason=="WS_PROCESSING_LAG": evidence = self._record_lag_evidence(frames,pending,group)
+                    if reason=='WS_PROCESSING_LAG' or reason in WRITER_FAILURES:
+                        evidence = self._record_lag_evidence(frames,pending,group,reason=reason)
                 if not noted or self.connected:
                     try: self._fail(reason,evidence=evidence)
                     except Exception: pass  # In-memory invalidation/close and explicit health failure already set.
             return False
 
-    def _record_lag_evidence(self, frames, pending, group):
+    def _record_lag_evidence(self, frames, pending, group, *, reason='WS_PROCESSING_LAG'):
         try:
-            self._lag_evidence_buffer = lag_evidence(frames,pending,group)
+            self._lag_evidence_buffer = lag_evidence(frames,pending,group,reason=reason)
             self._delivery.evidence_state = "PENDING"
             return self._lag_evidence_buffer
         except Exception:

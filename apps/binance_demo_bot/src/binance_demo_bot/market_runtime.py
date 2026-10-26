@@ -20,14 +20,15 @@ def _history_ready(rows, cutoff):
 
 class MarketDataRuntime:
     def __init__(self,store,client,*,account_provider=None,deep_symbols=(),transport_factory=None,
-                 enabled=True,background=False,checkpoint_background=True):
-        if type(enabled) is not bool or type(background) is not bool or type(checkpoint_background) is not bool or account_provider is not None and not callable(account_provider):
+                 enabled=True,background=False,checkpoint_background=True,group_writer_enabled=True):
+        if type(enabled) is not bool or type(background) is not bool or type(checkpoint_background) is not bool or type(group_writer_enabled) is not bool or account_provider is not None and not callable(account_provider):
             raise AdapterError("INVALID_PARAMETERS")
         self.store,self.client,self.clock = store,client,client.clock
         self.universe_service,self.service = UniverseService(store,client),MarketDataService(store,client)
         self.account_provider,self.deep_symbols,self.transport_factory = account_provider,tuple(deep_symbols),transport_factory
         self.enabled,self.background = enabled,background
         self.checkpoint_background=checkpoint_background
+        self.group_writer_enabled=group_writer_enabled
         self.universe,self.supervisor = None,None
         self._projection = None
         self.pipeline_state,self.running = "NOT_STARTED",False
@@ -95,16 +96,23 @@ class MarketDataRuntime:
             if error.reason not in {"CLOCK_STALE","CLOCK_UNSYNCED"}:
                 raise
             self.refresh_clock()
-        if self.checkpoint_background: self.store.start_checkpointing()
-        try: self._metadata()
+        try:
+            if self.group_writer_enabled:self.store.start_group_writer()
+            if self.checkpoint_background:self.store.start_checkpointing()
+            self._metadata()
         except BaseException:
-            self.store.stop_checkpointing()
+            try:self.store.stop_group_writer()
+            finally:self.store.stop_checkpointing()
             raise
         self.running = True
         self._started_ns = self.clock.monotonic_ns()
         if self.background:
             self._thread = threading.Thread(target=self._run,name="binance-demo-market-runtime",daemon=True)
-            self._thread.start()
+            try:self._thread.start()
+            except BaseException:
+                self._thread=None
+                self.stop()
+                raise
 
     def tick(self):
         if not self.running or self._stop.is_set():
@@ -180,6 +188,8 @@ class MarketDataRuntime:
             states = self.supervisor.health() if self.supervisor else {}
             pipeline_state = self.pipeline_state
             maintenance = self.store._checkpoint.health() if self.store._checkpoint else None
+            writer = self.store.group_writer_health()
+            if pipeline_state=='OBSERVING' and writer['state']=='FAILED':pipeline_state='STORAGE_DEGRADED'
             if pipeline_state=="OBSERVING" and maintenance and maintenance["state"] in {"CHECKPOINT_FAILED","STORAGE_BACKPRESSURE"}:
                 pipeline_state="STORAGE_DEGRADED"
             if not self.running:
@@ -196,6 +206,7 @@ class MarketDataRuntime:
                 status_excluded_n=sum(r["status"]!="REMOVED" for r in rows)-len(active),
                 removed_tombstones_n=sum(r["status"]=="REMOVED" for r in rows),quote_ready_n=qn,closed_history_ready_n=cn,
                 storage_maintenance=maintenance,
+                group_writer=writer,
                 public_quote_ready_ratio=qr,permitted_pairs_N=denominator,permitted_ready_ratio=pr,
                 observation_window_s=elapsed,incidents_n=self._incidents_n,supervisor=states,
                 processing_tick_recent_n=len(self._tick_lags),processing_tick_window_limit_N=4096,
@@ -226,4 +237,5 @@ class MarketDataRuntime:
                 if self.supervisor:
                     self.supervisor.stop()
             finally:
-                self.store.stop_checkpointing()
+                try:self.store.stop_group_writer()
+                finally:self.store.stop_checkpointing()

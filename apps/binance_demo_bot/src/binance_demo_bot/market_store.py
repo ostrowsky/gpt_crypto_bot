@@ -133,6 +133,9 @@ class _PreparedMarketBatch:
             return
         self._timing["writer_wait_started_ns"] = self._now()
         try:
+            if self.store._group_writer is not None:
+                self.store._group_writer.submit(self)
+                return
             with self.store._lock:
                 self._timing["writer_acquired_ns"] = self._now()
                 with self.store.batch():
@@ -205,6 +208,7 @@ class MarketSnapshotStore:
         self._lease = _WriterLease(paths.runtime_path(database + ".writer.lock"))
         self._con = None
         self._checkpoint = None
+        self._group_writer = None
         self._read_con = None
         self._reader_local = threading.local()
         self._reader_registry_lock = threading.Lock()
@@ -281,6 +285,18 @@ class MarketSnapshotStore:
                 available = max(available, row[0])
         value,row = _prepared_row(self.identity,kind,data,received_at_ms,received_monotonic_ns,dependencies,available)
         identifier = value["snapshot_id"]
+        if self._group_writer is not None and not self._own_batch():
+            pending = _PreparedMarketBatch(self,time.monotonic_ns)
+            pending.rows = [row]
+            pending.values = {identifier:value}
+            self._group_writer.submit(pending)
+            standalone = True
+        else:
+            self._append_direct(row)
+            standalone = not self._own_batch()
+        return self._append_result(identifier,standalone)
+
+    def _append_direct(self,row):
         with self._lock:
             self._storage_guard()
             standalone = self._batch_depth == 0
@@ -295,6 +311,8 @@ class MarketSnapshotStore:
                 if standalone:
                     self._con.rollback()
                 raise
+
+    def _append_result(self,identifier,standalone):
         # The committed row is immutable. Large result copies need no writer lock.
         # An explicit owner batch still routes get() through its staged connection.
         state = getattr(self._reader_local, "state", None)
@@ -339,6 +357,19 @@ class MarketSnapshotStore:
         if monotonic_ns is not None and not callable(monotonic_ns):
             raise AdapterError("INVALID_PARAMETERS")
         return _PreparedMarketBatch(self, time.monotonic_ns if monotonic_ns is None else monotonic_ns)
+
+    def start_group_writer(self,**options):
+        from .market_group_writer import MarketGroupWriter
+        if self._group_writer is None:self._group_writer=MarketGroupWriter(self,**options)
+        elif options:raise AdapterError('INVALID_PARAMETERS')
+        self._group_writer.start()
+        return self._group_writer
+
+    def stop_group_writer(self):
+        if self._group_writer is not None:self._group_writer.stop()
+
+    def group_writer_health(self):
+        return self._group_writer.health() if self._group_writer is not None else dict(state='NOT_STARTED',running=False)
 
     def start_checkpointing(self):
         from .market_checkpoint import MarketCheckpointer
@@ -566,6 +597,7 @@ class MarketSnapshotStore:
         return False
 
     def close(self):
+        self.stop_group_writer()
         self.stop_checkpointing()
         with self._lock:
             with self._reader_registry_lock:

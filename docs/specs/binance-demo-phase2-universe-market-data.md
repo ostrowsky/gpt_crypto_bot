@@ -1,7 +1,7 @@
 # Binance Demo phase 2: complete universe and causal market data
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P2-A/B2 foundations GREEN; 236 focused tests / 471 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
+Status: **P2-A/B2 foundations GREEN; 260 focused tests / 495 app GREEN; full-market stream latency FAIL; full P2 incomplete**.
 Priority: P2; may be developed alongside [phase 1](binance-demo-phase1-account-adapter.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -1456,3 +1456,122 @@ with commit ACK, exact causal receipts, candle guards, failure isolation and
 shutdown/backpressure tests before code. Avoid a growing queue or primary drops.
 FULL/250ms and disabled trading remain. Startup delivery and authenticated
 account/financial certification remain separately unqualified.
+
+## P2B2-12: bounded common market writer and durable ACK (2026-10-11)
+
+Prior full-market trials remain FAIL. Add a store-owned writer worker for
+prepared groups and standalone appends; explicit owner batch() transactions
+retain their synchronous same-connection contract under the same FIFO lock.
+Financial/journal/isolation code and their frozen fingerprints stay unchanged.
+The coordinator enables this service before metadata/stream startup and drains
+it after stopping producers, before checkpoint/store close. Optional boolean
+group_writer_enabled=False is a rollback to the prior market path, not a
+freshness/FULL/trading relaxation. Default is True; library stores stay direct
+until start_group_writer() is explicitly called.
+
+GW-01: frozen requests keep canonical rows, receipt stamps, availability,
+IDs/hashes, candle guards and FIFO admission. Successful submit returns only
+after actual FULL commit, never after enqueue or INSERT. Queue+active requests
+are capped at8 groups and64MiB serialized UTF-8 payload; a request is capped
+at256 rows. Config capacity1..8, byte_limit1024..64MiB, collect_ms0..2 are
+integers, booleans rejected. Overflow fails MARKET_WRITER_BACKPRESSURE without
+blocking or accepting an unbounded backlog; no silent successful primary drop.
+Read preparation releases its owned cut before enqueue; caller pins survive.
+Standalone returned envelopes still come from the immutable committed primary,
+including exact retries and older pinned caller cuts.
+GW-02: collect FIFO for at most2ms nominal monotonic time, up to8 groups,
+64 rows/4MiB per transaction. A head request larger than a batch cap is processed
+alone within request limits; SQL chunks remain <=64 rows. Guard-free groups
+use common bulk INSERT and one FULL commit. Coalescing reduces commit calls,
+not the250ms deadline: scheduling, queue wait, all retries and ACK handoff remain
+inside original receipt-to-completion. No receipt backdating or latest-price
+overwrite. Phase timings disclose attempts/coalesced size and uncertainty;
+group stage intervals include shared transaction work, not exclusive SQL CPU.
+GW-03: guarded groups use per-group savepoints and current-sequence guard checks
+in FIFO order after prior writes. A stale candle group rolls back alone; healthy
+neighbors commit. A guard-free bulk IntegrityError, only after confirmed rollback
+and before entering commit, permits bounded per-group isolation fallback once.
+No retry for I/O/commit exceptions. Successful groups retain original canonical
+rows, and bad groups get no partial rows or success ACK. Commit exception is
+MARKET_WRITER_COMMIT_UNKNOWN, with unconfirmed state and no blind retry; a driver
+may have committed before failing ACK. Fail the service closed and expose it.
+GW-04: health is detached counters/limits/state only, scope COALESCER_SUBMISSIONS:
+submitted=accepted+rejected; accepted=committed+failed+pending. Report pending
+bytes/groups, commit ACKs, constraint fallbacks and unconfirmed groups separately.
+No payload, IDs, credentials or dependency error text. Backpressure/worker failure
+is explicit; a stopped/failed service is never silently bypassed by direct writes.
+No-write prepared groups do not fabricate queue/commit samples.
+GW-05: stop refuses new work, drains accepted requests, resolves every waiter and
+joins its own worker before closing SQLite/lease. Failed worker wakes queued
+waiters and remains failed; no automatic restart hiding uncertainty. Routine
+stopped service can be explicitly restarted with diagnostics retained. Start
+failure cleans resources; shutdown timeout leaves DB/lease intact and reports
+MARKET_WRITER_STOP_TIMEOUT. Never stop existing bot workers.
+GW-06: reader failures for writer backpressure/unavailability/failure/commit
+uncertainty invalidate/close the session and retain original <=8 received frames
+as MARKET_GROUP_WRITE_EVIDENCE with the actual failure reason. Unknown commit
+has committed=null, candidate IDs and no confirmed committed-ID claim. Existing
+lag evidence keeps its operation/reason. Evidence/invalidation stays atomic;
+failed persistence is visible with at most one volatile group retained. No
+claim of zero DB interleaving or proven startup delivery; orders stay disabled.
+
+SPEC -> actual SQLite coalescing/ACK/FIFO/rollback/guard/fallback/uncertainty,
+capacity/bytes/chunks, lifecycle/runtime and raw-evidence tests -> intended RED
+-> minimal code -> GREEN/regressions -> full public population with retained
+failures -> full/staged Truth Harness -> selective commit/push. Mock scheduler
+gates may arrange concurrent arrivals; persistence/transactions stay real.
+No trading-policy change; max-period causal replay is required before future
+relaxations. Rollback stops only this owned runtime, preserves primary/evidence
+and explicitly disables the worker on a fresh store/runtime. Unit success or
+fewer commits never substitutes for full-market/account/PnL qualification.
+
+GW-05 lifecycle boundaries: diagnostic clock failure cannot strand any waiter;
+failure timestamp becomes null, not invented. stop must not overwrite sticky
+FAILED during the worker's terminal-error window. Coordinator background-thread
+start failure stops producers and both owned storage workers before rethrowing.
+Collection's nominal2ms window starts after FIFO writer acquisition so groups
+already waiting on that writer can coalesce; total original-receipt latency
+still includes all acquisition/collection/ACK waits. Test these before repair.
+
+GW-03 fallback boundary: a healthy isolated fallback commit is ACKed immediately;
+a later group's unknown commit cannot erase that already confirmed result or
+report its primary as uncommitted. Confirmed bad groups also retain their actual
+failure reason. Only remaining unacknowledged/queued groups fail on fatal error.
+
+### P2B2-12 verification and observed boundary
+
+Initial14 tests RED (1 failure/13 missing-interface errors), then14 GREEN.
+Six boundaries:2 failures/1 missing diagnostic field error before repair;
+three preserving limits/crash/timeout cases already GREEN. Lifecycle3 RED
+(3 failures/1 cleanup error), then GREEN. Later fallback uncertainty1 RED
+before repair. Final24 new/495 app GREEN, full51.694s, actual native SQL,
+real abort triggers/readonly readers, no skip/xfail or weakened assertions.
+Six groups/48 rows produce one real bulk INSERT/FULL commit in the focused
+coalescing test; ACK is blocked until real commit, and a private error cannot
+erase previous known success or leak into public health.
+
+Sparse full public trial1791744230720272600: startup28.942s,
+observation47.555206s,3727 discovered/1375 active pairs,6 shards, source SHA
+matched, no keys/orders. Startup6/6 connected; first post-tick0/6; final0/6
+connected,REST quotes1375/1375,closed history18/1375 — FAIL. All6 current failed
+sessions retained lag evidence/invalidation PERSISTED, zero evidence failures.
+Writer scope:1914 submitted/accepted/committed groups,0 pending/rejected/failed/
+unconfirmed,1166 commit ACKs,0 constraint fallbacks. This verifies actual
+coalescing in this run; it is not controlled performance or PnL uplift.
+Last-group end-to-end269.6732..453.4159ms, coalesced size1..3, attempts1 each.
+One3-group commit: prepare45.8873ms, queue/writer124.0135ms,
+BEGIN-stage49.0496ms,INSERT-stage28.4766ms,commit-stage30.4031ms,
+total297.4267ms. Shared phases include other groups and scheduling.
+Observe writer hold154.441ms, SQL INSERT63.4317ms/commit37.3377ms;
+startup INSERT319.8351ms/hold430.2633ms separate. No favorable startup/REST
+point overrides failure. Owned workers stop/drain/close in finally.
+
+The user requested complete interaction/decision logging during this work;
+[audit contract](binance-demo-interaction-decision-audit.md) is registered as
+SPECIFIED, not implemented. It is the next mandatory delivery before execution/
+learning, including every attempt/error/WS/no-action, causal IDs/clocks,
+redaction and completeness. Integrate through bounded durable writer with
+explicit gaps; do not claim current failure snapshots are a complete audit.
+Native/serialization/read/ACK scheduling stalls remain a separate full-market
+gate. Keep FULL/250ms and disabled trading; max-period replay is mandatory
+before future policy relaxation. Preserve every rejected network trial.

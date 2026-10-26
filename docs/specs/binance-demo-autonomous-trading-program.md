@@ -1,7 +1,9 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B2 foundations / 471 GREEN; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-11. Status: **P0-A/B + P1-A/B + P2-A/B2 foundations / 495 GREEN; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
+Полный [аудит Binance и решений](binance-demo-interaction-decision-audit.md)
+обязателен до автономного исполнения/learning; SPECIFIED, ещё не implemented.
 Основание: [дорожная карта](../roadmaps/binance-demo-daily-pnl-roadmap.md)
 и подтверждённая пользователем цель — чистый дневной PnL в USDT после комиссий.
 TH-01..TH-12 из [Truth Harness](truth-harness.md) обязательны.
@@ -136,6 +138,15 @@ TLS verification/hostname/minTLS1.2 и Demo endpoint сохранены.10 но�
 Public trial1791741563868852000:startup6/6, после tick0/6; финал48.0524598s,
 0/6 streams,REST quotes1375/1375,history14/1375 — FAIL. Только1 market TLS
 build; serialization/scheduler/writer остаются отдельным gate.
+
+P2B2-12: bounded common market writer, coalesced FULL commit и durable ACK,
+FIFO/causal receipts/guards, isolation fallback, explicit commit uncertainty,
+queue pressure/evidence и owned shutdown.24 новых теста после RED,495 GREEN.
+Финансовые fingerprints не менялись; полный аудит interactions/decisions
+следующий и обязателен до execution/learning. Full-market gate отдельно.
+Public trial1791744230720272600:47.555206s,0/6 streams,REST1375/1375,
+history18/1375 — FAIL; writer1914 groups/1166 commit ACKs,zero writer failures.
+Native/serialization/read/ACK latency остаётся gate; orders disabled.
 
 ## Shared interfaces and ownership
 
