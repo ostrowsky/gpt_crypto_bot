@@ -72,6 +72,14 @@ inventory/basis/valuation. This is a human declaration plus source observations,
 not independent certification that no external activity ever occurred.
 Certified cut/recovery and financial anchors are still prerequisites.
 
+P0-C2 (2026-10-27): [financial bridge](binance-demo-financial-account-bridge.md)
+now binds the original C1 seed to the own JournalStore and imports supported
+available fills without assigning OMS ownership. A later signed read matched
+2/2 required nonzero assets (866 returned), financial status PENDING. No actual
+economic fills were observed; global recovery/delivery coverage remains unknown.
+The background reader was healthy at the comparison; closure retained incidents
+and invalidated snapshot freshness. This is not completion of P1 reconciliation.
+
 ## Problem
 
 The current bot creates virtual positions; public market clients are not an

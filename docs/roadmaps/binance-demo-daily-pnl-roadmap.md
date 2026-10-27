@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B/C1, P1-A/B/order-test, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 829 GREEN, REST/order-test/signed WSS control PASS, opening PROVISIONAL, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B/C1/C2, P1-A/B/order-test, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 868 GREEN, balances MATCH 2/2, financial PENDING, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 
@@ -25,6 +25,13 @@ disabled.
 P0-C1 свежий capture:866 returned assets,2 ненулевых остатка, COMPLETE observed
 Demo midpoint valuation,2 SEED lots;39 focused /829 full tests GREEN.
 Financial episode ещё не открыт, daily PnL null; стартовые средства не прибыль.
+P0-C2 [financial bridge](../specs/binance-demo-financial-account-bridge.md)
+реализован:39 новых /868 full GREEN; исходный seed не заменяется при restart,
+fill import/fee dedup/recovery и независимые проверки остатков. Fresh signed
+comparison:2/2 required assets MATCH,866 returned, actual fills0/global N unknown.
+Financial PENDING; старые incidents сохранены, после close comparison stale.
+Следующий приоритет — certified cut/recovery/flows/delivery и P3
+audited sender/risk/protection; read-only equality не разрешает обычные entries.
 Ниже — история
 ранее выполненных шагов и их отдельных результатов; прежние «следующий
 приоритет» не заменяют этот текущий порядок. Торговые gates не ослаблены.

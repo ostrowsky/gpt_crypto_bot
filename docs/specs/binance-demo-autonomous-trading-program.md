@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-27. Status: **P0-A/B/C1 + P1-A/B/order-test + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 829 GREEN; REST/order-test/signed WSS control checks PASS; opening PROVISIONAL; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-27. Status: **P0-A/B/C1/C2 + P1-A/B/order-test + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 868 GREEN; independent balances MATCH 2/2; financial PENDING; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 
 Current user priority (2026-10-27): перейти к торговому контуру. Реализован
@@ -34,6 +34,14 @@ Demo midpoint valuation,2 SEED lots,0 managed assets,0 open orders/lists.
 39 focused /829 full tests GREEN; начальный капитал не daily profit,
 financial episode не открыт, ORDER_SEND disabled. Две отклонённые попытки
 (Decimal clock, Unicode identifiers) сохранены; воспроизведены тестами до repair.
+Далее [P0-C2 bridge](binance-demo-financial-account-bridge.md): исходный seed
+закреплён в own JournalStore, source-backed imports без OMS ownership,
+native commit/restart recovery и независимые residual checks;39 новых /868 full
+GREEN. Новые signed balances совпали по2/2 ненулевым активам,866 returned assets
+учтены; это BALANCES_MATCH при financial PENDING. Stored actual fills0,
+global history неизвестна. На момент проверки private reader был healthy;
+закрытие сохранило incidents и сделало comparison stale. Нужны certified cut/
+recovery, flows/delivery и audited sender/risk/protection; ORDER_SEND disabled.
 Техническая проверка подписки не является торговым релизом.
 Баланс/ключи/UID/runtime reports не коммитятся. Human declaration и provisional
 opening не закрывают independent financial anchors, account history,

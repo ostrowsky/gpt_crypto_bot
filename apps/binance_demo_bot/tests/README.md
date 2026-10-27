@@ -1,5 +1,19 @@
 # Independent Demo bot: P0-A tests
 
+P0-C2 financial bridge: `test_financial_account.py`,39 focused GREEN (14.052s).
+30 missing-module RED before code; later genuine RED reproductions for refreshed
+historical mappings, ready-ledger truncation and asset-name/redactor overlap.
+Native own JournalStore/AuditJournal/AccountEvidenceStore verify original seed
+binding, exact residuals, original fill provenance, duplicate fees, unsupported
+fee/mapping evidence, unknown commits/reopen and immutable checks. No credentials
+or exchange calls in unit tests. [Specification](../../../docs/specs/binance-demo-financial-account-bridge.md).
+Full financial cut/delivery/flows and actual order authority remain unqualified;
+green imports or balance equality cannot certify daily PnL.
+Final full regression868 GREEN (138.258s), root14 spec tests GREEN. Actual
+independent Demo balance comparison2/2 MATCH remains financial PENDING, with
+0 observed economic fills and unknown global denominator. Full Harness still
+FAIL TH-11; no profitability or execution gate is implied.
+
 P0-C1 ownership/opening manifest: `test_account_opening.py`,39 focused GREEN.
 26 missing-module RED before implementation; then genuine Decimal-clock and
 Unicode-identifier integration reproductions RED before repair (1 and3 cases).

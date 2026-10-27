@@ -404,6 +404,15 @@ anchors, а completeness и denominator — с календарным manifest. 
 
 ## Risk/tradeoffs
 
+2026-10-27: [P0-C2 ledger bridge](binance-demo-financial-account-bridge.md)
+реализован после RED: immutable binding исходного C1 seed, native JournalStore
+imports подтверждённых source facts как UNATTRIBUTED, duplicate/unknown-commit
+recovery и independent residual comparison;39 новых /868 full tests GREEN.
+Actual signed comparison2/2 required assets MATCH,866 returned; actual fills0,
+global history unknown. Это local accounting + observed residuals, ещё не
+сертифицированный financial cut, AccountEpisodeOpened или daily PnL. Gaps/flows,
+historic third-asset valuation и OMS ownership/protection остаются prerequisites.
+
 2026-10-27: пользователь явно подтвердил dedicated account для нового бота.
 [P0-C1 ownership/opening manifest](binance-demo-account-opening-manifest.md)
 добавляет durable declaration и provisional source-backed opening inventory,
