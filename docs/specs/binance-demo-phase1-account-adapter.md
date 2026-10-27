@@ -1,7 +1,7 @@
 # Binance Demo phase 1: account adapter and capability evidence
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-27.
-Status: **P1-A/B + order-test foundations; signed REST/order-test smoke PASS 2026-10-27; full P1 incomplete**.
+Status: **P1-A/B + order-test foundations; REST/order-test/signed WSS control checks PASS 2026-10-27; full P1 incomplete**.
 Priority: P1, after [phase 0](binance-demo-phase0-financial-contract.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -29,8 +29,45 @@ request/generation with30s expiry, not indefinitely renewed by saved reports.
 39 new focused tests cover default-off/single-POST/audit/clock/rate/auth/fences.
 PRIVATE_EVENTS remains UNVERIFIED and ORDER_SEND DENIED.
 Exclusive ownership, actual history/flows, certified as-of account/valuation
-anchors, signed private stream and execution/protection are still pending.
+anchors, actual private-event delivery and execution/protection are still pending.
 Earlier dated pending-smoke paragraphs below describe their original milestones.
+
+Signed private transport diagnostic (2026-10-27): existing PrivateEventReader,
+native pinned websockets17.1 and protocol audit were exercised with the dedicated
+Demo pair. Two separate connections/subscriptions accepted (2/2), distinct
+session IDs with per-connection subscriptionId0, four requested Ping/Pong
+heartbeats completed (4/4). Each session was manually polled for15s; background
+service mode was not qualified. All5 checks passed: both subscriptions/heartbeats,
+distinct sessions, returned balances agreement, unchanged open orders and lists.
+REST snapshots agreed on866/866 union assets, with no missing rows. This is
+diagnostic two-snapshot agreement, not comparison to a financial journal.
+No opening lots, basis, ownership, account episode or profit were manufactured.
+
+Zero private economic events and fills were observed; the delivery denominator
+is unknown, not0% or100%. Only subscription ACKs were received as application
+messages (2/2 durable receipts classified CONTROL_ACK). Thirty receive timeouts
+were retained as outcomes of quiet polling, not hidden or treated as lost fills.
+Capture coverage remains UNKNOWN. Each deliberate close recorded STREAM_GAP;
+both incidents remain after reconnect (2), requiring future gap/backfill/anchor
+qualification. A new healthy connection does not resolve old history gaps.
+PRIVATE_EVENTS stays UNVERIFIED, exchange_reconciled=false, ORDER_SEND DENIED.
+
+Runtime audit:10/10 REST BEGIN and END,42/42 WS BEGIN and END,2/2 processing
+markers and30/30 parsed-control records ACKed by local storage;0 unresolved
+REST/WS operations and0 process-submission gaps. These are app-local counters,
+not a server wire-capture denominator. Privacy scan covered14 diagnostic JSON
+files and138 final audit records, with0 key values/raw identifier fields found.
+No runtime/account data was committed. Existing synthetic regressions31 private,
+38 account evidence,25 WS audit and16 protocol tests pass (110/110); no code
+change was needed and no artificial RED was introduced for this verification.
+Full Harness remains FAIL TH-11 (historical alpha replay source hash stale).
+
+Remaining prerequisite: explicitly registered dedicated-account ownership,
+source-backed opening inventory/basis/valuation and certified cut/recovery.
+The user was asked whether this Demo account is exclusive to the new app;
+until that fact is provided, ownership is unconfirmed rather than inferred
+from empty open orders. This is missing account information, not a renewed
+request for permission to trade on Demo.
 
 ## Problem
 

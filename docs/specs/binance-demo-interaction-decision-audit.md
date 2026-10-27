@@ -7,6 +7,14 @@ User requirement: все взаимодействия с Binance и все пр�
 Parent: [программа](binance-demo-autonomous-trading-program.md),
 [dataset/outcomes](binance-demo-phase5-outcomes-training-dataset.md).
 
+Signed private WS diagnostic2026-10-27 exercised the existing audit without
+code changes:2 subscription ACK receipts,4 heartbeat checks, both closes and
+30 quiet receive timeouts were retained. Local expected/ACKed counters agree
+(10 REST,42 WS begin/end,2 processing,30 control records);138 final records,
+no unresolved attempt/operation. This does not prove unseen event capture or
+economic event delivery (observed0). Both STREAM_GAP incidents remain in the
+account store after reconnect; full reconciliation/audit stays incomplete.
+
 [P3-A](binance-demo-p3a-durable-intents.md) добавляет own audit-backed
 `oms-intents.sqlite`: genesis/epochs, reserve+outbox, idempotent retry, BLOCK,
 entry kill и uncertain-attempt transitions.39 focused GREEN. Это локальные

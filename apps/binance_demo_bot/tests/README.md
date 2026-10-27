@@ -1,5 +1,14 @@
 # Independent Demo bot: P0-A tests
 
+Signed private transport verification (2026-10-27): no source/behavior changes.
+Existing31 private-stream,38 account-evidence,25 WS-audit and16 protocol tests
+pass (110/110), with synthetic credentials/own fixtures and no new unit-test
+exchange calls. The prior790-test full regression remains separately dated.
+Two native signed Demo subscriptions and4 heartbeats passed; quiet sessions
+yielded0 economic events/fills, not proven delivery. Both closes retained gaps.
+No artificial RED for documentation-only recording; root spec/diff/staged checks
+still required. Live payloads, keys and runtime evidence remain outside Git.
+
 P1 order-test validation (2026-10-27):32 intended missing-module RED before
 code. Fixed the fixture's duplicate keyword argument without changing checks.
 Five added boundaries reproduced2 behavioral gaps: missing disable audit and

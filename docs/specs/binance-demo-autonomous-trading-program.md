@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-27. Status: **P0-A/B + P1-A/B/order-test + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 790 GREEN; signed REST/order-test smoke PASS; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-27. Status: **P0-A/B + P1-A/B/order-test + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 790 GREEN; REST/order-test/signed WSS control checks PASS; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 
 Current user priority (2026-10-27): перейти к торговому контуру. Реализован
@@ -18,9 +18,15 @@ BUY/protection/SELL/reconcile canary. Архивное reclamation не явля
 прошёл2/2 отдельные source-version диагностики (по1 POST, без изменения
 наблюдаемых balances/open orders/lists). KEY_TRADE_VALIDATED был SUPPORTED
 в момент проверки с30s TTL; сохранённый отчёт не возобновляет permission.
+Далее signed WSS control diagnostic:2/2 subscriptions,4/4 heartbeat,5/5 checks
+PASS;866/866 возвращённых активов совпали между REST-снимками. Это не сверка
+финансового журнала. Economic events/fills0, доставка ещё не доказана;
+оба intentional close оставили STREAM_GAP, не очищенный reconnect.
 PRIVATE_EVENTS ещё UNVERIFIED, ORDER_SEND DENIED. Следующий приоритет:
-signed private stream и certified account/ownership/valuation, затем P3 sender/
-protection/reconcile; техническая проверка ключа не является торговым релизом.
+подтверждённый dedicated-account ownership, opening inventory/valuation и
+certified cut/recovery, затем P3 sender/protection/reconcile. Эксклюзивность
+счёта уточняется у пользователя; пустые open orders её не доказывают.
+Техническая проверка подписки не является торговым релизом.
 Баланс/ключи/UID/runtime reports не коммитятся. Это не закрывает ownership,
 financial anchors, account history, market freshness или execution protection.
 

@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B/order-test, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 790 GREEN, signed REST/order-test smoke PASS, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B/order-test, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 790 GREEN, REST/order-test/signed WSS control PASS, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 
@@ -15,8 +15,12 @@ canary со сверкой. После отдельного provisioning signed 
 [order-test validator](../specs/binance-demo-order-test-validation.md) реализован:
 39 focused GREEN,2/2 source-version diagnostics PASS, по1 non-matching POST.
 Наблюдаемые balances/orders/lists не изменились; KEY_TRADE_VALIDATED был SUPPORTED
-с30s TTL. Следующий приоритет — private stream и certified ownership/account/
-valuation; далее actual sender/protection/reconcile. ORDER_SEND disabled. Ниже — история
+с30s TTL. Signed private transport затем проверен:2/2 subscriptions,4/4
+heartbeat,5/5 checks PASS,866/866 returned REST assets agree. Economic events0;
+PRIVATE_EVENTS не сертифицирован,2 close gaps сохранены. Ownership уточняется
+у пользователя; далее registration opening inventory/valuation и certified
+account cut/recovery, затем actual sender/protection/reconcile. ORDER_SEND
+disabled. Ниже — история
 ранее выполненных шагов и их отдельных результатов; прежние «следующий
 приоритет» не заменяют этот текущий порядок. Торговые gates не ослаблены.
 

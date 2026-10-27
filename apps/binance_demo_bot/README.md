@@ -62,8 +62,14 @@ lists unchanged. Its exact tested-request capability expires after30s; saved
 reports cannot renew it. Default validation is off; the read transport remains
 GET-only. The separate POST transport accepts only `/api/v3/order/test`, never
 actual order placement/cancel/list endpoints. No automatic POST retries.
-Private stream remains unverified, reconciliation/ownership uncertified and
-ORDER_SEND disabled. See the [validation specification](../../docs/specs/binance-demo-order-test-validation.md).
+Signed private stream control-plane checks then passed2/2 subscriptions,
+4/4 heartbeats and5/5 diagnostic checks, including reconnect. REST snapshots
+agreed on866/866 returned assets; no financial journal was seeded to manufacture
+agreement. No private economic events/fills were observed; delivery remains
+unverified. Both explicit closes retained STREAM_GAP, including after reconnect.
+Account ownership/valuation/cut/recovery remain uncertified; PRIVATE_EVENTS
+UNVERIFIED and ORDER_SEND disabled. See the [account specification](../../docs/specs/binance-demo-phase1-account-adapter.md)
+and [validation specification](../../docs/specs/binance-demo-order-test-validation.md).
 Raw UID/user identifiers are now redacted before audit persistence. Diagnostic
 artifacts and actual account balances stay in ignored runtime, never Git.
 
