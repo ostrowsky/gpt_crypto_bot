@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **591 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **629 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -75,6 +75,7 @@ Verified: **591 tests GREEN**, including 56 REST, 69 private/evidence cases,
 25 WSS audit/receipt/linkage/failure cases,
 28 operational-decision/frozen-prefix/cleanup cases,
 16 parsed-control/native-socket/failure cases,
+38 archive/export/integrity/crash/retention cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -351,7 +352,7 @@ completeness and decision->fill->daily net PnL analysis. AUD-A now implements
 explicit opt-in durable REST attempts and a causal decision-recording API.
 AUD-B1 adds automatic WSS application capture for readers sharing that journal.
 AUD-B2 covers coordinator/supervisor branch decisions and recorded-prefix gaps.
-Protocol-level controls, future OMS/policy decisions and archive integration remain required before
+Certified archive rollover/reclamation and future OMS/policy decisions remain required before
 autonomous execution/learning; snapshots/incidents do not constitute full audit.
 P2B2-12 public trial1791744230720272600:47.555206s, startup6/6 then0/6;
 final0/6 connected,REST quotes1375/1375,history18/1375 — FAIL. Writer accepted/
@@ -424,7 +425,7 @@ Only actual hook installation sets `protocol_controls_observed=True`; injected
 transports without hooks and unused mocked factories remain false. This is
 parsed-control observation, not serialized TCP/TLS capture: frames rejected
 before the parser hook remain unobserved and capture coverage stays UNKNOWN.
-Full audit, future policy/OMS integrations and archives remain required.
+Full audit, future policy/OMS integrations and certified archive rollover remain required.
 
 AUD-B2 logs decisions of the current read-only market coordinator and stream
 supervisor before network/scheduling effects: metadata/clock/quote refresh,
@@ -445,5 +446,54 @@ UNKNOWN; late markers cannot change an older frozen report. The denominator is
 explicitly DURABLE_COMPLETED_RECV. Capture coverage remains UNKNOWN: successful
 saved rows cannot reconstruct all physical traffic. Compare transport and audit
 submission counters separately. No report sets `full_audit_complete=True`.
-Default journal disk cap remains finite; archive/retention must be implemented
+Default journal disk cap remains finite; certified rollover/reclamation is required
 before sustained deployment. The previous full-market latency FAIL is unchanged.
+
+AUD-C1 supplies an opt-in archive/export API in `audit_archive.py`. It pins an
+independent read-only WAL snapshot, releases the journal lock before streaming,
+and writes original seq1..cutoff envelopes to deterministic gzip JSONL. A hashed
+manifest freezes identity, IDs/cutoff, source state/fingerprints, chain tip,
+kind counts, time range and compressed/uncompressed sizes/checksums. This is a
+DURABLE_EXPORTED_PREFIX denominator; capture coverage remains UNKNOWN.
+
+Use it with the existing own `AuditJournal` object (no additional source writer):
+
+```python
+from binance_demo_bot.audit_archive import AuditArchive
+
+archives = AuditArchive(paths)
+result = archives.export(audit)  # Or through_seq=an_explicit_cutoff.
+archive_id = result["archive_id"]
+manifest_pin = result["manifest"]["manifest_sha256"]
+verified = archives.verify(archive_id, expected_identity=audit.identity,
+                           expected_manifest_sha256=manifest_pin)
+print(archives.inventory(protected_archive_ids=(archive_id,)))
+```
+
+Retain the manifest pin independently if authenticity matters. A checksum stored
+beside its own data proves internal consistency only; without an external pin,
+the verifier returns `authenticity=UNVERIFIED`. Export is manual and off the
+receive hot path; a pinned WAL reader can retain WAL pages. This does not qualify
+market latency or change the250ms guard.
+
+Archives live only in own `.runtime/audit-archives`. Both files are flushed and
+fsynced, verified in `.pending-<id>`, then published by directory rename and
+verified again. There is no Windows directory-fsync/power-loss claim. A process
+death before rename leaves INCOMPLETE evidence; after rename the published
+copy can be verified on restart. An exception after rename is explicitly
+`AUDIT_ARCHIVE_PUBLICATION_UNKNOWN`, never a false success. Existing IDs cannot
+be overwritten. Error codes omit exception text and paths.
+
+Defaults:64MiB compressed,512MiB uncompressed per export,512MiB archive storage
+including incomplete copies,64 directories. Exceeding limits refuses new work;
+the source journal and existing archives are preserved. Verification bounds
+inflation/line/manifest size and checks CRC, schema, identity and the entire
+event hash chain. Inventory keeps valid/invalid/incomplete counts separate,
+reports protected missing IDs as UNKNOWN, and never invents complete byte
+accounting when unexpected directory entries are present.
+
+Retention is explicitly `PRESERVE_ALL_V1`, with zero deletion-eligible archives
+and no delete API. Active exposure, unfinalized days and current research remain
+protected because this slice deletes nothing. Certified rollover/reclamation
+and durable restart anchors are AUD-C2; sustained storage readiness and future
+OMS/policy audit remain open. Archive correctness is not a trading/PnL claim.

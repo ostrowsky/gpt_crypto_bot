@@ -1,5 +1,19 @@
 # Independent Demo bot: P0-A tests
 
+AUD-C1 (2026-10-27):28 intended missing-module RED ->28 GREEN. Seven additional
+boundary cases found three RED failures (unsafe deflate exception, nonobject
+source row classification and manifest schema); repaired to35 GREEN. Three
+further cases found two RED failures (inventory denominator and lease junction
+guard); repaired to38 focused GREEN (9.288s). Complete629 app GREEN (68.545s),
+14 root specification +13 Truth Harness tests PASS. `test_audit_archive.py`
+uses real own SQLite, deterministic gzip, filesystem/junctions, an actual
+concurrent source writer and child process deaths before/after publication.
+Tests verify original envelopes, empty/frozen/forensic prefixes, independent
+manifest pins, corruption/schema/inflation/line limits, preservation on storage
+pressure, immutable IDs, protected/incomplete inventories and secret redaction.
+PRESERVE_ALL_V1 has no deletion or rollover; sustained storage readiness remains
+open. No credentials, Binance calls, financial-policy changes or PnL claim.
+
 AUD-B3 (2026-10-27):15 intended missing-module RED ->15 focused GREEN
 then a valid public Close-code3072 reason-leak reproduction RED before repair.
 Final16 focused GREEN (3.068s); complete591 app GREEN. `test_protocol_audit.py` exercises
@@ -19,7 +33,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 591 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 629 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,

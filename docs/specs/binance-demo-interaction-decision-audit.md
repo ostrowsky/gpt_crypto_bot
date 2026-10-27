@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3 implemented;
-96 audit focused / 591 app GREEN; full interaction audit incomplete**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1 implemented;
+134 audit focused / 629 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -383,3 +383,89 @@ Full Harness remains FAIL TH-11: canonical portfolio artifact has a stale
 `replay_backtest.py` source hash. This read-only observability slice does not
 repair or rely on that portfolio evidence; a current causal replay is required
 before profitability claims or trading-policy relaxation.
+
+## AUD-C1: frozen archive/export and preserve-all retention (2026-10-27)
+
+Specified before tests/code; IMPLEMENTED with38 focused GREEN. Public API: `AuditArchive(AppPaths, *,
+max_compressed_bytes=64MiB, max_uncompressed_bytes=512MiB,
+max_total_bytes=512MiB, max_archives=64, fault_hook=None)` in `audit_archive.py`;
+`export(journal, through_seq=None, archive_id=None)`,
+`verify(archive_id, expected_identity=None, expected_manifest_sha256=None)`,
+`inventory(protected_archive_ids=())`. All IDs are32 lowercase hex characters;
+omitted export IDs are generated. APIs return detached metadata, never secrets.
+
+- C101: export uses an independent read-only SQLite WAL snapshot. Pin source
+  identity/cutoff under the short journal lock, release that lock before gzip,
+  hashing, fsync or verification. Stream exactly seq1..cutoff in bounded memory;
+  original immutable envelopes, IDs, source fingerprints, clocks and hashes are
+  preserved. Validate contiguous sequence, row columns, identity and entire
+  previous/content hash chain. Concurrent appends cannot alter this prefix.
+  Empty prefix0 is explicit; invalid cutoff, foreign runtime and closed source
+  are denied. A failed source may export its verified committed prefix for
+  forensics, without calling it healthy or resolving unknown ACKs.
+- C102: publish a directory under own `.runtime/audit-archives/<id>` containing
+  deterministic `records.jsonl.gz` and `manifest.json`. Manifest freezes schema,
+  identity, seq range/rows, kind counts, min/max receipt wall time, chain tip,
+  compressed/uncompressed SHA256 and byte counts, exporter source fingerprint,
+  source state/run at pin and `PRESERVE_ALL_V1`. Count basis is
+  DURABLE_EXPORTED_PREFIX; capture remains UNKNOWN/full_audit_complete=False.
+  No inferred transport denominator, mature labels or profitability claim.
+- C103: immutable publication: no overwrite/reuse. Serialize exports with an
+  app-owned writer lease. Write into unique `.pending-<id>`, flush/fsync both
+  files, fully verify them, then rename into the final directory. No success
+  until final verification. Faults before rename leave explicit incomplete
+  evidence; faults after rename are PUBLICATION_UNKNOWN, resolved only by a
+  separate verification/inventory. No directory-fsync/power-loss durability
+  claim on Windows. Faults never delete records, change source health, append
+  artificial source events or reset source counters.
+- C104: verifier streams/decompresses with byte/record/manifest limits; rejects
+  truncation, CRC/hash/count/chain/identity mismatch, extra files, malformed
+  schema, path traversal, symlink/junction escapes and wrong external pin.
+  Self-consistent hashes provide INTERNAL_VERIFIED integrity, not authenticity.
+  Only a caller-provided matching manifest SHA yields PINNED_MANIFEST; a
+  same-file checksum is not an external trust anchor. Errors expose fixed codes,
+  no raw payload/path/exception text. Never load executable/pickle artifacts.
+  Require the exact versioned manifest keys and typed counts/ranges (JSON bool
+  is not a count); invalid deflate streams map to the same safe integrity error.
+- C105: separate compressed/uncompressed/total storage and directory-count
+  limits, including incomplete exports. Refuse new work explicitly on limits;
+  never silently delete archives or truncate source evidence. Bounds apply to
+  verification too, including a malicious compression bomb or long JSON line.
+  Unexpected entries are surfaced rather than followed or removed.
+- C106: inventory verifies all published archives, distinguishes valid/invalid/
+  incomplete, returns byte/count denominators, and lists explicit protected IDs.
+  Missing protected IDs stay UNKNOWN; corrupt copies FAIL. Retention policy is
+  PRESERVE_ALL_V1, deletion_eligible_n=0. No delete API: active exposure,
+  unfinalized days and current research are preserved by construction. This is
+  export/retention inventory, not space reclamation or live segment rotation.
+  Archive counts conserve N: valid+invalid+incomplete=archives_expected_N.
+  Layout violations are separate; if unexpected layout prevents complete byte
+  accounting, stored_bytes_n=null and observed_file_bytes_n is a lower bound.
+  The writer lease path is checked before opening, including junction escapes.
+
+Acceptance: real SQLite/gzip/filesystem fixtures; causal concurrent append,
+prefix0, source failure/restart, immutable duplicate, secret-redacted roundtrip,
+corrupt/truncated gzip and forged metadata/chain, foreign identity/pin/runtime,
+bounded decompression/line/disk/count, publication faults and preserved source,
+incomplete/protected inventory and path escape. SPEC -> missing-interface RED ->
+code -> focused/full GREEN -> staged Harness -> commit/push. Rollback: do not
+call the opt-in exporter; journal behavior and trading guards are unchanged.
+Next AUD-C2: certified rollover/reclamation with durable restart anchors and
+explicit legal holds; no sustained-storage readiness before that gate.
+
+### AUD-C1 verification
+
+28 new tests initially RED for the intended missing `audit_archive` module;
+then28 GREEN. Additional boundary tests reproduced unsafe zlib exception,
+incorrect nonobject-source error and missing strict manifest schema (three RED
+before repair). Actual child-process deaths before/after directory rename,
+actual post-commit source ACK uncertainty and forged inflation sizes passed.
+Further RED reproduced archive-count double counting and unchecked writer-lease
+junction before repair. Final38 focused GREEN (9.288s),629 app GREEN (68.545s),
+14 root spec +13 Truth Harness GREEN. No test skips/credentials/external network.
+Manual snapshot export leaves source rows/health/counters unchanged and allows
+concurrent append. Integrity is separate from external authenticity and physical
+traffic completeness. Full Harness remains FAIL TH-11 for the historical replay
+source hash; no current profitability conclusion or live market qualification.
+Rollback is omission of explicit exporter calls. Certified segment rollover,
+reclamation, restart anchors and future policy/OMS audit remain unimplemented.
