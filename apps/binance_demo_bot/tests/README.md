@@ -1,5 +1,21 @@
 # Independent Demo bot: P0-A tests
 
+P0-C1 ownership/opening manifest: `test_account_opening.py`,39 focused GREEN.
+26 missing-module RED before implementation; then genuine Decimal-clock and
+Unicode-identifier integration reproductions RED before repair (1 and3 cases).
+Eight extra contract boundaries and tighter independent freshness cases passed
+without fabricated failures. Own native SQLite/fault hooks/reopen, deterministic
+routes, all-returned inventory coverage and immutable seed evidence; no keys or
+exchange calls in unit tests. Specification:
+[account opening manifest](../../../docs/specs/binance-demo-account-opening-manifest.md).
+Commands use own `.venv\Scripts\python.exe -I -m unittest discover -s tests`
+with `-p test_account_opening.py` (focused) or `-p 'test_*.py'` (regression).
+These tests do not certify an account cut, financial episode or permission to
+execute orders. Authenticated observations and rejected attempts are retained
+separately in ignored runtime; opening capital is not daily profit.
+Final full regression829 GREEN (97.268s),39 focused GREEN (5.272s), root14 spec
+tests GREEN. Full Harness FAIL TH-11 remains separate from unit success.
+
 Signed private transport verification (2026-10-27): no source/behavior changes.
 Existing31 private-stream,38 account-evidence,25 WS-audit and16 protocol tests
 pass (110/110), with synthetic credentials/own fixtures and no new unit-test

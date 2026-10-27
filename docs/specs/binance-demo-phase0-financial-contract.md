@@ -404,6 +404,15 @@ anchors, а completeness и denominator — с календарным manifest. 
 
 ## Risk/tradeoffs
 
+2026-10-27: пользователь явно подтвердил dedicated account для нового бота.
+[P0-C1 ownership/opening manifest](binance-demo-account-opening-manifest.md)
+добавляет durable declaration и provisional source-backed opening inventory,
+все ненулевые returned balances и Demo midpoint conversion без peg assumption.
+Это ещё не AccountEpisodeOpened, независимая финансовая сверка или разрешение
+продавать SEED. Равенство двух REST balances не доказывает отсутствие операций
+между чтениями; certified cut, fills/flows и reset evidence остаются отдельными
+требованиями. Начальный капитал не считается дневной прибылью.
+
 Mid equity отличается от доступной цены ликвидации; публикуем обе оценки. Fee asset valuation, latency и
 недостаток historic marks ограничивают coverage; точность отчёта важнее искусственного полного sample.
 Provisional pilot limits из roadmap (0.1% stop-risk/trade, 5% position, 25% gross notional, сначала одна

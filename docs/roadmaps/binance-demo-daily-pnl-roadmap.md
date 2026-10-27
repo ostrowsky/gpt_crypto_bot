@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B/order-test, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 790 GREEN, REST/order-test/signed WSS control PASS, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B/C1, P1-A/B/order-test, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 829 GREEN, REST/order-test/signed WSS control PASS, opening PROVISIONAL, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 
@@ -17,10 +17,15 @@ canary со сверкой. После отдельного provisioning signed 
 Наблюдаемые balances/orders/lists не изменились; KEY_TRADE_VALIDATED был SUPPORTED
 с30s TTL. Signed private transport затем проверен:2/2 subscriptions,4/4
 heartbeat,5/5 checks PASS,866/866 returned REST assets agree. Economic events0;
-PRIVATE_EVENTS не сертифицирован,2 close gaps сохранены. Ownership уточняется
-у пользователя; далее registration opening inventory/valuation и certified
-account cut/recovery, затем actual sender/protection/reconcile. ORDER_SEND
-disabled. Ниже — история
+PRIVATE_EVENTS не сертифицирован,2 close gaps сохранены. Пользователь подтвердил
+эксклюзивность Demo-счёта для нового бота. [P0-C1 manifest](../specs/binance-demo-account-opening-manifest.md)
+регистрирует декларацию и provisional opening inventory/valuation; далее
+certified account cut/recovery, затем actual sender/protection/reconcile. ORDER_SEND
+disabled.
+P0-C1 свежий capture:866 returned assets,2 ненулевых остатка, COMPLETE observed
+Demo midpoint valuation,2 SEED lots;39 focused /829 full tests GREEN.
+Financial episode ещё не открыт, daily PnL null; стартовые средства не прибыль.
+Ниже — история
 ранее выполненных шагов и их отдельных результатов; прежние «следующий
 приоритет» не заменяют этот текущий порядок. Торговые gates не ослаблены.
 

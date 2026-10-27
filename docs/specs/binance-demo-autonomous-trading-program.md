@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-27. Status: **P0-A/B + P1-A/B/order-test + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 790 GREEN; REST/order-test/signed WSS control checks PASS; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-27. Status: **P0-A/B/C1 + P1-A/B/order-test + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 829 GREEN; REST/order-test/signed WSS control checks PASS; opening PROVISIONAL; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 
 Current user priority (2026-10-27): перейти к торговому контуру. Реализован
@@ -23,12 +23,21 @@ PASS;866/866 возвращённых активов совпали между R
 финансового журнала. Economic events/fills0, доставка ещё не доказана;
 оба intentional close оставили STREAM_GAP, не очищенный reconnect.
 PRIVATE_EVENTS ещё UNVERIFIED, ORDER_SEND DENIED. Следующий приоритет:
-подтверждённый dedicated-account ownership, opening inventory/valuation и
-certified cut/recovery, затем P3 sender/protection/reconcile. Эксклюзивность
-счёта уточняется у пользователя; пустые open orders её не доказывают.
+certified cut/recovery и financial anchors, затем P3
+sender/protection/reconcile. Пользователь подтвердил эксклюзивность счёта
+для нового приложения. [P0-C1 manifest](binance-demo-account-opening-manifest.md)
+регистрирует декларацию против HMAC identity и сохраняет provisional SEED
+inventory/valuation. Пустые open orders сами по себе ownership не доказывают;
+декларация не закрывает actual history/flows и certified financial cut.
+Свежий P0-C1 capture:866 returned assets,2 ненулевых актива, COMPLETE
+Demo midpoint valuation,2 SEED lots,0 managed assets,0 open orders/lists.
+39 focused /829 full tests GREEN; начальный капитал не daily profit,
+financial episode не открыт, ORDER_SEND disabled. Две отклонённые попытки
+(Decimal clock, Unicode identifiers) сохранены; воспроизведены тестами до repair.
 Техническая проверка подписки не является торговым релизом.
-Баланс/ключи/UID/runtime reports не коммитятся. Это не закрывает ownership,
-financial anchors, account history, market freshness или execution protection.
+Баланс/ключи/UID/runtime reports не коммитятся. Human declaration и provisional
+opening не закрывают independent financial anchors, account history,
+market freshness или execution protection.
 
 Полный [аудит Binance и решений](binance-demo-interaction-decision-audit.md)
 обязателен до автономного исполнения/learning. AUD-A: durable opt-in REST attempts

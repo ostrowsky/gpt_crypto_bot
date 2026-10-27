@@ -28,8 +28,12 @@ balances/open orders/lists. KEY_TRADE_VALIDATED was SUPPORTED for the tested
 request/generation with30s expiry, not indefinitely renewed by saved reports.
 39 new focused tests cover default-off/single-POST/audit/clock/rate/auth/fences.
 PRIVATE_EVENTS remains UNVERIFIED and ORDER_SEND DENIED.
-Exclusive ownership, actual history/flows, certified as-of account/valuation
-anchors, actual private-event delivery and execution/protection are still pending.
+At that diagnostic milestone exclusive ownership had not yet been declared.
+The user has now explicitly confirmed exclusive use by the new bot; the
+[opening manifest](binance-demo-account-opening-manifest.md) registers this
+against the HMAC account identity. Actual history/flows, certified as-of
+account/valuation anchors, private-event delivery and execution/protection
+remain pending.
 Earlier dated pending-smoke paragraphs below describe their original milestones.
 
 Signed private transport diagnostic (2026-10-27): existing PrivateEventReader,
@@ -62,12 +66,11 @@ No runtime/account data was committed. Existing synthetic regressions31 private,
 change was needed and no artificial RED was introduced for this verification.
 Full Harness remains FAIL TH-11 (historical alpha replay source hash stale).
 
-Remaining prerequisite: explicitly registered dedicated-account ownership,
-source-backed opening inventory/basis/valuation and certified cut/recovery.
-The user was asked whether this Demo account is exclusive to the new app;
-until that fact is provided, ownership is unconfirmed rather than inferred
-from empty open orders. This is missing account information, not a renewed
-request for permission to trade on Demo.
+Dedicated-account exclusivity was explicitly confirmed by the user on
+2026-10-27. P0-C1 adds immutable registration and provisional opening
+inventory/basis/valuation. This is a human declaration plus source observations,
+not independent certification that no external activity ever occurred.
+Certified cut/recovery and financial anchors are still prerequisites.
 
 ## Problem
 
