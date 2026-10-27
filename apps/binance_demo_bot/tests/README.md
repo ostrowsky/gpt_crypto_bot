@@ -1,12 +1,25 @@
 # Independent Demo bot: P0-A tests
 
+AUD-B3 (2026-10-27):15 intended missing-module RED ->15 focused GREEN
+then a valid public Close-code3072 reason-leak reproduction RED before repair.
+Final16 focused GREEN (3.068s); complete591 app GREEN. `test_protocol_audit.py` exercises
+real pinned Sans-I/O parsing, automatic Pong/close echo, client controls,
+causal parents/original clocks, private redaction, bounded pending intents,
+write-return versus unknown outcomes, duplicate ownership and actual factory
+installation. Native receive-thread tests use an own loopback pair with bounded
+connect/accept/receive and assert termination after journal failure under the
+protocol mutex. The original Windows socketpair fallback hung at accept in the
+sandbox; diagnostic-only run was not counted GREEN and the fixture was bounded.
+No Binance access, credentials, trading, full-wire capture or PnL claim.
+Archive/retention/export remains open; existing full Harness FAIL TH-11 remains.
+
 Specifications: [financial API](../../../docs/specs/binance-demo-phase0-financial-contract.md#p0-a-публичный-контракт-первой-партии-unit-тестов),
 [isolation kernel](../../../docs/specs/binance-demo-application-isolation.md).
 Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 495 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 591 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,

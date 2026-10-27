@@ -83,6 +83,11 @@ class DemoMarketWsTransport:
         self._logger = logging.Logger("binance_demo_bot.market_transport")
         self._logger.disabled, self._logger.propagate = True, False
         self._controls = deque()
+        self._protocol_audit=None
+
+    def set_protocol_audit(self,observer):
+        if self._connection is not None:raise AdapterError('WS_ALREADY_CONNECTED')
+        self._protocol_audit=observer
 
     def connect(self):
         if self._connection is not None:
@@ -90,9 +95,10 @@ class DemoMarketWsTransport:
         connection = None
         try:
             self._ssl_context = _verified_market_tls(self._ssl_context)
+            factory={} if self._protocol_audit is None else {'create_connection':self._protocol_audit.connection_factory()}
             connection = ws_connect(WS_URL, ssl=self._ssl_context, proxy=None,
                 open_timeout=5, close_timeout=2, compression=None, max_size=WS_LIMIT,
-                max_queue=16, ping_interval=None, ping_timeout=5, logger=self._logger, legacy=True)
+                max_queue=16, ping_interval=None, ping_timeout=5, logger=self._logger, legacy=True,**factory)
             if (connection.request.path != "/stream" or connection.request.headers.get("Host")
                     not in ("demo-stream.binance.com", "demo-stream.binance.com:443")):
                 raise AdapterError("HANDSHAKE_TARGET_MISMATCH")

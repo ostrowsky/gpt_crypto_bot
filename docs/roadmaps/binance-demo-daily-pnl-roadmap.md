@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11. Статус: **P0-A/B, P1-A/B и P2-A/B2 foundations; 495 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2 и AUD-A/B1/B2/B3 foundations; 591 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
@@ -72,9 +72,11 @@ snapshot/private-record linkage и fail-closed cleanup;25 новых /547 app GR
 AUD-B2 добавляет coordinator/supervisor decisions до side effects, causal
 source refs, independent gap counts и frozen processing reports;28 новых /575
 app GREEN. Сохранены неизвестные результаты и исходные ошибки, исправлен
-cleanup при блокировке coordinator thread на собственном lock. Protocol controls,
-future OMS/policy audit и archives ещё не готовы. Следующий приоритет —
-protocol/retention/export; далее latency/account gates перед исполнением.
+cleanup при блокировке coordinator thread на собственном lock. AUD-B3 добавляет
+parsed PING/PONG/CLOSE, automatic Pong/close echo и локальные socket-write
+outcomes;16 новых /591 app GREEN. Не заявляет remote ACK/full wire capture;
+capture coverage UNKNOWN. Future OMS/policy audit и archives ещё не готовы.
+Следующий приоритет — retention/export; далее latency/account gates перед исполнением.
 P2B2-12: common bounded writer/coalesced FULL commits/durable ACK, independent
 group guards/failures, no blind retry при unknown commit и owned lifecycle.
 24 new после RED,495 GREEN; исходные receipts/FULL/250ms сохранены.

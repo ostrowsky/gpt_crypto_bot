@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **575 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **591 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -74,6 +74,7 @@ Verified: **575 tests GREEN**, including 56 REST, 69 private/evidence cases,
 27 REST/decision audit/redaction/crash/coverage cases,
 25 WSS audit/receipt/linkage/failure cases,
 28 operational-decision/frozen-prefix/cleanup cases,
+16 parsed-control/native-socket/failure cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -413,9 +414,17 @@ evidence record sequence/namespace. Raw and normalized databases have separate
 commits: missing processing markers remain unknown; no cross-database atomicity
 is claimed. Journal failure closes and invalidates the reader, including after
 normalized commit. Reader health exposes audit state/counters without payloads.
-`protocol_controls_observed=False`: automatic low-level control frames consumed
-inside the WebSocket library are outside this application boundary. Full audit,
-remaining operational integrations and archives remain required before autonomy.
+AUD-B3 adds per-connection parsed PING/PONG/CLOSE hooks on the pinned default
+transports before native receive threads start. Automatic Pong and close echo
+have durable INTENT/QUEUED and socket WRITE_ATTEMPT/WRITE_RETURNED/WRITE_UNKNOWN
+records. Local socket return is never a Binance ACK. Pending control intents
+are bounded at64; audit failure shuts down the raw socket without re-entering
+the native protocol mutex. Private payloads remain sanitized/omitted.
+Only actual hook installation sets `protocol_controls_observed=True`; injected
+transports without hooks and unused mocked factories remain false. This is
+parsed-control observation, not serialized TCP/TLS capture: frames rejected
+before the parser hook remain unobserved and capture coverage stays UNKNOWN.
+Full audit, future policy/OMS integrations and archives remain required.
 
 AUD-B2 logs decisions of the current read-only market coordinator and stream
 supervisor before network/scheduling effects: metadata/clock/quote refresh,

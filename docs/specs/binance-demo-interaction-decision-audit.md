@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
-Дата: 2026-10-11, обновлено 2026-10-26. Статус: **AUD-A/B1/B2 implemented;
-80 audit focused / 575 app GREEN; full interaction audit incomplete**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3 implemented;
+96 audit focused / 591 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -314,3 +314,72 @@ these mechanics; no real keys or network calls. Full Harness remains FAIL TH-11
 for the historical replay hash. No full-market rerun or earnings claim. Next:
 automatic protocol-control capture and retained archive/export lifecycle;
 market latency and account/ownership qualification still precede execution.
+
+## AUD-B3: parsed WebSocket control frames (2026-10-27)
+
+Specified before tests/code; IMPLEMENTED with16 focused GREEN. Extend opt-in audit on owned default transports,
+using the pinned websockets17.1 ClientConnection factory. No dependency-file
+patches, endpoints/TLS/proxy changes, credential discovery or order capability.
+Injected transports without the observer remain explicitly unobserved.
+
+- B301: install per-connection hooks before the native reader thread starts.
+  Observe parsed PING/PONG/CLOSE before protocol interpretation and automatic
+  responses; preserve original wall/mono, connection ID, direction, fixed opcode,
+  phase and causal parent. Public decoded payload <=125 bytes may be exact when
+  safe, but is not a serialized/masked wire capture. Private payload is always
+  sanitized/omitted. Close payload is always OMITTED (only byte count), even
+  on public streams. No exception text, close reason, keys or signature leakage.
+- B302: outbound control phases INTENT (durable before queue), QUEUED (after
+  protocol serialization), WRITE_ATTEMPT and WRITE_RETURNED/WRITE_UNKNOWN are
+  distinct. Local sendall return is not a remote ACK. Batch send failure leaves
+  every pending control uncertain even if earlier bytes may have been sent.
+  Max64 pending control intents; no unbounded queue. Data-message payloads are
+  not duplicated by the control observer. Malformed frames rejected before the
+  parsed-frame hook remain unobserved; full capture coverage stays UNKNOWN.
+- B303: counters for observed inbound/outbound controls, queued controls,
+  socket-write attempts/returns/unknowns and audit ACK/gaps come from observer
+  actions independently of saved rows. Actual hook installation, not merely a
+  transport capability or mocked factory, enables protocol_controls_observed.
+  Reset connection identity on reconnect; installed callbacks freeze that ID.
+- B304: journal failure/overflow closes the raw socket without recursively
+  invoking ClientConnection.close while its protocol mutex is held. Suppress
+  further protocol processing/queueing/writes after failure; native teardown
+  must terminate. Preserve the first safe audit error through high-level
+  transport/reader handling. No false ACK or silently successful fallback.
+- B305: controls rejected during content interpretation get a separate REJECTED
+  marker; parser/TCP/TLS gaps cannot become full coverage. Health has counters/
+  scope/unknowns but no payloads. Audit absence retains the original factory and
+  unaudited behavior. Hooks are supported only for the exact pinned backend;
+  unsupported versions/duplicate ownership are rejected before use.
+
+Test-first gate: real Sans-I/O protocol for automatic Pong/close echo, client
+Ping/unsolicited Pong/content rejection, no data duplication and bounded pending
+work; real native ClientConnection + own bounded loopback pair for masked responses/write
+outcomes and journal abort under the protocol lock (no external network). Verify
+default public/private wiring, absent/injected observer, source clocks, private
+redaction and first-error preservation. Then full regressions/staged Harness,
+commit/push. No real keys, Binance connection, trading or latency/PnL claim.
+Archive/rotation/compression/export remains the following implementation gate;
+active evidence must not be deleted to evade the existing finite disk budget.
+
+### AUD-B3 verification
+
+The15 new tests first failed on the intended missing `protocol_audit` module
+(RED), then passed after implementation. The Windows socketpair fallback blocked
+at accept in the sandbox; diagnostic traceback identified a fixture/tooling
+problem, not a successful run. Replaced it with an equivalent own loopback pair
+with two-second connect/accept/receive bounds; no external server or keys.
+A public Close-code1000 case initially stayed GREEN because its invalid UTF-8
+code bytes already caused omission. A valid application Close-code3072 case
+then reproduced exact reason retention (RED); all Close payloads are now
+explicitly omitted, including automatic echo. Final16 focused GREEN (3.068s);
+complete app591 GREEN. Native automatic Pong
+passes a real masked socket send, and journal abort under the protocol mutex
+terminates the native receive thread. These tests certify the stated parsed
+boundary only. Archive/retention/export and full-market latency remain open;
+no trading or PnL improvement is claimed.
+Root14 specification and13 Truth Harness tests pass; `git diff --check` passes.
+Full Harness remains FAIL TH-11: canonical portfolio artifact has a stale
+`replay_backtest.py` source hash. This read-only observability slice does not
+repair or rely on that portfolio evidence; a current causal replay is required
+before profitability claims or trading-policy relaxation.

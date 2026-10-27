@@ -44,15 +44,21 @@ class DemoWsTransport:
         self._logger = logging.Logger("binance_demo_bot.private_transport")
         self._logger.disabled = True
         self._logger.propagate = False
+        self._protocol_audit=None
+
+    def set_protocol_audit(self,observer):
+        if self._connection is not None:raise AdapterError('WS_ALREADY_CONNECTED')
+        self._protocol_audit=observer
 
     def connect(self):
         if self._connection is not None:
             raise AdapterError("WS_ALREADY_CONNECTED")
         connection = None
         try:
+            factory={} if self._protocol_audit is None else {'create_connection':self._protocol_audit.connection_factory()}
             connection = ws_connect(WS_URL, ssl=ssl.create_default_context(), proxy=None,
                 open_timeout=5, close_timeout=2, compression=None, max_size=WS_LIMIT,
-                max_queue=64, ping_interval=None, ping_timeout=5, logger=self._logger, legacy=True)
+                max_queue=64, ping_interval=None, ping_timeout=5, logger=self._logger, legacy=True,**factory)
             request = connection.request
             if (request.path != "/ws-api/v3" or request.headers.get("Host") not in
                     ("demo-ws-api.binance.com", "demo-ws-api.binance.com:443")):

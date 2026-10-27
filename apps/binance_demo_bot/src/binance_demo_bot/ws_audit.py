@@ -1,4 +1,4 @@
-"""WSS application calls/messages only; hidden protocol controls are not observed."""
+"""WSS application evidence with opt-in pinned parsed-control observation."""
 from copy import deepcopy
 import json
 import uuid
@@ -9,7 +9,7 @@ from .interaction_audit import AuditJournal, response_payload
 OPERATIONS=('CONNECT','SEND','RECV','PING','CLOSE')
 SAFE_ERRORS=frozenset(('WS_UNAVAILABLE','WS_BUFFER_OVERFLOW','WS_RATE_LIMITED',
     'INVALID_PARAMETERS','FORBIDDEN_METHOD','HANDSHAKE_TARGET_MISMATCH',
-    'FORBIDDEN_ENDPOINT','WS_ALREADY_CONNECTED','TLS_UNSAFE'))
+    'FORBIDDEN_ENDPOINT','WS_ALREADY_CONNECTED','TLS_UNSAFE','AUDIT_PROTOCOL_UNSUPPORTED','AUDIT_PROTOCOL_OWNERSHIP'))
 
 
 def bind_ws_audit(transport,journal,clock,identity,*,private=False,credentials=None):
@@ -35,6 +35,7 @@ class AuditedWsTransport:
         self._frames=0
         self._cleanup_closes=0
         self._counts={op:dict(attempted_n=0,completed_n=0,errors_n=0,recorded_n=0) for op in OPERATIONS}
+        self._protocol=None
 
     def _secrets(self):
         values=[]
@@ -55,14 +56,26 @@ class AuditedWsTransport:
         try:
             return self.journal.append(kind,data,wall_ms=wall,monotonic_ns=mono,secrets=self._secrets())
         except AdapterError as error:
-            self.error=error.reason
+            reason=self.journal._failure_reason or error.reason
+            if self.error is None:self.error=reason
             self._physical_close()
-            raise
+            raise AdapterError(reason) from None
+
+    def _protocol_failure(self,reason):
+        # Native callback may hold the protocol mutex; the observer has already
+        # closed the raw socket. Never invoke the application close path here.
+        if self.error is None:self.error=reason
 
     def _perform(self,operation,call,request=None):
         if operation=='CONNECT':
             self.connection_id=uuid.uuid4().hex
             self._closed=False
+            self._protocol=None
+            if hasattr(self.transport,'set_protocol_audit'):
+                from .protocol_audit import ProtocolControlAudit
+                self._protocol=ProtocolControlAudit(self.journal,self.clock,self.connection_id,
+                    private=self.private,secrets=self._secrets,on_failure=self._protocol_failure)
+                self.transport.set_protocol_audit(self._protocol)
         if operation=='RECV':self.last_receipt=None
         self._sequence+=1
         common=dict(operation=operation,operation_id=uuid.uuid4().hex,connection_id=self.connection_id,
@@ -129,7 +142,9 @@ class AuditedWsTransport:
             self.clock.wall_ms(),self.clock.monotonic_ns())
 
     def health(self):
-        return dict(scope='WSS_APPLICATION_BOUNDARY',protocol_controls_observed=False,full_audit_complete=False,
+        protocol=self._protocol.health() if self._protocol is not None else None
+        return dict(scope='WSS_APPLICATION_BOUNDARY',protocol_controls_observed=bool(protocol and protocol['installed']),
+            protocol_control=protocol,full_audit_complete=False,
             audit_state=self.journal.health()['state'],error=self.error,connection_id=self.connection_id,
             received_frames_n=self._frames,cleanup_closes_n=self._cleanup_closes,operations=deepcopy(self._counts))
 

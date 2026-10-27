@@ -1,7 +1,7 @@
-"""AUD-A/B1: app-local durable interaction/decision evidence, never an OMS.
+"""AUD-A/B1/B2/B3: app-local durable interaction/decision evidence, never an OMS.
 
-The ws_audit bridge supplies application-level WSS observations. Hidden protocol
-controls and automatic policy coverage remain incomplete. No credential discovery,
+The ws_audit bridge supplies application and pinned parsed-control observations.
+Full wire capture and policy coverage remain incomplete. No credential discovery,
 arbitrary endpoint capture, async backlog or automatic log deletion.
 """
 import base64
@@ -21,7 +21,7 @@ from .adapter import AdapterError
 from .isolation import AppPaths
 from .journal import _WriterLease
 
-KINDS = ('RUN_BEGIN', 'RUN_END', 'REST_BEGIN', 'REST_END', 'DECISION','WS_BEGIN','WS_END','WS_PROCESSING')
+KINDS = ('RUN_BEGIN', 'RUN_END', 'REST_BEGIN', 'REST_END', 'DECISION','WS_BEGIN','WS_END','WS_PROCESSING','WS_CONTROL')
 MAX_EVENT_BYTES = 48*1024*1024
 SENSITIVE = re.compile(r'api[-_ ]?key|api[-_ ]?secret|signature|authorization|cookie|listen[-_ ]?key|access[-_ ]?token|password|secret|token', re.I)
 REDACTED = '[REDACTED]'
@@ -119,7 +119,7 @@ class AuditJournal:
             account_episode_id=episode_id,portfolio_scope_id=scope_id)
         package=Path(__file__).resolve().parent
         self.source_code_sha256=_sha({n:hashlib.sha256((package/n).read_bytes()).hexdigest()
-                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py')})
+                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py','protocol_audit.py')})
         self.path=paths.runtime_path(database)
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.max_bytes,self.fault_hook=max_bytes,fault_hook
