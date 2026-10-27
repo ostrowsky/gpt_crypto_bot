@@ -50,12 +50,12 @@ def _check_receipt(receipt,seal,first):
     if receipt!=expected:raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
 
 
-def _read_source(paths,database,identity,archives):
+def _read_source(paths,database,identity,archives,*,immutable=False):
     path=_database(paths,database)
     if not path.is_file() or path.stat().st_size==0:raise AdapterError('AUDIT_ROLLOVER_MISSING')
     connection=None
     try:
-        connection=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True);connection.execute('BEGIN')
+        connection=sqlite3.connect(path.as_uri()+'?mode=ro'+('&immutable=1' if immutable else ''),uri=True);connection.execute('BEGIN')
         metadata={}
         for key,raw in connection.execute('SELECT key,value FROM meta'):
             if len(raw)>65536:raise ValueError()

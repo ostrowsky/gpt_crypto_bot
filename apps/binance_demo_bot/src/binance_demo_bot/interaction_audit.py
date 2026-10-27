@@ -119,7 +119,7 @@ class AuditJournal:
             account_episode_id=episode_id,portfolio_scope_id=scope_id)
         package=Path(__file__).resolve().parent
         self.source_code_sha256=_sha({n:hashlib.sha256((package/n).read_bytes()).hexdigest()
-                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py','protocol_audit.py','audit_rollover.py')})
+                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py','protocol_audit.py','audit_rollover.py','audit_backup.py','audit_retention.py')})
         self.path=paths.runtime_path(database)
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.max_bytes,self.fault_hook=max_bytes,fault_hook

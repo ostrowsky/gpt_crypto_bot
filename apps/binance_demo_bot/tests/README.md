@@ -1,5 +1,18 @@
 # Independent Demo bot: P0-A tests
 
+AUD-C2b1 (2026-10-27):23 backup +12 retention tests first RED for intended
+missing modules. The initial code exposed active-source error ordering; fixed
+before23 backup /12 retention GREEN. Lost-file fixtures now model loss of the
+entire SQLite DB/WAL/SHM set; a separate stale-WAL test still requires refusal.
+Additional RED reproduced quota staging, unbounded partial restores, hidden
+ledger failures/schema drift and malformed release clearing a hold. Fixed to
+26 backup /15 retention GREEN. A cross-seal invalid-count RED was then fixed
+before final16 retention GREEN (1.817s). Final707 app GREEN (127.437s),14 root
+spec +13 Truth Harness PASS. Actual WAL data, native SQLite backup, non-mutating
+verification, real publication process deaths, missing sealed DB/prefix restore
+followed by C2a recovery, no-overwrite/sidecar/pin guards and opaque hold history
+are covered. No keys/network/trading/deletion; certification remains unavailable.
+
 AUD-C2a (2026-10-27):27 intended missing-module RED before implementation;
 then27 GREEN. The metadata-tampering fixture restores its mutation trigger so
 it isolates ancestry validation rather than the separate trigger-presence guard.
@@ -48,7 +61,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 665 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 707 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,

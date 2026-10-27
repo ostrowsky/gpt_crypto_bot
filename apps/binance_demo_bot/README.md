@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **665 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **707 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -77,6 +77,8 @@ Verified: **665 tests GREEN**, including 56 REST, 69 private/evidence cases,
 16 parsed-control/native-socket/failure cases,
 38 archive/export/integrity/crash/retention cases,
 36 sealed-rollover/ancestry/limits/restart cases,
+26 full sealed-backup/WAL/schema/restore cases,
+16 retention-ledger/history/idempotency/coverage cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -545,6 +547,75 @@ Original segment evidence, reservations and archives remain preserved; normal
 SQLite checkpoint/close may merge and retire WAL files. The
 C1 export precedes the terminal seal: final seal/activation evidence still lives
 in the original DB, so that DB cannot yet be reclaimed from the C1 copy alone.
-C2b requires full-tail backup/restoration and certified exposure/day/research
-holds before deletion. Live maintenance/rebinding, cross-segment analytics and
+C2b1 below supplies full-tail backup/restoration and hold history; authoritative
+exposure/day/research certification remains required before deletion.
+Live maintenance/rebinding, cross-segment analytics and
 aggregate storage qualification remain gates; current reports stay per segment.
+
+AUD-C2b1 adds `SealedAuditBackup` for a complete sealed segment. Its SQLite
+online backup includes committed WAL pages, terminal RUN_END, immutable parent/
+seal metadata, activation receipt, the linked C1 gzip archive and a successor
+first-record witness. Verification uses an immutable read-only snapshot and
+the app's fixed SQL schema; it does not add WAL/SHM files to the bundle.
+
+```python
+from binance_demo_bot.audit_backup import SealedAuditBackup
+
+copies = SealedAuditBackup(paths, account_alias=identity["account_alias"],
+                          episode_id=identity["account_episode_id"],
+                          scope_id=identity["portfolio_scope_id"])
+copy = copies.create(database="audit.sqlite")  # Source must be sealed/activated.
+backup_id = copy["backup_id"]
+manifest_pin = copy["manifest"]["manifest_sha256"]
+# Store this pin independently. After loss of the original SQLite file set:
+# receipt = copies.restore(backup_id, expected_manifest_sha256=manifest_pin,
+#                          quiesced=True)
+```
+
+Bundles under `.runtime/audit-sealed-backups` are published only after fsync and
+verification. Defaults:512MiB per SQLite copy,1GiB aggregate,16 bundles including
+incomplete attempts. Logical pages, prefix bytes and manifest reserve are
+checked before staging. Restore staging has separate count/byte bounds under
+the same ceilings. Original files and failed staging evidence are preserved.
+
+Restore requires a matching manifest pin, explicit maintenance quiescence and
+an absent target DB/WAL/SHM. It reuses an existing prefix only if its pin matches,
+checks a present successor against the activation witness, and never overwrites
+or deletes a target. A partial prefix publication is explicitly UNKNOWN and may
+be reused on retry. Restoring copies files and verifies evidence; it does not
+append a new BEGIN or start a trading runtime. C2a recovery can then open an
+existing valid active head. This is one sealed-segment copy, not a whole-chain,
+active-head or hold-ledger disaster backup; Windows power-loss is not certified.
+
+`RetentionLedger` stores append-only holds/releases in separate own
+`audit-retention.sqlite` with FULL commits, identity, hash chain and writer
+ownership. Holds bind to a seal digest across all copies. Categories are
+ACTIVE_EXPOSURE, UNFINALIZED_DAY, RESEARCH and INTEGRITY. Opaque references and
+request IDs are32 hex; evidence digests are64 hex. For example:
+
+```python
+from binance_demo_bot.audit_retention import RetentionLedger
+
+holds = RetentionLedger(paths, account_alias=identity["account_alias"],
+                        episode_id=identity["account_episode_id"],
+                        scope_id=identity["portfolio_scope_id"])
+try:
+    # hold_id = holds.place(seal_sha256, category="RESEARCH",
+    #                       reference_id=research_id, evidence_sha256=evidence_hash,
+    #                       request_id=request_id)
+    # holds.release(hold_id, evidence_sha256=release_evidence_hash,
+    #               request_id=release_request_id)
+    print(holds.status(copy["manifest"]["source_metadata"]["sealed"]["seal_sha256"]))
+finally:
+    holds.close()
+```
+
+Equal request+payload retries return the original event; conflicting reuse or
+independent duplicate release is denied. Unknown persistence cannot turn into a
+successful retry until verified reopen. Status exposes frozen-prefix mutation/
+placed/active/released/invalid counts, up to100 active IDs, and separate live
+ledger failure state. Malformed releases never clear valid holds. Missing
+authoritative account/day/research certification stays UNAVAILABLE; even an
+empty ledger or released holds always has `deletion_eligible=False`. There is
+no deletion/reclamation API. Certifying those sources and backing up the hold
+ledger/full chain remain release gates before any evidence can be reclaimed.

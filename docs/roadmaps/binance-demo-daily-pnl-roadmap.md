@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2 и AUD-A/B1/B2/B3/C1/C2a foundations; 665 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2 и AUD-A/B1/B2/B3/C1/C2a/C2b1 foundations; 707 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
@@ -80,8 +80,10 @@ AUD-C1 реализует frozen verified gzip export и preserve-all retention 
 38 новых /629 app GREEN. Real process-death recovery и пределы inflate/disk
 проверены; source evidence не удаляется. AUD-C2a реализует maintenance rollover
 с immutable seal/ancestry/activation anchors, crash recovery и сохранением
-resource ceilings;36 новых /665 app GREEN. Следующий приоритет — full sealed-tail
-backup/restore и certified holds перед C2b reclamation; live rebinding/analytics
+resource ceilings;36 новых /665 app GREEN. AUD-C2b1 реализует полный sealed-tail
+SQLite/WAL/prefix backup, pinned restore и opaque hold/release ledger;42 новых
+/707 app GREEN. Следующий приоритет — authoritative hold certification и
+ledger/full-chain/active-head backup перед reclamation; live rebinding/analytics
 и latency/account gates остаются перед исполнением.
 P2B2-12: common bounded writer/coalesced FULL commits/durable ACK, independent
 group guards/failures, no blind retry при unknown commit и owned lifecycle.

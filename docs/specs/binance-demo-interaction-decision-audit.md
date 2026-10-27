@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1/C2a implemented;
-170 audit focused / 665 app GREEN; full interaction audit incomplete**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1/C2a/C2b1 implemented;
+212 audit focused / 707 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -562,3 +562,104 @@ market/financial qualification follows from these maintenance-only tests.
 No network/keys/orders/legacy-worker changes or runtime artifacts in the commit.
 Next: full sealed-tail backup/restoration and certified holds before C2b
 reclamation; live maintenance/rebinding and cross-segment analytics remain gates.
+
+## AUD-C2b1: full sealed-segment backup/restore and retention ledger (2026-10-27)
+
+Specified before tests/code; IMPLEMENTED with42 focused GREEN. `SealedAuditBackup(AppPaths, account_alias=...,
+episode_id=..., scope_id=..., max_database_bytes=512MiB,
+max_total_bytes=1GiB, max_backups=16, fault_hook=None)` in `audit_backup.py`:
+`create(database='audit.sqlite', backup_id=None)`, `verify(backup_id,
+expected_manifest_sha256=None)`, `restore(backup_id, *,
+expected_manifest_sha256, target_paths=None, quiesced=False)`.
+`RetentionLedger(AppPaths, account_alias=..., episode_id=..., scope_id=...)`
+in `audit_retention.py`: `place(seal_sha256, *, category, reference_id,
+evidence_sha256, request_id)`, `release(hold_event_id, *, evidence_sha256,
+request_id)`, `status(seal_sha256, through_seq=None)`, `close()`.
+
+- C211: backup only sealed, activated segments. Hold the rollover lease and
+  source writer fence; verify the entire source/seal/C1 archive and successor
+  first-record activation witness. Use pinned SQLite online backup, including
+  committed WAL pages; never copy only the possibly stale main DB file. Include
+  full metadata, terminal RUN_END and activation receipt, original records/IDs/
+  hashes, prefix gzip archive and manifest, and successor first-record witness.
+  The copy is ONE sealed segment, not a whole-account/active-head disaster backup.
+- C212: publish immutable own `.runtime/audit-sealed-backups/<32hex>` bundles
+  through `.pending-<id>`, fsynced files, full verification and directory rename.
+  Layout: `manifest.json` and `snapshot/.runtime/<database>` plus its exact
+  `audit-archives/<archive_id>/{manifest.json,records.jsonl.gz}`. Manifest freezes
+  identity/schema, source metadata/row count/tip, fixed file sizes/SHA256,
+  exporter fingerprint and successor witness. Verify without modifying bundle
+  files or creating SQLite sidecars (immutable read-only snapshot). Internal
+  checksums are not authenticity; an independent matching manifest pin is
+  mandatory for restore. Unsupported schema/layout/SQLite objects, corrupt
+  bytes/chains/pins, extra files, links/junctions and path escapes are rejected.
+- C213: bounded SQLite page copy, manifest, per-file/database/aggregate bytes
+  and bundle count including incomplete attempts. Reject before publication
+  on limits. Preserve source rows/metadata/health and all failed staging evidence.
+  Pre-publication faults are WRITE_FAILED; after publication, PUBLICATION_UNKNOWN.
+  Real process death is checked before/after publication. No directory-fsync or
+  Windows power-loss guarantee. No keys/network/orders/financial-core changes.
+  Preflight the logical DB pages plus prefix files/manifest reserve before
+  staging. Restore staging has separate count/byte limits under the same
+  configured ceilings; repeated partial restores cannot grow without bound.
+- C214: restore only into absent DB targets with absent WAL/SHM. Never overwrite
+  files or remove sidecars. Require explicit quiescence and target identity;
+  serialize with rollover/archive/source leases and guard paths before opening.
+  Validate the complete bundle/pin first. An existing prefix archive is reusable
+  only if it verifies against the exact pin. A present successor must match
+  the activation witness. Stage/fsync/verify copies, publish prefix then DB and
+  reverify; errors after any publication are RESTORE_UNKNOWN. Retry can reuse
+  an identical prefix after a partial restore, but cannot overwrite an existing
+  DB. Preserve pending evidence. Restoring does not append RUN_BEGIN, enable
+  trading, invent missing ancestors/successors or return an active journal.
+- C215: ledger is a separate own `audit-retention.sqlite` append-only FULL/hash
+  journal with immutable rows, identity and OS writer ownership. Categories:
+  ACTIVE_EXPOSURE, UNFINALIZED_DAY, RESEARCH, INTEGRITY. A hold applies to the
+  seal digest, independent of backup ID, so making another copy cannot evade it.
+  Opaque reference/request/event IDs are32 hex; evidence/seal digests are64 hex.
+  Place/release are explicit durable events; release references an earlier own
+  hold and never deletes it. Equal request ID+payload returns the original ID;
+  conflicting reuse, foreign/missing hold and second independent release fail.
+  Failed/unknown ledger persistence cannot return a successful idempotent ACK
+  until a verified reopen; retain original error/incomplete-run evidence.
+- C216: status verifies a frozen recorded prefix, counts placed/active/released
+  holds and invalid references separately, and bounds returned active IDs at100.
+  Later releases cannot change an older report. Counts conserve placed_N =
+  active_n + released_n for valid data; zero holds is not proof of account/day/
+  research coverage. Always `deletion_eligible=False`, certification=UNAVAILABLE:
+  no authoritative exposure/final-day/research connector exists yet. Corruption
+  is FAIL; missing certification stays UNKNOWN, not CLEAR. No delete/reclaim API.
+  Report mutation N and count unique invalid mutation IDs, including schema/
+  operation drift and conflicting releases. Live ledger failure state/reason
+  are explicit outside the frozen-prefix report hash.
+
+Acceptance: SPEC -> missing-module RED -> implementation -> focused/full GREEN,
+SQLite/WAL metadata/terminal/witness roundtrip, non-mutating verification,
+actual lost sealed DB+prefix restore followed by C2a recovery, immutable targets,
+wrong identity/pin/active source, sidecar/conflicting archive, quota/path/schema
+and corruption, real publication crashes, partial restore retry, ledger
+idempotency/release/restart/unknown commit/frozen-prefix/bounded n/N checks.
+Rollback: omit opt-in backup/ledger operations; never unseal or delete evidence.
+Next: certify authoritative hold sources and ledger disaster backup, full-chain/
+active-head restoration and live maintenance/analytics before any reclamation.
+
+### AUD-C2b1 verification
+
+Initial23 backup and12 ledger missing-module RED; native implementation first
+exposed active-source error ordering. Restore loss fixtures were corrected to
+remove the entire DB/WAL/SHM set, preserving the separate stale-sidecar refusal
+test. Then23/12 GREEN. Additional RED covered quota preflight, restore staging
+limits, missing live ledger-failure metadata, operation/schema drift and an
+invalid release incorrectly clearing a hold; repaired to26 backup GREEN
+(32.269s) and15 retention GREEN. Cross-seal invalid-count leakage then failed
+before repair; final16 retention GREEN (1.817s). Full707 app GREEN (127.437s),
+14 root specification +13 Truth Harness GREEN. Real process deaths are tested
+before/after backup publication; an actual deleted sealed SQLite file set and
+prefix restore is followed by validated C2a active-head recovery.
+Verification preserves bundle bytes and creates no SQLite sidecars. The bundle
+is locally complete for one sealed segment; it does not certify a full-chain,
+active-head or hold-ledger disaster recovery plan. All deletion remains blocked.
+Full Harness remains FAIL TH-11 for the historical replay source hash; this
+slice neither changes trading policy nor supplies portfolio-alpha evidence.
+Next: authoritative hold certification and ledger/full-chain/active-head backup,
+then maintenance/rebinding and cross-segment analytics before reclamation.
