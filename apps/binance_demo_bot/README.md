@@ -60,7 +60,7 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **629 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **665 tests GREEN**, including 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,
@@ -76,6 +76,7 @@ Verified: **629 tests GREEN**, including 56 REST, 69 private/evidence cases,
 28 operational-decision/frozen-prefix/cleanup cases,
 16 parsed-control/native-socket/failure cases,
 38 archive/export/integrity/crash/retention cases,
+36 sealed-rollover/ancestry/limits/restart cases,
 29 original durable integration cases and real
 process deaths before/after commit. Trading awaits account adapter, exclusive
 ownership, actual anchors, OMS/risk and release evidence.
@@ -352,7 +353,7 @@ completeness and decision->fill->daily net PnL analysis. AUD-A now implements
 explicit opt-in durable REST attempts and a causal decision-recording API.
 AUD-B1 adds automatic WSS application capture for readers sharing that journal.
 AUD-B2 covers coordinator/supervisor branch decisions and recorded-prefix gaps.
-Certified archive rollover/reclamation and future OMS/policy decisions remain required before
+Live maintenance/rebinding, certified reclamation and future OMS/policy decisions remain required before
 autonomous execution/learning; snapshots/incidents do not constitute full audit.
 P2B2-12 public trial1791744230720272600:47.555206s, startup6/6 then0/6;
 final0/6 connected,REST quotes1375/1375,history18/1375 — FAIL. Writer accepted/
@@ -425,7 +426,7 @@ Only actual hook installation sets `protocol_controls_observed=True`; injected
 transports without hooks and unused mocked factories remain false. This is
 parsed-control observation, not serialized TCP/TLS capture: frames rejected
 before the parser hook remain unobserved and capture coverage stays UNKNOWN.
-Full audit, future policy/OMS integrations and certified archive rollover remain required.
+Full audit, future policy/OMS integrations and maintenance/reclamation gates remain required.
 
 AUD-B2 logs decisions of the current read-only market coordinator and stream
 supervisor before network/scheduling effects: metadata/clock/quote refresh,
@@ -494,6 +495,56 @@ accounting when unexpected directory entries are present.
 
 Retention is explicitly `PRESERVE_ALL_V1`, with zero deletion-eligible archives
 and no delete API. Active exposure, unfinalized days and current research remain
-protected because this slice deletes nothing. Certified rollover/reclamation
-and durable restart anchors are AUD-C2; sustained storage readiness and future
-OMS/policy audit remain open. Archive correctness is not a trading/PnL claim.
+protected because this slice deletes nothing. Rollover/restart mechanics are
+implemented in AUD-C2a below; full-tail restoration/reclamation remains C2b.
+Sustained storage readiness and future OMS/policy audit remain open.
+Archive correctness is not a trading/PnL claim.
+
+AUD-C2a adds explicit maintenance rollover in `audit_rollover.py`. Stop/drain
+readers before calling it and rebind them to the returned journal afterward:
+
+```python
+from binance_demo_bot.audit_rollover import AuditRollover
+
+identity = audit.identity
+rollover = AuditRollover(paths, account_alias=identity["account_alias"],
+                        episode_id=identity["account_episode_id"],
+                        scope_id=identity["portfolio_scope_id"])
+audit = rollover.rotate(audit, quiesced=True)
+# At a later restart, construct rollover with the same explicit identity:
+# audit = rollover.recover(database="audit.sqlite")
+```
+
+Only the default `audit.sqlite` root and managed `audit-segments/<id>.sqlite`
+paths participate. Recovery never creates a missing root. The source must be
+READY with zero process ACK gaps, outstanding REST/WSS calls, unresolved prior
+runs or unresolved/conflicting processing markers. `quiesced=True` declares
+that the caller drained producers; this API does not stop an existing service.
+There is no automatic switch of live transport references or trading enablement.
+
+Rollover pins/verifies the current archive, fsyncs an exclusive empty child
+reservation, then stores terminal RUN_END and `meta.sealed` together in one
+FULL transaction. The old handle becomes SEALED and cannot accept new records.
+The successor starts local sequence1 with frozen parent/archive anchors in both
+metadata and its first BEGIN; no global sequence is invented. The parent's
+immutable activation receipt pins that first record before the handle returns.
+Ancestral max_bytes/max_inflight ceilings survive rotation, recovery and normal
+child reopen; tighter settings may be used. Recovery depth defaults to64 and
+rotation checks its budget before sealing.
+
+Recovery verifies original rows, archive/manifest pins, parent seals and child
+activation receipts. A reserved empty file may be initialized only without an
+activation receipt. Missing children, emptied activated files, removed seal/
+parent metadata and inconsistent hashes prevent startup. Process-crash BEGINs
+and incomplete-run evidence are retained; recovery does not reset their metrics.
+An uncertain seal commit or maintenance exception returns an explicit fixed
+error; no unverified handle is exposed. Recover from anchors rather than retrying
+an old sealed handle. Windows power-loss durability remains unclaimed.
+
+Original segment evidence, reservations and archives remain preserved; normal
+SQLite checkpoint/close may merge and retire WAL files. The
+C1 export precedes the terminal seal: final seal/activation evidence still lives
+in the original DB, so that DB cannot yet be reclaimed from the C1 copy alone.
+C2b requires full-tail backup/restoration and certified exposure/day/research
+holds before deletion. Live maintenance/rebinding, cross-segment analytics and
+aggregate storage qualification remain gates; current reports stay per segment.

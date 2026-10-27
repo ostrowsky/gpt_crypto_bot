@@ -109,7 +109,7 @@ def rate_headers(headers):
 
 class AuditJournal:
     def __init__(self,paths,*,account_alias,episode_id,scope_id,database='audit.sqlite',
-                 max_bytes=512*1024*1024,max_inflight=8,fault_hook=None):
+                 max_bytes=512*1024*1024,max_inflight=8,fault_hook=None,parent_segment=None):
         if not isinstance(paths,AppPaths):raise AdapterError('AUDIT_IDENTITY_MISMATCH')
         for v in (account_alias,episode_id,scope_id):_text(v)
         if type(max_bytes) is not int or max_bytes<65536 or type(max_inflight) is not int or not 1<=max_inflight<=8:
@@ -119,10 +119,11 @@ class AuditJournal:
             account_episode_id=episode_id,portfolio_scope_id=scope_id)
         package=Path(__file__).resolve().parent
         self.source_code_sha256=_sha({n:hashlib.sha256((package/n).read_bytes()).hexdigest()
-                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py','protocol_audit.py')})
+                                      for n in ('interaction_audit.py','adapter.py','ws_audit.py','market_stream.py','private_stream.py','market_runtime.py','operational_audit.py','protocol_audit.py','audit_rollover.py')})
         self.path=paths.runtime_path(database)
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.max_bytes,self.fault_hook=max_bytes,fault_hook
+        self.max_inflight=max_inflight
         self.run_id,self.process_id=uuid.uuid4().hex,uuid.uuid4().hex
         self._lock,self._metrics_lock=threading.RLock(),threading.Lock()
         self._slots=threading.BoundedSemaphore(max_inflight)
@@ -131,6 +132,7 @@ class AuditJournal:
         self._failure_reason=None
         self._con,self._lease=None,None
         self._tip='0'*64
+        self.parent_segment=None
         try:
             self._lease=_WriterLease(paths.runtime_path(str(database)+'.writer.lock'))
             self._con=sqlite3.connect(self.path,timeout=0,isolation_level=None,check_same_thread=False)
@@ -138,11 +140,18 @@ class AuditJournal:
             self._con.execute('PRAGMA synchronous=FULL')
             tables={r[0] for r in self._con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not tables:
+                if str(database).replace('\\','/').startswith('audit-segments/') and parent_segment is None:
+                    raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
+                if parent_segment is not None:
+                    from .audit_rollover import validate_parent
+                    validate_parent(paths,parent_segment,str(database).replace('\\','/'),self.identity)
                 self._con.execute('BEGIN IMMEDIATE')
                 try:
                     self._con.execute('CREATE TABLE meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
                     self._con.execute('CREATE TABLE records (seq INTEGER PRIMARY KEY,id TEXT UNIQUE NOT NULL,kind TEXT NOT NULL,payload_json TEXT NOT NULL,content_sha256 TEXT NOT NULL)')
                     self._con.execute('INSERT INTO meta VALUES (?,?)',('identity',_json(self.identity)))
+                    if parent_segment is not None:
+                        self._con.execute('INSERT INTO meta VALUES (?,?)',('parent_segment',_json(parent_segment)))
                     for table in ('meta','records'):
                         for op in ('UPDATE','DELETE'):
                             self._con.execute(f"CREATE TRIGGER immutable_{table}_{op} BEFORE {op} ON {table} BEGIN SELECT RAISE(ABORT,'immutable audit'); END")
@@ -151,8 +160,35 @@ class AuditJournal:
                 except BaseException:
                     self._con.rollback();raise
             self._verify()
+            if self._con.execute("SELECT 1 FROM meta WHERE key='sealed'").fetchone():
+                raise AdapterError('AUDIT_SEGMENT_SEALED')
+            if self._con.execute("SELECT 1 FROM records WHERE kind='RUN_END' AND json_extract(payload_json,'$.data.scope')='SEGMENT_SEAL' LIMIT 1").fetchone():
+                raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
+            frozen_parent=self._con.execute("SELECT value FROM meta WHERE key='parent_segment'").fetchone()
+            if frozen_parent is not None:
+                try:self.parent_segment=json.loads(frozen_parent[0])
+                except (ValueError,TypeError,RecursionError):
+                    raise AdapterError('AUDIT_ROLLOVER_INTEGRITY') from None
+                if parent_segment is not None and parent_segment!=self.parent_segment:
+                    raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
+                from .audit_rollover import validate_parent
+                validate_parent(paths,self.parent_segment,str(database).replace('\\','/'),self.identity)
+                ceilings=self.parent_segment['journal_limits']
+                self.max_bytes=min(self.max_bytes,ceilings['max_bytes'])
+                self.max_inflight=min(self.max_inflight,ceilings['max_inflight'])
+                self._slots=threading.BoundedSemaphore(self.max_inflight)
+                first=self.read(limit=1)
+                if first and first[0]['data'].get('parent_segment')!=self.parent_segment:
+                    raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
+            else:
+                first=self.read(limit=1)
+                if (parent_segment is not None or str(database).replace('\\','/').startswith('audit-segments/')
+                    or (first and 'parent_segment' in first[0]['data'])):
+                    raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
             self._con.execute("CREATE INDEX IF NOT EXISTS audit_ws_operation ON records(kind,json_extract(payload_json,'$.data.operation_id'))")
-            self.append('RUN_BEGIN',dict(scope='REST_ATTEMPTS_AND_EXPLICIT_DECISIONS'))
+            data=dict(scope='REST_ATTEMPTS_AND_EXPLICIT_DECISIONS')
+            if self.parent_segment is not None:data['parent_segment']=deepcopy(self.parent_segment)
+            self.append('RUN_BEGIN',data)
         except BaseException:
             self._state='FAILED'
             self.close()
@@ -183,6 +219,45 @@ class AuditJournal:
         with self._metrics_lock:
             self._state='FAILED'
             if self._failure_reason is None:self._failure_reason=reason
+
+    def _seal_segment(self,base):
+        """Maintenance only: one FULL transaction for the terminal event and fence."""
+        with self._lock:
+            if self._closed or self._state!='READY':raise AdapterError('AUDIT_ROLLOVER_SOURCE')
+            phase='PREPARE'
+            with self._metrics_lock:self._expected['RUN_END']+=1
+            try:
+                if base['prefix_last_seq']!=self._last_seq or base['prefix_chain_tip']!=self._tip:
+                    raise AdapterError('AUDIT_ROLLOVER_INTEGRITY')
+                value=dict(self.identity,seq=self._last_seq+1,event_id=uuid.uuid4().hex,kind='RUN_END',
+                    run_id=self.run_id,process_instance_id=self.process_id,source_code_sha256=self.source_code_sha256,
+                    wall_ms=time.time_ns()//1000000,monotonic_ns=time.monotonic_ns(),previous_sha256=self._tip,
+                    data=dict(scope='SEGMENT_SEAL',rollover=deepcopy(base)))
+                payload=_json(value);digest=_sha(value)
+                if self._disk_bytes()+2*len(payload.encode())+65536>self.max_bytes:raise AdapterError('AUDIT_DISK_LIMIT')
+                seal=dict(base,seq=value['seq'],event_id=value['event_id'],chain_tip=digest)
+                seal['seal_sha256']=_sha(seal)
+                self._con.execute('BEGIN IMMEDIATE')
+                self._con.execute('INSERT INTO records VALUES (?,?,?,?,?)',
+                    (value['seq'],value['event_id'],'RUN_END',payload,digest))
+                self._con.execute('INSERT INTO meta VALUES (?,?)',('sealed',_json(seal)))
+                if self.fault_hook:self.fault_hook('before_seal_commit')
+                phase='COMMIT';self._con.commit()
+                if self.fault_hook:self.fault_hook('after_seal_commit')
+                self._last_seq,self._tip=value['seq'],digest
+                with self._metrics_lock:self._acked['RUN_END']+=1;self._state='SEALED'
+                return deepcopy(seal)
+            except BaseException as error:
+                try:self._con.rollback()
+                except Exception:pass
+                reason='AUDIT_SEAL_COMMIT_UNKNOWN' if phase=='COMMIT' else 'AUDIT_SEAL_WRITE_FAILED'
+                self._failed(reason)
+                if isinstance(error,(KeyboardInterrupt,SystemExit)):raise
+                raise AdapterError(reason) from None
+            finally:
+                self._closed=True
+                try:self._con.close()
+                finally:self._lease.close()
 
     def _disk_bytes(self):
         return sum(p.stat().st_size for p in (self.path,self.path.with_name(self.path.name+'-wal')) if p.exists())

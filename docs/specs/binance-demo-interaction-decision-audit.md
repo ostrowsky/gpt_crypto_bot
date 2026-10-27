@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1 implemented;
-134 audit focused / 629 app GREEN; full interaction audit incomplete**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1/C2a implemented;
+170 audit focused / 665 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -469,3 +469,96 @@ traffic completeness. Full Harness remains FAIL TH-11 for the historical replay
 source hash; no current profitability conclusion or live market qualification.
 Rollback is omission of explicit exporter calls. Certified segment rollover,
 reclamation, restart anchors and future policy/OMS audit remain unimplemented.
+
+## AUD-C2a: sealed segment rollover and restart anchors (2026-10-27)
+
+Specified before tests/code; IMPLEMENTED with36 focused GREEN. `AuditRollover(AppPaths, account_alias=...,
+episode_id=..., scope_id=..., archives=None, max_segments=64, fault_hook=None)`;
+`rotate(journal, quiesced=False)` returns the successor `AuditJournal`;
+`recover(database='audit.sqlite')` validates the chain and opens its active head.
+This is an explicit maintenance API. Callers stop/drain readers first and rebind
+them to the returned journal; no live transport swapping or latency claim.
+
+- C201: deny rotation without explicit quiescence, wrong runtime/identity,
+  failed/closed source, outstanding REST/WSS operations, unresolved prior runs
+  or unresolved/conflicting processing markers. Verify source integrity and
+  require zero process submission/ACK gaps. Do not clear gaps to pass a gate.
+  Serialize rollover/recovery with an app-owned OS lease; guard all paths and
+  junctions before opening. No legacy imports/process changes/order capability.
+- C202: while source callers are quiesced, export its exact current prefix via
+  AUD-C1, verify the manifest pin and tip, then exclusively reserve/fsync the
+  successor file in own `audit-segments/<32hex>.sqlite`. No overwritten paths.
+  Seal the source in ONE FULL transaction: final RUN_END with archive/next links
+  and immutable `meta.sealed` containing that event's seq/hash/ID. A successful
+  seal fences/closes the old writer. Ordinary `AuditJournal` startup refuses
+  sealed sources before appending; calls on the old handle cannot write again.
+  Seal failure/unknown commit never yields a usable successor or fallback.
+- C203: successor metadata `parent_segment` and first RUN_BEGIN freeze the
+  parent database, final seq/hash/ID, archived prefix and manifest pin. Local
+  sequences restart at1; `(database,event_id)` and ancestry remain explicit.
+  No invented global sequence or cross-segment processing-coverage claim.
+  Validate the parent seal/archive before opening a child, including ordinary
+  journal reopen. Caller-supplied ancestry must match the frozen metadata.
+- C204: reserve the child before seal, so a crash after seal can initialize the
+  reserved empty file. After child initialization, persist immutable
+  `meta.successor_opened` on the sealed parent with the child's first record
+  hash before returning the child. Recovery follows bounded validated links,
+  verifies source rows/seal/archive pins and child ancestry/first-record receipt.
+  A missing child, or empty child after an activation receipt, is UNKNOWN/error;
+  never recreate it as fresh zero history. Crash-created BEGIN records remain
+  in history and incomplete-run evidence remains visible. No duplicate seals.
+- C205: crash before seal leaves original source usable and any reserved file
+  retained as unlinked evidence. Crash after seal resumes only from verified
+  anchors. Missing/corrupt archives, metadata, identity, rows or receipt prevent
+  startup. External file disappearance is not interpreted as an empty episode.
+  Transition errors have fixed codes without paths/raw exceptions. Windows
+  directory-fsync/power-loss durability remains unclaimed.
+  Ordinary child startup also verifies activation's first-record pin, even if
+  the child was maliciously repacked with internally consistent hashes. Chain
+  depth limits include reserved children. Unexpected maintenance exceptions
+  return AUDIT_ROLLOVER_TRANSITION_UNKNOWN; durable anchors remain recoverable.
+  A terminal seal event without `meta.sealed`, or a child BEGIN without matching
+  frozen parent metadata, is corruption; absence cannot downgrade sealed/child
+  evidence into an ordinary root journal.
+  Rotation checks the successor's full ancestry budget before exporting/sealing;
+  it must not create a chain its configured recovery limit cannot open.
+  Freeze `journal_limits` (max_bytes/max_inflight) in the seal and propagate
+  them to the child and recovered head; maintenance cannot silently reset a
+  tighter configured resource guard to defaults.
+  Ordinary child reopen clamps resource settings to its frozen parent ceilings;
+  explicit tighter settings remain possible, relaxation through defaults does not.
+- C206: no application deletion, truncation, VACUUM or automatic reclamation in
+  C2a. Retain original DB evidence, archives, reservations and anchors; normal
+  SQLite checkpoint/close may merge and retire WAL files. Source accounting hashes
+  and market250ms/FULL guards are unchanged. C2b must add certified hold/release
+  evidence and full sealed-tail archival/restoration before any reclamation.
+  Existing per-segment analysis remains scoped; sustained end-to-end readiness
+  additionally requires maintenance/rebinding and cross-segment analytics gates.
+
+Acceptance: SPEC -> focused RED -> implementation -> GREEN/full regression,
+actual process death around reservation/seal/open/activation, unresolved work,
+seal transaction rollback/unknown commit, immutable reopen/parent receipts,
+multiple rotations/restart, corrupt/missing/empty successor and archive pins,
+own-path/lease guards. Rollback is omission of the opt-in rollover calls;
+sealed evidence is never unsealed as a rollback. Full Harness/staged review,
+commit and push required. No current trading/PnL improvement claim.
+
+### AUD-C2a verification
+
+27 missing-module RED first,27 GREEN after implementation and a fixture repair
+that isolates metadata corruption from the separate trigger-presence guard.
+Three additional RED cases reproduced ordinary-open receipt bypass, reserved
+depth bypass and exception misclassification; fixed to30 GREEN. Metadata-removal
+and rotation-budget RED reproductions were fixed to33 GREEN /662 full GREEN.
+Two resource-limit RED cases found default reset on rotation/ordinary reopen;
+fixed to35 GREEN /664 full GREEN. Malformed parent JSON then reproduced an
+uncaught parser error; fixed before final36 focused GREEN (20.898s),665 full
+app GREEN (91.594s),14 root specification +13 Truth Harness GREEN.
+Actual process death covers four transition boundaries, including committed
+seal before child initialization and child BEGIN before activation receipt.
+Original evidence, failure reasons and unknown prior runs remain visible.
+Full Harness remains FAIL TH-11 for the historical replay source hash; no
+market/financial qualification follows from these maintenance-only tests.
+No network/keys/orders/legacy-worker changes or runtime artifacts in the commit.
+Next: full sealed-tail backup/restoration and certified holds before C2b
+reclamation; live maintenance/rebinding and cross-segment analytics remain gates.

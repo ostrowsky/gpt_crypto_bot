@@ -1,5 +1,20 @@
 # Independent Demo bot: P0-A tests
 
+AUD-C2a (2026-10-27):27 intended missing-module RED before implementation;
+then27 GREEN. The metadata-tampering fixture restores its mutation trigger so
+it isolates ancestry validation rather than the separate trigger-presence guard.
+Additional RED reproductions: first-record receipt bypass on ordinary reopen,
+reserved-child depth bypass, maintenance exception classification, deleted
+seal/parent metadata and rotation exceeding its own recovery budget. Fixed
+before33 GREEN /662 full app GREEN. Tighter resource ceilings then reproduced
+reset-to-default on rotation and ordinary reopen (two further RED tests), fixed
+before35 GREEN /664 full app GREEN. Malformed parent JSON produced a raw parser
+exception (RED), now a fixed startup integrity error. Final36 focused GREEN
+(20.898s); final665 app GREEN (91.594s),14 root spec +13 Truth Harness GREEN.
+Real process deaths occur after reservation, seal, child open and
+activation; tests retain unknown prior runs and deny missing/emptied activated
+children. No external network, keys, order sending, deletion or PnL claim.
+
 AUD-C1 (2026-10-27):28 intended missing-module RED ->28 GREEN. Seven additional
 boundary cases found three RED failures (unsafe deflate exception, nonobject
 source row classification and manifest schema); repaired to35 GREEN. Three
@@ -33,7 +48,7 @@ Required order: **SPEC → TESTS → CODE** in [app rules](../AGENTS.md).
 
 `test_market_store_concurrency.py` adds P2B2-06: actual concurrent WAL reads/
 writes, atomic/pinned prefixes, prepared groups/dependencies/revisions, query
-plans, receiver lifecycle and detached cache integrity. Current app: 629 GREEN.
+plans, receiver lifecycle and detached cache integrity. Current app: 665 GREEN.
 `test_market_checkpoint.py` adds 22 P2B2-07 cases: pinned market-only engine,
 explicit transaction/Row/error/trace/file-format compatibility, PASSIVE worker
 without writer lock, version/WAL/FULL guards, byte pressure under the writer,
