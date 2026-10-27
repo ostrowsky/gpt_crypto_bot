@@ -1,5 +1,17 @@
 # Independent Demo bot: P0-A tests
 
+P1 order-test validation (2026-10-27):32 intended missing-module RED before
+code. Fixed the fixture's duplicate keyword argument without changing checks.
+Five added boundaries reproduced2 behavioral gaps: missing disable audit and
+expired final decision ACK accepted.37 GREEN /788 intermediate full GREEN
+(157.647s). Two final defense tests reproduced unguarded internal TLS paths and
+integer1 accepted as a signed flag (2 failures/1 callback error). Repaired before
+39 focused GREEN (9.345s). Synthetic own SQL/foreign reads/native aborts prove
+audit before POST and before support; mocks verify actual method/query/TLS and
+0 socket creation for forbidden dispatch. No keys/network in tests, skip/xfail
+or weakened assertions. Live diagnostics are separate from these unit results.
+Final790 app GREEN (145.254s),14 root spec GREEN; full Harness FAIL TH-11.
+
 AUD-03 UID repair (2026-10-27):5 focused tests reproduced4 expected failures
 before code; opaque namespace/economic preservation already passed. Fixture
 discovery was restricted to helper reuse so inherited tests do not inflate N.

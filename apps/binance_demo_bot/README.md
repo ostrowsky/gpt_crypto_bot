@@ -55,8 +55,15 @@ this app's ignored `.env`, based on `.env.example`, or pass the complete pair
 explicitly. No parent-env discovery, old-config imports or legacy key fallback.
 On2026-10-27 a user-supplied dedicated file was moved to this app's ignored
 `.env`. Signed REST smoke passed5/5 ping/time/account/open-orders/list reads;
-Spot account permission allowed. TRADE authority and private stream remain
-unverified, reconciliation/ownership uncertified and ORDER_SEND disabled.
+Spot account permission allowed. The separate opt-in
+`DemoTradeValidator` then passed one non-matching BTCUSDT BUY LIMIT validation
+per source-version diagnostic (2/2 accepted); observed balances/open orders/
+lists unchanged. Its exact tested-request capability expires after30s; saved
+reports cannot renew it. Default validation is off; the read transport remains
+GET-only. The separate POST transport accepts only `/api/v3/order/test`, never
+actual order placement/cancel/list endpoints. No automatic POST retries.
+Private stream remains unverified, reconciliation/ownership uncertified and
+ORDER_SEND disabled. See the [validation specification](../../docs/specs/binance-demo-order-test-validation.md).
 Raw UID/user identifiers are now redacted before audit persistence. Diagnostic
 artifacts and actual account balances stay in ignored runtime, never Git.
 
@@ -74,7 +81,8 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **751 tests GREEN**, including 5 account-identifier redaction and
+Verified: **790 tests GREEN**, including 39 non-matching order-validation,
+5 account-identifier redaction and
 39 local OMS intent/reservation/recovery
 cases, 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,

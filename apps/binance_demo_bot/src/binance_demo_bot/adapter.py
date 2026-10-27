@@ -163,6 +163,13 @@ class DemoHttpTransport:
     def request(self, method, path, query, headers, timeout_s):
         if method != "GET" or not isinstance(path, str) or path not in READ_PATHS:
             raise AdapterError("FORBIDDEN_ENDPOINT")
+        return self._request_https(method, path, query, headers, timeout_s)
+
+    def _request_https(self, method, path, query, headers, timeout_s):
+        """Shared bounded TLS implementation; public transports own their allowlist."""
+        if (not isinstance(path,str) or not ((method=='GET' and path in READ_PATHS)
+                or (method=='POST' and path=='/api/v3/order/test'))):
+            raise AdapterError('FORBIDDEN_ENDPOINT')
         allowed_request_headers = {"X-MBX-APIKEY"} | ({"Accept-Encoding"} if path == "/api/v3/exchangeInfo" else set())
         if (not isinstance(query, str) or any(c in query for c in "\r\n?#")
                 or not isinstance(headers, dict) or set(headers) - allowed_request_headers
@@ -193,7 +200,7 @@ class DemoHttpTransport:
                 connection.connect()
             connection.sock.settimeout(remaining())
             target = path + ("?" + query if query else "")
-            connection.request("GET", target, headers=headers)
+            connection.request(method, target, headers=headers)
             connection.sock.settimeout(remaining())
             response = connection.getresponse()
             if 300 <= response.status < 400:
@@ -340,15 +347,19 @@ class DemoReadClient:
                   dict(state='UNCONFIGURED',full_audit_complete=False))
         return dict(result,transport=dict(self._transport_counts))
 
-    def _transport_attempt(self, path, query, headers, params, signed, deadline, request_id, attempt):
+    def _transport_attempt(self, path, query, headers, params, signed, deadline, request_id, attempt,
+                           *, method='GET', transport=None):
         """Intent ACK before send; receipt captured before terminal audit latency."""
+        if (not isinstance(path,str) or not ((method=='GET' and path in READ_PATHS)
+                or (method=='POST' and path=='/api/v3/order/test' and signed is True))):
+            raise AdapterError('FORBIDDEN_ENDPOINT')
         audit, parent, terminal = self.audit, None, None
         attempt_id = uuid.uuid4().hex
         secrets = (() if self._credentials is None else
                    (self._credentials.api_key,self._credentials.api_secret))
         if audit is not None:
             parent = audit.append('REST_BEGIN',dict(request_id=request_id,attempt_id=attempt_id,
-                attempt_number=attempt+1,method='GET',endpoint=path,parameters=params,private=signed),
+                attempt_number=attempt+1,method=method,endpoint=path,parameters=params,private=signed),
                 wall_ms=self.clock.wall_ms(),monotonic_ns=self.clock.monotonic_ns(),secrets=secrets)
         response, error = None, None
         wall, mono = self.clock.wall_ms(), self.clock.monotonic_ns()
@@ -358,7 +369,8 @@ class DemoReadClient:
             if available<=0:raise AdapterError('READ_UNAVAILABLE')
             self._transport_counts['attempted_n']+=1
             sent=True
-            response=self.transport.request('GET',path,query,headers,min(15,available))
+            target=self.transport if transport is None else transport
+            response=target.request(method,path,query,headers,min(15,available))
             self._transport_counts['responses_n']+=1
         except BaseException as caught:
             error=caught
@@ -373,7 +385,7 @@ class DemoReadClient:
                          else 'CANCELLED' if isinstance(error,(KeyboardInterrupt,SystemExit)) or not sent
                          else 'TRANSPORT_ERROR')
                 terminal = audit.append('REST_END',dict(request_id=request_id,attempt_id=attempt_id,parent_event_id=parent,
-                    outcome=outcome,method='GET',endpoint=path,private=signed,
+                    outcome=outcome,method=method,endpoint=path,private=signed,
                     status=response.status if valid and type(response.status) is int else None,
                     headers=rate_headers(response.headers) if valid else {},
                     sent_at_ms=wall if sent else None,sent_monotonic_ns=mono if sent else None,

@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
 Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1/C2a/C2b1 implemented;
-217 audit focused / 751 app GREEN; full interaction audit incomplete**.
+217 audit focused / 790 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),

@@ -1,7 +1,7 @@
 # Binance Demo phase 1: account adapter and capability evidence
 
 Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-27.
-Status: **P1-A/B foundations; signed REST smoke PASS 2026-10-27; full P1 incomplete**.
+Status: **P1-A/B + order-test foundations; signed REST/order-test smoke PASS 2026-10-27; full P1 incomplete**.
 Priority: P1, after [phase 0](binance-demo-phase0-financial-contract.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
@@ -18,7 +18,16 @@ BEGIN/END pairs persisted, with0 unresolved attempts. Raw UID/user identifiers
 are removed before audit append (AUD-03 repair);6 diagnostic JSON files and12
 final audit records passed a local credential/identifier absence check. These
 runtime artifacts, balances and identity keys are not committed.
-`KEY_TRADE_VALIDATED` and `PRIVATE_EVENTS` remain UNVERIFIED; `ORDER_SEND` DENIED.
+At that read-only milestone KEY_TRADE_VALIDATED and PRIVATE_EVENTS were
+UNVERIFIED; ORDER_SEND DENIED. Subsequently the opt-in
+[order-test validator](binance-demo-order-test-validation.md) passed two distinct
+source-version diagnostics, one accepted BTCUSDT BUY LIMIT test per run (2/2).
+It sends no matching-engine orders. Each run retained11/11 REST attempts and
+terminal responses plus2 decisions;4/4 checks passed with unchanged observed
+balances/open orders/lists. KEY_TRADE_VALIDATED was SUPPORTED for the tested
+request/generation with30s expiry, not indefinitely renewed by saved reports.
+39 new focused tests cover default-off/single-POST/audit/clock/rate/auth/fences.
+PRIVATE_EVENTS remains UNVERIFIED and ORDER_SEND DENIED.
 Exclusive ownership, actual history/flows, certified as-of account/valuation
 anchors, signed private stream and execution/protection are still pending.
 Earlier dated pending-smoke paragraphs below describe their original milestones.
