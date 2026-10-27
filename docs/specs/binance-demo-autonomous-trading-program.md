@@ -1,6 +1,6 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-27. Status: **P0-A/B + P1-A/B + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 746 GREEN; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-27. Status: **P0-A/B + P1-A/B + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 751 GREEN; signed REST smoke PASS; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
 
 Current user priority (2026-10-27): перейти к торговому контуру. Реализован
@@ -11,8 +11,12 @@ kill, CAS/epoch и recovery неизвестной отправки. Execution a
 certified valuation/freshness → audited sender/filter/risk checks → verified
 BUY/protection/SELL/reconcile canary. Архивное reclamation не является текущим
 приоритетом; evidence сохраняется. Наличие локального OMS не закрывает P1/P2
-или полный P3. Свой `.env` и inherited demo pair на проверке отсутствовали;
-значения секретов не читались/не выводились.
+или полный P3. Первоначально свой `.env` отсутствовал; затем пользователь
+указал dedicated файл, перенесённый в ignored app `.env`. Signed REST smoke
+2026-10-27 прошёл5/5 (ping/time/account/open orders/lists); Spot account allowed,
+KEY_TRADE_VALIDATED/PRIVATE_EVENTS ещё UNVERIFIED, ORDER_SEND DENIED.
+Баланс/ключи/UID/runtime reports не коммитятся. Это не закрывает ownership,
+financial anchors, account history, market freshness или execution protection.
 
 Полный [аудит Binance и решений](binance-demo-interaction-decision-audit.md)
 обязателен до автономного исполнения/learning. AUD-A: durable opt-in REST attempts

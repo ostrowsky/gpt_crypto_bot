@@ -1,6 +1,6 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 746 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 751 GREEN, signed REST smoke PASS, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
 
@@ -10,7 +10,9 @@ GREEN, local reservation/outbox, idempotency, epoch/CAS, persistent entry kill
 и uncertain-attempt recovery. Он не отправляет ордера. Следующие зависимости:
 собственная demo credential pair, signed account/ownership, certified valuation
 и свежие данные; затем audited sender/risk/filters, protection и BUY→SELL
-canary со сверкой. Credentials отсутствовали при проверке. Ниже — история
+canary со сверкой. После отдельного provisioning signed REST smoke2026-10-27
+прошёл5/5; raw UID redaction исправлена до первого запроса. TRADE validation,
+private stream, ownership и account/financial qualification ещё pending. Ниже — история
 ранее выполненных шагов и их отдельных результатов; прежние «следующий
 приоритет» не заменяют этот текущий порядок. Торговые gates не ослаблены.
 

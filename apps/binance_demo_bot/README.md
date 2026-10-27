@@ -53,7 +53,12 @@ wheel/service. Always test future deployment packaging separately.
 For authenticated adapter calls, provision a dedicated demo pair in
 this app's ignored `.env`, based on `.env.example`, or pass the complete pair
 explicitly. No parent-env discovery, old-config imports or legacy key fallback.
-Real credentials have not been copied or validated in this milestone.
+On2026-10-27 a user-supplied dedicated file was moved to this app's ignored
+`.env`. Signed REST smoke passed5/5 ping/time/account/open-orders/list reads;
+Spot account permission allowed. TRADE authority and private stream remain
+unverified, reconciliation/ownership uncertified and ORDER_SEND disabled.
+Raw UID/user identifiers are now redacted before audit persistence. Diagnostic
+artifacts and actual account balances stay in ignored runtime, never Git.
 
 `FinancialLedger` is the pure in-memory projection. `JournalStore` persists its
 immutable fill events, separate receipt clocks, projection and outbox in SQLite
@@ -69,7 +74,8 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **746 tests GREEN**, including 39 local OMS intent/reservation/recovery
+Verified: **751 tests GREEN**, including 5 account-identifier redaction and
+39 local OMS intent/reservation/recovery
 cases, 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,

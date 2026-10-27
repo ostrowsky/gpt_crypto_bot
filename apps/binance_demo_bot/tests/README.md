@@ -1,5 +1,15 @@
 # Independent Demo bot: P0-A tests
 
+AUD-03 UID repair (2026-10-27):5 focused tests reproduced4 expected failures
+before code; opaque namespace/economic preservation already passed. Fixture
+discovery was restricted to helper reuse so inherited tests do not inflate N.
+Then5 focused GREEN (0.232s) and27 interaction-audit regression GREEN (4.395s).
+Final751 app GREEN (113.886s),14 root spec tests GREEN. Full Harness remains
+FAIL TH-11 independently of this privacy repair and read-only live smoke.
+Native persistence/reopen proves raw UID removal before storage; nested/case/
+encoded names and labeled free text are redacted, public identity payloads
+cannot claim exact bytes. No keys/network in tests, skip/xfail or weaker asserts.
+
 P3-A (2026-10-27):29 intended missing-module RED before code. A fixture-only
 connection-lifetime fix removed cleanup errors; it did not change assertions.
 Four added boundaries reproduced3 semantic/audit failures (bool version,

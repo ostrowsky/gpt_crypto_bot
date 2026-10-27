@@ -1,6 +1,6 @@
 # Binance Demo P3-A: durable order intents and reservations
 
-Registered: 2026-10-27. Status: P3-A implemented; 39 focused /746 app GREEN; execution disabled.
+Registered: 2026-10-27. Status: P3-A implemented; 39 focused /751 app GREEN; execution disabled.
 Parent: [phase 3](binance-demo-phase3-order-management-risk.md).
 Objective: `daily_net_equity_pnl_v1`; environment: `BINANCE_SPOT_DEMO`.
 

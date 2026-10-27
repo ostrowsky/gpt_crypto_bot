@@ -1,7 +1,7 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
 Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1/C2a/C2b1 implemented;
-212 audit focused / 746 app GREEN; full interaction audit incomplete**.
+217 audit focused / 751 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
@@ -39,6 +39,22 @@ headers; auth определяется opaque key/account identity, без се�
 public market bytes/JSON/hash сохраняются; private payload после обязательной
 redaction остаётся помеченным sanitized, не "exact raw". Балансы/fills/fees
 относятся к own account namespace. Credentials/runtime audit не коммитятся.
+
+AUD-03 UID repair (2026-10-27): before the first authenticated account smoke,
+raw account/user identifiers (`uid`, `userId`, `user_id`, case-insensitive and
+URL-encoded variants) must be removed from structured audit payloads at every
+depth. Free-text echoes labeled with these names are redacted. Such fields in
+public responses also prohibit an EXACT_PUBLIC_BYTES representation. Opaque
+`account_identity` HMAC and `account_alias`, economic amounts and ordinary
+market text such as `liquidity` remain usable. Runtime account parsing/HMAC
+is unchanged. Five focused synthetic tests must reproduce the omission gap
+before implementation, then pass with native persisted/reopened audit evidence.
+No trading gate is relaxed; rollback preserves logs and disables signed reads
+if identity redaction is unavailable. This is privacy repair, not profit proof.
+Verification:5 focused tests,4 intended RED failures before code; then5 GREEN,
+27 existing interaction-audit GREEN,751 full app GREEN (113.886s),14 root spec
+GREEN. Live signed read-only smoke5/5 and runtime privacy scan6 files/12 records
+PASS; no actual order. Full Harness still FAIL TH-11 (stale replay source hash).
 
 AUD-04: DecisionEnvelope связывает data cutoff и доступные snapshot IDs с
 policy/model/risk/schema versions, candidate population, BUY/SELL/HOLD/WAIT/

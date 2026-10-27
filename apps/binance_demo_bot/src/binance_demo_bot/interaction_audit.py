@@ -23,7 +23,7 @@ from .journal import _WriterLease
 
 KINDS = ('RUN_BEGIN', 'RUN_END', 'REST_BEGIN', 'REST_END', 'DECISION','WS_BEGIN','WS_END','WS_PROCESSING','WS_CONTROL')
 MAX_EVENT_BYTES = 48*1024*1024
-SENSITIVE = re.compile(r'api[-_ ]?key|api[-_ ]?secret|signature|authorization|cookie|listen[-_ ]?key|access[-_ ]?token|password|secret|token', re.I)
+SENSITIVE = re.compile(r'api[-_ ]?key|api[-_ ]?secret|signature|authorization|cookie|listen[-_ ]?key|access[-_ ]?token|password|secret|token|\b(?:uid|user[-_ ]?id)\b', re.I)
 REDACTED = '[REDACTED]'
 
 

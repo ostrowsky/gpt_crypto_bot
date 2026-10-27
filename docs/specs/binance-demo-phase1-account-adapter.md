@@ -1,13 +1,27 @@
 # Binance Demo phase 1: account adapter and capability evidence
 
-Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-11.
-Status: **P1-A/B read-only foundations / 235 app tests GREEN; full P1 incomplete**.
+Registered: 2026-10-10, Europe/Budapest. Updated: 2026-10-27.
+Status: **P1-A/B foundations; signed REST smoke PASS 2026-10-27; full P1 incomplete**.
 Priority: P1, after [phase 0](binance-demo-phase0-financial-contract.md).
 Program: [autonomous demo trading](binance-demo-autonomous-trading-program.md).
 Application boundary: [independent app isolation](binance-demo-application-isolation.md).
 Objective: `daily_net_equity_pnl_v1`; environment: `BINANCE_SPOT_DEMO`.
 Explicit library calls can read Demo; the offline entrypoint starts no account
 client. Order sending and existing signal integration remain disabled.
+
+Current authenticated verification (2026-10-27): the user-provided standalone
+Demo env file was moved into the app's ignored `.env`, without legacy fallback.
+Existing pinned Demo adapter passed public ping, clock sync, signed account,
+all open orders and open order lists:5/5 read-only checks. Account Spot permission
+was reported allowed; this does not validate the key's TRADE endpoint. All5 REST
+BEGIN/END pairs persisted, with0 unresolved attempts. Raw UID/user identifiers
+are removed before audit append (AUD-03 repair);6 diagnostic JSON files and12
+final audit records passed a local credential/identifier absence check. These
+runtime artifacts, balances and identity keys are not committed.
+`KEY_TRADE_VALIDATED` and `PRIVATE_EVENTS` remain UNVERIFIED; `ORDER_SEND` DENIED.
+Exclusive ownership, actual history/flows, certified as-of account/valuation
+anchors, signed private stream and execution/protection are still pending.
+Earlier dated pending-smoke paragraphs below describe their original milestones.
 
 ## Problem
 
