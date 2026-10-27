@@ -1,7 +1,19 @@
 # Binance Demo: программа автономной торговли по дневному PnL
 
-Дата: 2026-10-27. Status: **P0-A/B + P1-A/B + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 foundations / 707 GREEN; all-market latency FAIL; trading runtime pending**.
+Дата: 2026-10-27. Status: **P0-A/B + P1-A/B + P2-A/B2 + AUD-A/B1/B2/B3/C1/C2a/C2b1 + P3-A foundations / 746 GREEN; all-market latency FAIL; trading runtime pending**.
 Owner: repository maintainer. Objective contract: `daily_net_equity_pnl_v1`.
+
+Current user priority (2026-10-27): перейти к торговому контуру. Реализован
+[P3-A local OMS journal](binance-demo-p3a-durable-intents.md),39 focused GREEN:
+atomic reservations/outbox, idempotent intents, arm budgets, persistent entry
+kill, CAS/epoch и recovery неизвестной отправки. Execution authority отсутствует.
+Дальнейший торговый путь: dedicated credentials/signed account/ownership и
+certified valuation/freshness → audited sender/filter/risk checks → verified
+BUY/protection/SELL/reconcile canary. Архивное reclamation не является текущим
+приоритетом; evidence сохраняется. Наличие локального OMS не закрывает P1/P2
+или полный P3. Свой `.env` и inherited demo pair на проверке отсутствовали;
+значения секретов не читались/не выводились.
+
 Полный [аудит Binance и решений](binance-demo-interaction-decision-audit.md)
 обязателен до автономного исполнения/learning. AUD-A: durable opt-in REST attempts
 и explicit causal decisions implemented; AUD-B1 пишет WSS application calls/raw

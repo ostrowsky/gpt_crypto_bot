@@ -1,4 +1,4 @@
-# Independent Binance Demo bot — P0/P1 and P2-A/B2 read-only foundations
+# Independent Binance Demo bot — financial/data foundations and local OMS intents
 
 This separate application implements offline Decimal accounting, valuation,
 daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation.
@@ -14,6 +14,15 @@ supervision and bounded incremental L2. These are explicitly invoked libraries.
 P2-B2 adds metadata refresh, all-pair closed-candle topics, bounded bootstrap,
 atomic store batches and a separate read-only coordinator. Full-market stream
 latency verification is FAIL; this runtime is diagnostic, not production-ready.
+
+P3-A implements the [durable intent journal](../../docs/specs/binance-demo-p3a-durable-intents.md):
+local per-arm reservations and immutable pending outbox identity, canonical
+Decimal amounts, idempotency/tombstones, epoch/CAS, persistent entry kill and
+uncertain-attempt recovery. Its dedicated `oms-intents.sqlite` is audit-backed
+WAL/FULL. Supplied allocations are uncertified seed budgets; pending BUYs cannot
+fund SELLs. Neither a reservation nor an attempt annotation authorizes I/O.
+No sender, exchange TP/SL or terminal fill/reconciliation integration exists yet.
+39 focused tests pass; actual trading remains disabled and no profit is claimed.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md),
@@ -60,7 +69,8 @@ established by P1/P2/reconcile. No production/account permission follows from
 storage correctness. The journal freezes its accounting code fingerprint;
 changing accounting artifacts requires an explicit versioned migration.
 
-Verified: **707 tests GREEN**, including 56 REST, 69 private/evidence cases,
+Verified: **746 tests GREEN**, including 39 local OMS intent/reservation/recovery
+cases, 56 REST, 69 private/evidence cases,
 57 public market/universe/valuation cases,
 46 stream/L2/supervision cases,
 36 runtime/refresh/closed-stream/storage cases,

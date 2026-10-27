@@ -1,8 +1,19 @@
 # Дорожная карта: автономная торговля Binance Demo и обучение по дневному PnL
 
-Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2 и AUD-A/B1/B2/B3/C1/C2a/C2b1 foundations; 707 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
+Дата: 2026-10-11, обновлено 2026-10-27. Статус: **P0-A/B, P1-A/B, P2-A/B2, AUD-A/B1/B2/B3/C1/C2a/C2b1 и P3-A foundations; 746 GREEN, all-market latency FAIL; торговый сервис ещё не включён**.
 Канонические спецификации фаз 0–7 и зависимости зарегистрированы в
 [программе реализации](../specs/binance-demo-autonomous-trading-program.md).
+
+Текущий приоритет пользователя (2026-10-27): торговый контур. Первый
+[P3-A шаг](../specs/binance-demo-p3a-durable-intents.md) реализован:39 focused
+GREEN, local reservation/outbox, idempotency, epoch/CAS, persistent entry kill
+и uncertain-attempt recovery. Он не отправляет ордера. Следующие зависимости:
+собственная demo credential pair, signed account/ownership, certified valuation
+и свежие данные; затем audited sender/risk/filters, protection и BUY→SELL
+canary со сверкой. Credentials отсутствовали при проверке. Ниже — история
+ранее выполненных шагов и их отдельных результатов; прежние «следующий
+приоритет» не заменяют этот текущий порядок. Торговые gates не ослаблены.
+
 P0-A/B: свой package/.venv/lock, financial/isolation kernel и SQLite journal,
 atomic outbox/restart/replay/report revisions, 110 GREEN после RED.
 P1-A: read-only REST adapter, подпись, clock/TLS/rate guards, account/orders/fills;

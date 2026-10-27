@@ -1,9 +1,14 @@
 # Binance Demo phase 3: order management, protection and risk
 
-Registered: 2026-10-10. Status: **PLANNED — specification only**.
+Registered: 2026-10-10. Status: **P3-A local journal implemented /39 focused GREEN; full execution pending**.
 Objective contract: `daily_net_equity_pnl_v1`. Environment: `BINANCE_SPOT_DEMO`.
 Priority: P3; execution/accounting prerequisite for automatic trading, roadmap phase 3.
 This document enables no exchange requests, orders, policy changes or learning.
+
+First implementation slice: [P3-A durable intents](binance-demo-p3a-durable-intents.md),
+local reservations, idempotency, uncertain-attempt recovery and audit. It grants
+no execution authority; sender, exchange protection/reconciliation and live
+readiness remain pending.
 
 ## Problem
 
@@ -274,7 +279,10 @@ Schema/artifact upgrade имеет проверенный backward read/restore 
 
 ## Planned focused tests and verification scenarios
 
-Это обязательные будущие тесты; сейчас test implementation/results отсутствуют.
+Ниже acceptance полного OMS. P3-A добавляет 39 локальных тестов на intents,
+резервы, fencing/CAS и uncertain recovery; это частичное покрытие D3-01/02/03/
+05/07/15, не завершённые D3-сценарии с биржей. Остальные execution-сценарии
+ещё требуют реализации и проверки.
 
 | ID | Проверяемый сценарий и ожидаемый результат |
 |---|---|

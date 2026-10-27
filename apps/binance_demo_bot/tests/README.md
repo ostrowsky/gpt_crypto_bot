@@ -1,5 +1,16 @@
 # Independent Demo bot: P0-A tests
 
+P3-A (2026-10-27):29 intended missing-module RED before code. A fixture-only
+connection-lifetime fix removed cleanup errors; it did not change assertions.
+Four added boundaries reproduced3 semantic/audit failures (bool version,
+missing genesis, missing retry audit); six more reproduced1 malformed BLOCK
+failure before repair. Final39 focused GREEN (8.652s),746 app GREEN (148.261s),
+14 root spec tests GREEN. Tests use native SQLite aborts, uncertain post-commit
+ACKs, real competing threads, process exit73 and verified reopen. Reservations
+remain across unknown send outcomes; no keys/network/orders, skip/xfail or
+weakened assertions. Full Truth Harness remains FAIL TH-11 (stale canonical
+portfolio-alpha replay hash). These results do not qualify exchange execution.
+
 AUD-C2b1 (2026-10-27):23 backup +12 retention tests first RED for intended
 missing modules. The initial code exposed active-source error ordering; fixed
 before23 backup /12 retention GREEN. Lost-file fixtures now model loss of the

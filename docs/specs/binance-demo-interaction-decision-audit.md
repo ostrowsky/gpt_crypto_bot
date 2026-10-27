@@ -1,11 +1,16 @@
 # Binance Demo: полный аудит взаимодействий и решений
 
 Дата: 2026-10-11, обновлено 2026-10-27. Статус: **AUD-A/B1/B2/B3/C1/C2a/C2b1 implemented;
-212 audit focused / 707 app GREEN; full interaction audit incomplete**.
+212 audit focused / 746 app GREEN; full interaction audit incomplete**.
 User requirement: все взаимодействия с Binance и все принятые решения нужны
 для последующего анализа эффективности. Scope: только `apps/binance_demo_bot`.
 Parent: [программа](binance-demo-autonomous-trading-program.md),
 [dataset/outcomes](binance-demo-phase5-outcomes-training-dataset.md).
+
+[P3-A](binance-demo-p3a-durable-intents.md) добавляет own audit-backed
+`oms-intents.sqlite`: genesis/epochs, reserve+outbox, idempotent retry, BLOCK,
+entry kill и uncertain-attempt transitions.39 focused GREEN. Это локальные
+поручения; execution calls, реальные fills, TP/SL и reconcile ещё не подключены.
 
 ## Required coverage
 
