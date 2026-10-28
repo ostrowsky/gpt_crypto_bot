@@ -5,6 +5,9 @@ RED missing interfaces and permission/order-count/partial/unknown-recovery,
 protection and learning baseline/leakage failures. Native isolated SQLite/audit
 and synthetic exchange only; no credentials or real orders in unit tests.
 See [PIL-01..08](../../../docs/specs/binance-demo-execution-qualification-pilot.md).
+Native audited-attempt repair:4 genuine RED tests,51 pilot +40 permission GREEN,
+full920 GREEN (207.257s), root14 GREEN. Known local refusal migration retains
+the old ID, attempt count and expiry; missing proof cannot clear UNKNOWN.
 
 P0-C2 financial bridge: `test_financial_account.py`,39 focused GREEN (14.052s).
 30 missing-module RED before code; later genuine RED reproductions for refreshed

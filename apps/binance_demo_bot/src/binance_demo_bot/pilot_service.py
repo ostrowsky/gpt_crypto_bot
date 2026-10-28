@@ -63,7 +63,7 @@ class PilotService:
         if base<0 or base*mid>2:fail('PILOT_DUST_OR_UNCLOSED_EXPOSURE')
         delivered=self.gateway.private_matches(rows)
         equity=Decimal('100')+Decimal(inventory['cash_delta'])+base*mid
-        outcome=dict(state='CLOSED',cycle=state['cycles'],technical_probe=state['cycles']==1,
+        outcome=dict(state='CLOSED',cycle=state['cycles'],technical_probe=state.get('technical_probe',state['cycles']==1),
             origin_ms=state['origin_ms'],feature_end_ms=state['feature_end_ms'],features=state['features'],
             label_end_ms=snapshot['now_ms'],label_available_at_ms=snapshot['now_ms'],
             net_usdt=text(equity-Decimal(state['start_equity'])),exit_reason=reason,
@@ -89,7 +89,7 @@ class PilotService:
                 if not self._account_agrees(snapshot,inventory):fail('PILOT_BALANCE_MISMATCH')
                 if any(o['order_id'] not in self.book.owned_order_ids() for o in snapshot['open_orders']):fail('PILOT_FOREIGN_ORDER')
                 if state['phase']=='OPEN':
-                    if now>=state['deadline_ms']:return self._close(state,snapshot,'PROBE_TIME' if state['cycles']==1 else 'TIME')
+                    if now>=state['deadline_ms']:return self._close(state,snapshot,'PROBE_TIME' if state.get('technical_probe',state['cycles']==1) else 'TIME')
                     if not snapshot['open_orders'] and Decimal(inventory['base'])*amount(snapshot['bid'])<=2:
                         return self._close(state,snapshot,'EXCHANGE_EXIT')
                     return self._save(state)
@@ -101,7 +101,7 @@ class PilotService:
                 if (equity<99 or Decimal(state.get('peak_equity','100'))-equity>=1):
                     state.update(phase='HALTED',entry_killed=True,reason='PILOT_LOSS_STOP');return self._save(state)
                 stopped=self.book._audit.path.parent.joinpath('stop-entries').exists()
-                if (stopped or state.get('entry_killed') or (state['cycles'] and not state.get('qualified'))
+                if (stopped or state.get('entry_killed') or (state['cycles'] and not state.get('qualified') and not state.get('local_unsent_abandoned'))
                         or now<state['next_entry_ms'] or not snapshot['stream_ok']):
                     self.book.decision(dict(action='WAIT',reason='ENTRY_GUARD',cutoff_ms=now,snapshot_id=snapshot['snapshot_id']));return self._save(state)
                 if Decimal(inventory['base'])*amount(snapshot['bid'])>2:fail('PILOT_DUST_OR_UNCLOSED_EXPOSURE')
@@ -111,6 +111,7 @@ class PilotService:
                 now=snapshot['now_ms']
                 if now>=self.book._binding['expires_ms']:fail('PILOT_EXPIRED')
                 state.update(phase='BUY_PENDING',cycles=state['cycles']+1,origin_ms=now,
+                    technical_probe=not state.get('qualified'),local_unsent_abandoned=False,
                     feature_end_ms=snapshot['feature_end_ms'],features=snapshot['features'],
                     snapshot_id=snapshot['snapshot_id'],start_equity=text(equity))
                 if state['feature_end_ms']>=now:fail('PILOT_FUTURE_FEATURE')
@@ -165,7 +166,7 @@ class PilotService:
             raise
         if not self.gateway.protection_ok(protection,plan['quantity']):fail('PILOT_PROTECTION_UNVERIFIED')
         snapshot=self.gateway.snapshot()
-        state.update(phase='OPEN',deadline_ms=state['origin_ms']+(60000 if state['cycles']==1 else 900000),
+        state.update(phase='OPEN',deadline_ms=state['origin_ms']+(60000 if state.get('technical_probe',state['cycles']==1) else 900000),
             protected_quantity=plan['quantity'],take_profit=plan['take_profit'],stop_loss=plan['stop_loss'],
             unprotected_duration_ms=snapshot['now_ms']-state['origin_ms'])
         if state['unprotected_duration_ms']>10000:state.update(entry_killed=True,reason='UNPROTECTED_DEADLINE_BREACH')

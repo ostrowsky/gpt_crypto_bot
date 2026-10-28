@@ -79,6 +79,16 @@ class ValidatorTests(unittest.TestCase):
         self.reason('ORDER_VALIDATION_DISABLED',self.validate)
         self.assertEqual(self.calls,[]);self.assertEqual(self.capability(),'UNVERIFIED')
 
+    def test_pil01_native_audited_matching_attempt_requires_explicit_flag(self):
+        self.reply(data={'orderId':123})
+        params=dict(symbol='BTCUSDT',side='BUY',type='MARKET',quoteOrderQty='30')
+        self.reason('FORBIDDEN_ENDPOINT',self.client._transport_attempt,'/api/v3/order','',{},params,True,
+            self.time.mono+15000000000,'default-attempt',0,transport=self.transport,method='POST')
+        response,*_=self.client._transport_attempt('/api/v3/order','',{},params,True,
+            self.time.mono+15000000000,'pilot-attempt',0,transport=self.transport,method='POST',matching_engine=True)
+        self.assertEqual(response.status,200);self.assertEqual(len(self.post_rows('REST_BEGIN')),1)
+        self.assertEqual(self.calls[0][-1],1)
+
     def test_vld01_requires_configured_same_namespace_audit(self):
         saved=self.client.audit;self.client.audit=None
         self.reason('AUDIT_UNAVAILABLE',self.make)

@@ -114,7 +114,7 @@ class MatchingGateway:
         signed=dict(params,timestamp=timestamp,recvWindow=5000)
         query=sign_rest(signed,c._credentials.api_secret)
         response,*rest=c._transport_attempt(path,query,{'X-MBX-APIKEY':c._credentials.api_key},signed,
-            True,deadline,uuid.uuid4().hex,0,method=method,transport=self.transport)
+            True,deadline,uuid.uuid4().hex,0,method=method,transport=self.transport,matching_engine=True)
         for key,value in response.headers.items():
             if key.lower()=='x-mbx-used-weight-1m' and value.isdecimal():
                 c._shared_weight=max(c._shared_weight,int(value));c._shared_weight_expires_ns=c.clock.monotonic_ns()+60_000_000_000
@@ -241,6 +241,38 @@ class PilotJournal:
             if 'orderList' in item['path']:result.update(x['orderId'] for x in r['orders'])
             else:result.add(r['orderId'])
         return sorted(result)
+    def abandon_reviewed_local_refusal(self,action,*,network_audit,snapshot,blocked_adapter_sha256):
+        """Operator-only migration of the reviewed 05ac2d4 pre-network refusal.
+
+        Source review is required in addition to the verified closed audit.
+        Never retry the old ID or erase an attempt from the budget.
+        """
+        self._ready();item=self._actions.get(action,{})
+        if (blocked_adapter_sha256!='e254e6f90b7523207aa7ee7944ddeb1bfab13a193ae0900287c30f3db77e174e'
+            or not isinstance(network_audit,AuditJournal) or item.get('state')!='QUERY_REQUIRED'
+            or action!='buy-1' or len(self._actions)!=1 or self._state.get('cycles')!=1
+            or snapshot.get('account_identity')!=self._binding['account_identity']
+            or snapshot.get('open_orders') or not self._binding['start_ms']<=snapshot.get('now_ms',0)<self._binding['expires_ms']):
+            fail('PILOT_LOCAL_PROOF_INVALID')
+        if any(network_audit.identity[k]!=self._audit.identity[k] for k in
+                ('account_alias','account_episode_id','portfolio_scope_id')):fail('PILOT_LOCAL_PROOF_INVALID')
+        actual={k:v for k,v in snapshot.get('balances',{}).items() if amount(v['free']) or amount(v['locked'])}
+        if actual!=self._binding['initial_balances']:fail('PILOT_LOCAL_PROOF_INVALID')
+        manifest=network_audit.manifest();closed=False
+        for after in range(0,manifest['rows_n'],1000):
+            for row in network_audit.read(after_seq=after,limit=1000):
+                if row['kind']=='RUN_END':closed=True
+                d=row['data']
+                if row['kind']=='REST_BEGIN' and (d.get('method'),d.get('endpoint')) in PAIRS:
+                    fail('PILOT_LOCAL_PROOF_INVALID')
+        if not closed:fail('PILOT_LOCAL_PROOF_INVALID')
+        self._save('DECISION',dict(action='ABANDON_NEVER_SENT',original_action=action,
+            blocked_adapter_sha256=blocked_adapter_sha256,network_manifest_sha256=manifest['manifest_sha256'],
+            cutoff_ms=snapshot['now_ms'],reason='OPERATOR_REVIEWED_LOCAL_ALLOWLIST_REFUSAL'))
+        self._save('REJECT',dict(action=action))
+        state=self.state();state.update(phase='IDLE',entry_killed=False,local_unsent_abandoned=True,
+            reason='LOCAL_REFUSAL_ABANDONED',next_entry_ms=0)
+        self.save_state(state)
     def actions(self):self._ready();return deepcopy(self._actions)
     def state(self):self._ready();return deepcopy(self._state)
     def save_state(self,state):self._ready();self._save('STATE',state)

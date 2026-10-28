@@ -132,6 +132,17 @@ Primary API reference: [Binance official REST specification](https://github.com/
 
 ## Implementation evidence, 2026-10-28
 
+First startup found a local audited-attempt allowlist omission before network
+send. Fix acceptance: the common attempt helper permits only the explicit
+matching flag plus signed exact matching pairs; ordinary calls still reject.
+One operator-reviewed migration may abandon the provably never-sent first BUY,
+preserving its ID, attempt/cycle count and all limits/expiry. Proof requires the
+known blocked adapter source hash, closed verified native audit manifest with no
+matching REST_BEGIN, fresh empty orders/lists and unchanged initial balances.
+Not-found or a missing audit row alone is never sufficient. Append proof/reject
+events; do not erase/reuse the old ID. A fresh cycle must repeat permission and
+snapshot checks and remain the60s technical probe until actual qualification.
+
 48 focused tests GREEN after genuine missing-module and boundary RED runs:
 unknown accepted BUY query/recovery, partial BUY cancel, rejected/unknown OCO,
 native order count, absent permission, durable audit and causal learning export.
@@ -149,3 +160,11 @@ Runtime archive, models, journals and balances stay uncommitted.
 Full isolated application916 tests GREEN (197.862s); root14 specification tests
 GREEN. Full Harness remains FAIL TH-11: stale legacy replay source fingerprint.
 This does not approve portfolio profitability or clear financial PENDING gates.
+
+Follow-up native audit repair:4 new expected RED failures before code;
+51 pilot +40 native permission tests GREEN, full920 GREEN (207.257s), root14
+GREEN. A fixture initially lacked the required prior RUN_END and was corrected
+without weakening the closed-audit check. Actual read-only migration confirmed
+unchanged seed/empty orders/lists; old buy-1 is REJECTED with durable proof,
+attempt count1 and original expiry retained. No matching request was sent in
+that refused attempt. Next actual startup still requires protected probe proof.

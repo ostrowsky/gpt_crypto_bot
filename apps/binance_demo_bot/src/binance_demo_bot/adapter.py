@@ -350,10 +350,13 @@ class DemoReadClient:
         return dict(result,transport=dict(self._transport_counts))
 
     def _transport_attempt(self, path, query, headers, params, signed, deadline, request_id, attempt,
-                           *, method='GET', transport=None):
+                           *, method='GET', transport=None, matching_engine=False):
         """Intent ACK before send; receipt captured before terminal audit latency."""
         if (not isinstance(path,str) or not ((method=='GET' and path in READ_PATHS)
-                or (method=='POST' and path=='/api/v3/order/test' and signed is True))):
+                or (method=='POST' and path=='/api/v3/order/test' and signed is True)
+                or (matching_engine is True and signed is True and (method,path) in {
+                    ('POST','/api/v3/order'),('POST','/api/v3/orderList/oco'),
+                    ('DELETE','/api/v3/order'),('DELETE','/api/v3/orderList')}))):
             raise AdapterError('FORBIDDEN_ENDPOINT')
         audit, parent, terminal = self.audit, None, None
         attempt_id = uuid.uuid4().hex

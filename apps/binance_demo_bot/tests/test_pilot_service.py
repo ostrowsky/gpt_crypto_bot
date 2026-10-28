@@ -77,6 +77,13 @@ class ServiceTests(unittest.TestCase):
         state=self.service.tick();self.assertEqual(state['phase'],'OPEN')
         self.assertEqual(len(self.exchange.calls),2)
         self.assertEqual(self.exchange.calls[1][1],'/api/v3/orderList/oco')
+
+    def test_pil03_abandoned_local_attempt_keeps_next_actual_probe_short(self):
+        self.book.save_state(dict(phase='IDLE',cycles=1,qualified=False,entry_killed=False,
+            local_unsent_abandoned=True,peak_equity='100',last_equity='100',next_entry_ms=0))
+        state=self.service.tick();self.assertEqual(state['phase'],'OPEN')
+        self.assertEqual(state['cycles'],2);self.assertEqual(state['deadline_ms'],self.exchange.now+60000)
+        self.exchange.now+=61000;self.service.tick();self.assertTrue(self.book.outcomes()[0]['technical_probe'])
     def test_pil04_first_probe_time_exit_cancels_only_owned_then_sells(self):
         self.service.tick();self.exchange.now+=61000;state=self.service.tick()
         self.assertEqual(state['phase'],'IDLE');self.assertEqual(len(self.book.outcomes()),1)

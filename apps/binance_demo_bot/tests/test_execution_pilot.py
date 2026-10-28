@@ -153,5 +153,27 @@ class PilotTests(unittest.TestCase):
         self.book.save_state({'phase':'IDLE','cycles':0});state=self.book.state();state['phase']='WRONG'
         self.book.close();self.book=self.make();self.assertEqual(self.book.state()['phase'],'IDLE')
 
+    def test_pil03_reviewed_local_refusal_preserves_old_id_and_attempt_budget(self):
+        self.broker.error=TimeoutError();self.reason('PILOT_QUERY_REQUIRED',self.buy)
+        self.book.save_state(dict(phase='RECOVERY_REQUIRED',cycles=1,qualified=False,entry_killed=True))
+        from binance_demo_bot.interaction_audit import AuditJournal
+        audit=AuditJournal(self.paths,account_alias='demo-primary',episode_id='opening-candidate-20261027',
+            scope_id='whole-account-opening',database='proof.sqlite');self.addCleanup(audit.close)
+        audit.close()
+        audit=AuditJournal(self.paths,account_alias='demo-primary',episode_id='opening-candidate-20261027',
+            scope_id='whole-account-opening',database='proof.sqlite');self.addCleanup(audit.close)
+        snapshot=dict(account_identity='a'*64,now_ms=2000,open_orders=[],balances={'USDT':{'free':'100','locked':'0'}})
+        self.book.abandon_reviewed_local_refusal('buy-1',network_audit=audit,snapshot=snapshot,
+            blocked_adapter_sha256='e254e6f90b7523207aa7ee7944ddeb1bfab13a193ae0900287c30f3db77e174e')
+        self.assertEqual(self.book.actions()['buy-1']['state'],'REJECTED')
+        self.assertEqual(self.book.state()['cycles'],1);self.assertTrue(self.book.state()['local_unsent_abandoned'])
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_pil03_missing_local_refusal_proof_never_clears_unknown(self):
+        self.broker.error=TimeoutError();self.reason('PILOT_QUERY_REQUIRED',self.buy)
+        self.reason('PILOT_LOCAL_PROOF_INVALID',self.book.abandon_reviewed_local_refusal,'buy-1',
+            network_audit=None,snapshot={},blocked_adapter_sha256='bad')
+        self.assertEqual(self.book.actions()['buy-1']['state'],'QUERY_REQUIRED')
+
 
 if __name__=='__main__':unittest.main()
