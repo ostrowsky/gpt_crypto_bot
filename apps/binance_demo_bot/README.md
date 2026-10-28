@@ -673,6 +673,32 @@ no deletion/reclamation API. Certifying those sources and backing up the hold
 ledger/full chain remain release gates before any evidence can be reclaimed.
 # Bounded Demo execution qualification (2026-10-28)
 
+## Financial imports and trend research (2026-10-28)
+
+`FinancialAccount.reconcile(..., metadata_history=[saved_exchange_info])` can
+import native fills using integrity-checked symbol mappings observed before
+each fill. Restore serialized decimal clock uncertainty to Decimal when loading
+an observation JSON; do not invent a new receipt. `interval_report(check_id)`
+uses the original seed and the pinned journal prefix to reconcile whole-account
+equity and FIFO/fee/unrealized attribution at identical marks. It remains a
+diagnostic: daily PnL is null until certified calendar/cut/flow/delivery evidence.
+Metadata refresh, restart or changing symbols never resets the seed or fees.
+
+`binance_demo_bot.trend_runner` researches a frozen volume-confirmed breakout
+challenger on the own native15m archive. Use `--wait-for-history` to wait for the
+entire registered cohort then run global chronological70/15/15 segments and
+cost stress. `--allow-partial` is an explicit one-time provisional diagnostic;
+it cannot satisfy the full-cohort gate. These flags cannot be combined.
+Parameters/source/cohort are pinned before results. Source/result mutation
+fails closed; a changed hypothesis requires a separately registered experiment.
+The runner streams pages, writes own `.runtime/trend-research/` and never loads
+credentials or sends orders. Stop waiting with its own `trend-research/stop` file.
+Signals, next-open execution, conservative intrabar stops and full-day simulated
+PnL are tested; historical PIT/receipts/filters and actual financial certification
+remain external gates. All results are SIMULATION, never actual training rows.
+Live technical round-robin and its original expiry/limits remain unchanged.
+See [integration spec](../../docs/specs/binance-demo-financial-research-integration.md).
+
 The opt-in `binance_demo_bot.pilot_service --enable-demo-qualification` worker
 owns an isolated24h BTCUSDT pilot:30 USDT/BUY,100 virtual budget, one position,
 native OCO TP/SL, first probe60s/subsequent900s, max8 cycles at3h cadence,

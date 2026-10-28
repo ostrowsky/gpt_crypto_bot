@@ -11,7 +11,7 @@ from pathlib import Path
 import sqlite3
 
 from .account_evidence import AccountEvidenceStore
-from .account_opening import AccountOpeningManifest, _balances, _identifier, _strings
+from .account_opening import AccountOpeningManifest, _balances, _identifier, _strings, _source, _asset, _market_symbol
 from .adapter import AdapterError, _sha
 from .financial import AccountingError, LedgerConflict
 from .interaction_audit import AuditJournal, sanitize
@@ -156,9 +156,29 @@ class FinancialAccount:
                             incidents=evidence.incidents())
         except Exception:_fail('FINANCE_EVIDENCE_INVALID')
 
-    def _import(self,prefix,metadata,cutoff):
+    def _metadata_sources(self,metadata,history,cutoff):
+        try:
+            if not isinstance(history,(list,tuple)) or len(history)>64:_fail('FINANCE_SOURCE_INVALID')
+            sources=[];mappings={}
+            for observation in [metadata,*history]:
+                _source(observation,'exchangeInfo',cutoff,2**63-1,{},private=False)
+                members={}
+                for member in observation['data']['symbols']:
+                    symbol=_market_symbol(member['symbol']);mapping=(_asset(member['baseAsset']),_asset(member['quoteAsset']))
+                    if symbol in members:_fail('FINANCE_SOURCE_INVALID')
+                    members[symbol]=member
+                    key=(observation['received_at_ms'],symbol)
+                    if key in mappings and mappings[key]!=mapping:_fail('FINANCE_METADATA_CONFLICT')
+                    mappings[key]=mapping
+                sources.append((observation,members))
+            return sorted(sources,key=lambda r:(r[0]['received_at_ms'],r[0]['source_sha256']),reverse=True)
+        except AdapterError as error:
+            if error.reason=='FINANCE_METADATA_CONFLICT':raise
+            _fail('FINANCE_SOURCE_INVALID')
+        except (KeyError,TypeError,ValueError,ArithmeticError):_fail('FINANCE_SOURCE_INVALID')
+
+    def _import(self,prefix,metadata_sources,cutoff):
         rows={row['seq']:row for row in prefix['rows']}
-        members={row['symbol']:row for row in metadata['data']['symbols']}
         counts=dict(stored_fills_N=len(prefix['fills']),imported_n=0,unimported_n=0,pre_anchor_n=0,
                     deferred_n=0,global_fill_denominator=None,dispositions=[])
         reasons=[]
@@ -176,9 +196,11 @@ class FinancialAccount:
             elif (fill['symbol'],fill['trade_id'],item['source_sha256']) in accepted:
                 counts['imported_n']+=1;disposition['state']='IMPORTED';reasons.append('UNATTRIBUTED_ACTIVITY')
             else:
-                member=members.get(fill['symbol'])
+                selected=next(((source,members[fill['symbol']]) for source,members in metadata_sources
+                    if source['received_at_ms']<=at and fill['symbol'] in members),None)
+                metadata,member=selected if selected else (None,None)
                 reason=None
-                if not member or metadata['received_at_ms']>at:reason='HISTORICAL_SYMBOL_MAPPING_MISSING'
+                if not member:reason='HISTORICAL_SYMBOL_MAPPING_MISSING'
                 elif member['quoteAsset']!='USDT':reason='NON_USDT_FILL_UNSUPPORTED'
                 elif Decimal(fill['commission_quantity'])!=0 and fill['commission_asset'] not in ('USDT',member['baseAsset']):
                     reason='HISTORICAL_FEE_MARK_MISSING'
@@ -210,7 +232,7 @@ class FinancialAccount:
             counts['dispositions'].append(disposition)
         return counts,reasons
 
-    def reconcile(self,*,check_id,account_before,account_after,orders,order_lists,metadata,tickers,cutoff_ms,evidence):
+    def reconcile(self,*,check_id,account_before,account_after,orders,order_lists,metadata,tickers,cutoff_ms,evidence,metadata_history=()):
         with self._audit._lock:
             self._ready();_identifier(check_id)
             try:
@@ -221,15 +243,18 @@ class FinancialAccount:
                         _fail('FINANCE_SOURCE_INVALID')
                     returned=_balances(account_after['data'],self._binding['account_identity'])
             except (AdapterError,KeyError,TypeError,ValueError,ArithmeticError):_fail('FINANCE_SOURCE_INVALID')
+            metadata_sources=self._metadata_sources(metadata,metadata_history,cutoff_ms)
             prefix=self._prefix(evidence)
-            request_hash=_sha(_strings(dict(observed=observed,evidence_generation=prefix['generation'])))
+            request=dict(observed=observed,evidence_generation=prefix['generation'])
+            if metadata_history:request['historical_metadata_pins']=[_sha(_strings(row)) for row in metadata_history]
+            request_hash=_sha(_strings(request))
             if check_id in self._checks:
                 previous=self._checks[check_id]
                 if previous['request_sha256']!=request_hash:_fail('FINANCE_CHECK_CONFLICT')
                 return deepcopy(previous)
             if len(self._checks)>=1000:_fail('FINANCE_CAPACITY')
             with localcontext(Context(prec=96)):
-                fills,import_reasons=self._import(prefix,metadata,cutoff_ms)
+                fills,import_reasons=self._import(prefix,metadata_sources,cutoff_ms)
                 marks=observed['valuation']['marks']
                 projection=self._ledger._cache(self._ledger._event_rows())
                 if all(Decimal(q)==0 or asset=='USDT' or asset in marks for asset,q in projection['balances'].items()):
@@ -258,10 +283,40 @@ class FinancialAccount:
                     journal_source_sha256=projection['source_sha256'],source_pins=observed['sources'],
                     returned_assets_N=len(returned),returned_asset_sha256=sorted(_sha(a) for a in returned),
                     reasons=sorted(set(reasons)),
-                    observed_equity_usdt=equity,unadjusted_equity_change_usdt=None if equity is None else
+                    valuation=observed['valuation'],observed_equity_usdt=equity,unadjusted_equity_change_usdt=None if equity is None else
                     equity-Decimal(self._binding['opening']['valuation']['equity_usdt']),
                     daily_net_pnl_usdt=None,exchange_reconciled=False,financial_episode_opened=False,execution_authorized=False)
             return self._save('CHECK',result)
+
+    def interval_report(self,check_id):
+        with self._audit._lock,localcontext(Context(prec=96)):
+            self._ready()
+            if check_id not in self._checks:_fail('FINANCE_CHECK_MISSING')
+            check=self._checks[check_id];reasons=list(check['reasons'])+['CALENDAR_BOUNDARIES_PENDING']
+            result=dict(check_id=check_id,opening_sha256=self._binding['opening_sha256'],
+                cutoff_ms=check['cutoff_ms'],evidence_kind='LOCAL_ACCOUNT_DIAGNOSTIC',financial_status='PENDING',
+                attribution_status='BLOCKED',observed_equity_usdt=check['observed_equity_usdt'],
+                projected_equity_usdt=None,projected_equity_change_usdt=None,attribution=None,
+                attribution_residual_usdt=None,daily_net_pnl_usdt=None,execution_authorized=False,reasons=reasons)
+            marks=check.get('valuation',{}).get('marks',{})
+            cached=self._ledger._cache(self._ledger._event_rows())
+            if cached['source_sha256']!=check['journal_source_sha256']:
+                reasons.append('JOURNAL_CHANGED');return _strings(result)
+            if (check['balance_check']!='BALANCES_MATCH' or check['observed_equity_usdt'] is None
+                or check['fills']['unimported_n'] or check['fills']['deferred_n']):return _strings(result)
+            try:
+                projection=self._ledger.projection(marks)
+                equity=sum((Decimal(q)*Decimal(marks[a]) for a,q in projection['balances'].items() if Decimal(q)),Decimal(0))
+            except (KeyError,ValueError,ArithmeticError):
+                reasons.append('VALUATION_INCOMPLETE');return _strings(result)
+            change=equity-Decimal(self._binding['opening']['valuation']['equity_usdt'])
+            attribution=projection['attribution']
+            residual=change-(attribution['gross_realized_usdt']-attribution['fee_expenses_usdt']+attribution['unrealized_usdt'])
+            if equity!=Decimal(check['observed_equity_usdt']) or residual!=0:
+                reasons.append('ATTRIBUTION_MISMATCH');return _strings(result)
+            result.update(attribution_status='MATCH',projected_equity_usdt=equity,
+                projected_equity_change_usdt=change,attribution=attribution,attribution_residual_usdt=residual)
+            return _strings(result)
 
     def projection(self,marks):
         with self._audit._lock:

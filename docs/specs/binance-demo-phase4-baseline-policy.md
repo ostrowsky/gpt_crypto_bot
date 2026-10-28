@@ -2,6 +2,13 @@
 
 Дата: 2026-10-10. Status: **PLANNED — specification only; not implemented**.
 Owner: repository maintainer. Contract: `daily_net_equity_pnl_v1`.
+
+Update2026-10-28: a separate frozen research challenger trend-breakout-v1 and
+shared-cash native-archive simulator are implemented in the
+[financial/research integration](binance-demo-financial-research-integration.md).
+This is not the live decision adapter or an approved champion. Native technical
+round-robin remains separate; this phase's financial/PIT/forward admission gates
+remain outstanding. Do not translate research code or unit GREEN into live P4.
 Parent: [программа](binance-demo-autonomous-trading-program.md).
 Boundary: [отдельное приложение](binance-demo-application-isolation.md)
 `apps/binance_demo_bot`; свои package/env/config/ledger/процессы.

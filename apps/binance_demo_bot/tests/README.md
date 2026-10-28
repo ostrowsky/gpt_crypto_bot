@@ -1,5 +1,20 @@
 # Independent Demo bot: P0-A tests
 
+Financial/research integration2026-10-28:14 new financial import/attribution
+scenarios,23 causal trend/portfolio/calendar scenarios and8 native SQLite runner
+scenarios. Genuine initial RED:14 missing contracts,18 missing research module,
+2 boundary failures,3 missing calendar fields,7 missing runner module and1
+archive-cutoff mismatch. Financial
+fixtures corrected to keep the current catalog before its observation cutoff;
+this is not counted as a product failure. All checks are synthetic, offline,
+credential-free. Native GET-only verification separately imported4 actual fills
+and matched4/4 required balances with unchanged seed and zero attribution residual;
+this does not certify daily PnL, ownership or profitability.
+Final full application1031 GREEN (249.022s),45 new focused contracts covered,
+root14 specification tests GREEN. Full Harness remains FAIL TH-11 separately.
+Final full application1031 GREEN (249.022s),45 new focused contracts covered,
+root14 specification tests GREEN. Full Harness remains FAIL TH-11 separately.
+
 All-USDT extension2026-10-28:54 dedicated scope/history/controller/native-gateway
 tests GREEN,57 pilot regressions GREEN,986 full GREEN (262.814s), root14 GREEN.
 Named USD-01..06 cases use native own SQLite/AuditJournal/MarketSnapshotStore,
