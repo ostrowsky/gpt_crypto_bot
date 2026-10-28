@@ -1,5 +1,11 @@
 # Independent Demo bot: P0-A tests
 
+2026-10-28 execution qualification:48 focused GREEN (7.212s), after genuine
+RED missing interfaces and permission/order-count/partial/unknown-recovery,
+protection and learning baseline/leakage failures. Native isolated SQLite/audit
+and synthetic exchange only; no credentials or real orders in unit tests.
+See [PIL-01..08](../../../docs/specs/binance-demo-execution-qualification-pilot.md).
+
 P0-C2 financial bridge: `test_financial_account.py`,39 focused GREEN (14.052s).
 30 missing-module RED before code; later genuine RED reproductions for refreshed
 historical mappings, ready-ledger truncation and asset-name/redactor overlap.

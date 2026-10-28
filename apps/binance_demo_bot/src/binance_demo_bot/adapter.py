@@ -24,9 +24,9 @@ from .isolation import DemoCredentials
 
 BASE_URL = "https://demo-api.binance.com/api/v3/"
 PUBLIC_PATHS = frozenset(("/api/v3/ping", "/api/v3/time", "/api/v3/exchangeInfo",
-                         "/api/v3/ticker/bookTicker", "/api/v3/klines", "/api/v3/depth"))
+                         "/api/v3/ticker/bookTicker", "/api/v3/klines", "/api/v3/depth", "/api/v3/avgPrice"))
 READ_PATHS = PUBLIC_PATHS | frozenset(("/api/v3/account",
-                        "/api/v3/openOrders", "/api/v3/order", "/api/v3/myTrades", "/api/v3/openOrderList"))
+                        "/api/v3/openOrders", "/api/v3/order", "/api/v3/myTrades", "/api/v3/openOrderList", "/api/v3/orderList"))
 BODY_LIMIT = 8 * 1024 * 1024
 METADATA_LIMIT = 32 * 1024 * 1024
 
@@ -165,10 +165,12 @@ class DemoHttpTransport:
             raise AdapterError("FORBIDDEN_ENDPOINT")
         return self._request_https(method, path, query, headers, timeout_s)
 
-    def _request_https(self, method, path, query, headers, timeout_s):
+    def _request_https(self, method, path, query, headers, timeout_s, *, matching_engine=False):
         """Shared bounded TLS implementation; public transports own their allowlist."""
         if (not isinstance(path,str) or not ((method=='GET' and path in READ_PATHS)
-                or (method=='POST' and path=='/api/v3/order/test'))):
+                or (method=='POST' and path=='/api/v3/order/test')
+                or (matching_engine is True and (method,path) in {('POST','/api/v3/order'),
+                    ('POST','/api/v3/orderList/oco'),('DELETE','/api/v3/order'),('DELETE','/api/v3/orderList')}))):
             raise AdapterError('FORBIDDEN_ENDPOINT')
         allowed_request_headers = {"X-MBX-APIKEY"} | ({"Accept-Encoding"} if path == "/api/v3/exchangeInfo" else set())
         if (not isinstance(query, str) or any(c in query for c in "\r\n?#")

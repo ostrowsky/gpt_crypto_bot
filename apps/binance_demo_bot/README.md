@@ -649,3 +649,17 @@ authoritative account/day/research certification stays UNAVAILABLE; even an
 empty ledger or released holds always has `deletion_eligible=False`. There is
 no deletion/reclamation API. Certifying those sources and backing up the hold
 ledger/full chain remain release gates before any evidence can be reclaimed.
+# Bounded Demo execution qualification (2026-10-28)
+
+The opt-in `binance_demo_bot.pilot_service --enable-demo-qualification` worker
+owns an isolated24h BTCUSDT pilot:30 USDT/BUY,100 virtual budget, one position,
+native OCO TP/SL, first probe60s/subsequent900s, max8 cycles at3h cadence,
+1 USDT entry loss/drawdown stop. Default read-only adapter remains unchanged in
+authority. Own `.runtime/pilot/stop-entries` blocks new entries while protection
+and reconciliation continue. Never delete/rebase the pilot profile or journals.
+
+Status, native HTTP/WS audit, owned orders/fills/fees and mature learning handoff
+are in own `.runtime/pilot/`. Actual partial-day financial status stays PENDING;
+the reference replay is negative and this worker does not enable a profit policy.
+At most8 cycles are an integration sample, not enough to prove learning uplift.
+See [specification](../../docs/specs/binance-demo-execution-qualification-pilot.md).
