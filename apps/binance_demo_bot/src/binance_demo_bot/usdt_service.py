@@ -11,12 +11,13 @@ from .execution_pilot import amount,text,fail
 from .interaction_audit import AuditJournal
 from .isolation import AppPaths,load_demo_credentials
 from .market_store import MarketSnapshotStore
-from .pilot_service import PilotService,LiveGateway,RATE_REASONS,pilot_sleep_seconds,write_json
+from .pilot_service import PilotService,LiveGateway,RATE_REASONS,CLOCK_REASONS,pilot_sleep_seconds,write_json
 from .pilot_research import learning_handoff
 from .private_stream import PrivateEventReader
 from .universe import PERMISSIONS
 from .usdt_scope import UsdtPilotJournal,usdt_catalog,portfolio_inventory,portfolio_value,select_round_robin
 from .usdt_history import read_ready,verify_reference
+from .pilot_runtime import PrivateReaderSupervisor,resume_clock_halt
 
 
 def forecast_features(state,bars,received_at_ms,*,now_ms):
@@ -40,9 +41,17 @@ def operational_report(state,monitor,*,pid,now_ms,expires_ms,actual_outcomes_n,s
     fresh=type(received) is int and 0<=now_ms-received<=30000
     if not fresh:monitor['quote_ready_n']=None
     monitor['quote_status']='FRESH' if fresh else 'UNKNOWN_OR_STALE'
+    blocked=bool(state.get('entry_killed') or state.get('phase')=='HALTED')
+    private_ok=bool(stream.get('connected',stream.get('transport_healthy')) and stream.get('transport_healthy') and stream.get('reader_alive',True))
+    wait_clock=bool(state.get('data_wait_reason'))
+    trading=('EXPIRED' if now_ms>=expires_ms else 'BLOCKED' if blocked else 'WAIT_CLOCK' if wait_clock else
+        'WAIT_PRIVATE' if not private_ok else state.get('phase','UNKNOWN'))
+    operational='BLOCKED' if blocked and error is None else 'PAUSED' if error or not fresh or wait_clock or not private_ok else 'RUNNING'
     return dict(mode='ALL_USDT_EXECUTION_QUALIFICATION',pid=pid,checked_at_ms=now_ms,state=deepcopy(state),
-        monitoring=monitor,monitoring_enabled=True,operational_status='RUNNING' if fresh and error is None else 'PAUSED',
-        last_error=error,entry_enabled=bool(error is None and fresh and now_ms<expires_ms and state.get('phase')=='IDLE'
+        monitoring=monitor,monitoring_enabled=True,monitoring_status='RUNNING' if fresh else 'PAUSED',
+        trading_status=trading,operational_status=operational,
+        last_error=error or state.get('data_wait_reason') or (state.get('reason') if blocked else None),
+        entry_enabled=bool(error is None and fresh and private_ok and not wait_clock and now_ms<expires_ms and state.get('phase')=='IDLE'
             and not state.get('entry_killed') and monitor.get('selected_symbol')),
         expires_ms=expires_ms,actual_outcomes_n=actual_outcomes_n,daily_net_pnl_usdt=None,financial_status='PENDING',
         ordinary_strategy_enabled=False,stream=stream)
@@ -180,9 +189,10 @@ class UsdtGateway(LiveGateway):
             for r in self.catalog if r['metadata'].get('quoteAsset')=='USDT' and r['symbol'] in self.quotes}
         marks[self.metadata[self.symbol]['baseAsset']]=(quote['bidPrice'],quote['askPrice'])
         if critical:marks.update({r['symbol'][:-4]:(r['bidPrice'],r['askPrice']) for r in quote_rows})
+        reader_health=self.reader.health()
         result=dict(now_ms=now,bid=quote['bidPrice'],ask=quote['askPrice'],average=avg['price'],metadata=self.metadata[self.symbol],
             balances={r['asset']:{k:text(r[k]) for k in ('free','locked')} for r in account['data']['balances']},
-            marks=marks,stream_ok=self.reader.health()['transport_healthy'],open_orders=orders,features=features,
+            marks=marks,stream_ok=bool(reader_health['transport_healthy'] and reader_health.get('reader_alive',True)),open_orders=orders,features=features,
             bid_qty=quote['bidQty'],ask_qty=quote['askQty'],feature_end_ms=feature_end,
             snapshot_id=_sha([account['source_sha256'],selected['source_sha256'],_sha(features),feature_available,self.quote_source]),
             account_identity=account['data']['account_identity'],feature_available_at_ms=feature_available)
@@ -224,6 +234,7 @@ class UsdtGateway(LiveGateway):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--enable-all-usdt-demo',action='store_true');parser.add_argument('--once',action='store_true')
+    parser.add_argument('--review-clock-halt',action='store_true')
     args=parser.parse_args()
     if not args.enable_all_usdt_demo:raise SystemExit('EXPLICIT_USDT_DEMO_SCOPE_REQUIRED')
     paths=AppPaths(Path(__file__).resolve().parents[2]);folder=paths.runtime_path('pilot')
@@ -240,12 +251,22 @@ def main():
         evidence=AccountEvidenceStore(paths,**ns,account_identity=profile['account_identity'],database='pilot/account-evidence.sqlite')
         reader=PrivateEventReader(c,evidence,process_instance_id=uuid.uuid4().hex,background=True);reader.start()
         gateway=UsdtGateway(c,evidence,reader,book,paths);service=UsdtPilotService(book,gateway)
+        supervisor=PrivateReaderSupervisor(gateway,book=book)
+        if args.review_clock_halt and book.state().get('phase')=='HALTED':
+            gateway.refresh_catalog();gateway.poll_quotes();gateway.authorize()
+            for review_attempt in range(3):
+                try:resume_clock_halt(service,reviewed=True);break
+                except AdapterError as error:
+                    if error.reason not in CLOCK_REASONS|RATE_REASONS|{'PILOT_REVIEW_SOURCE_STALE'} or review_attempt==2:raise
+                    time.sleep(5)
         while True:
             try:
                 state=book.state();gateway.symbol=state.get('symbol','BTCUSDT')
                 critical_processed=state.get('phase') in ('OPEN','BUY_PENDING','PROTECTION_PENDING','RECOVERY_REQUIRED')
                 if critical_processed:
                     state=service.recover_once() if state['phase']=='RECOVERY_REQUIRED' else service.tick()
+                if (book.state().get('phase')=='IDLE' and time.time_ns()//1000000<profile['expires_ms']):
+                    reader=supervisor.maintain()
                 gateway.refresh_catalog();gateway.poll_quotes();ready=gateway.authorize();monitor=gateway.monitoring_status(ready)
                 state=book.state();gateway.symbol=state.get('symbol','BTCUSDT')
                 # Explicit user-authorized scope migration, only from the old

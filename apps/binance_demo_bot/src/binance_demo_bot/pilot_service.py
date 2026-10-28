@@ -15,6 +15,7 @@ from .pilot_research import learning_handoff
 from .order_validation import DemoTradeValidator
 
 RATE_REASONS={'MARKET_RATE_BUDGET','LOCAL_RATE_BUDGET','RATE_LIMITED'}
+CLOCK_REASONS={'CLOCK_UNSYNCED','CLOCK_STALE','CLOCK_QUALITY','CLOCK_JUMP','TIMESTAMP_REJECTED'}
 
 
 def pilot_sleep_seconds(state,now_ms):
@@ -104,6 +105,7 @@ class PilotService:
             if state['phase'] in ('HALTED','FINISHED','RECOVERY_REQUIRED'):return state
             try:
                 snapshot=self.gateway.snapshot();now=snapshot['now_ms'];rows=self._rows()
+                state.pop('data_wait_reason',None)
                 inventory=self._inventory(rows)
                 if snapshot['account_identity']!=self.book._binding['account_identity']:fail('PILOT_ACCOUNT_CHANGED')
                 if not self._account_agrees(snapshot,inventory):fail('PILOT_BALANCE_MISMATCH')
@@ -144,8 +146,9 @@ class PilotService:
                     snapshot_id=snapshot['snapshot_id'],features=state['features'],feature_end_ms=state['feature_end_ms']))
                 return self._entry(state,snapshot)
             except AdapterError as error:
-                if error.reason in RATE_REASONS and state['phase']=='IDLE':
+                if error.reason in RATE_REASONS|CLOCK_REASONS and state['phase']=='IDLE':
                     state['reason']=error.reason
+                    if error.reason in CLOCK_REASONS:state['data_wait_reason']=error.reason
                     self.book.decision(dict(action='WAIT',reason=error.reason,cutoff_ms=time.time_ns()//1000000))
                     return self._save(state)
                 buy=self.book.actions().get('buy-'+str(state['cycles']),{})

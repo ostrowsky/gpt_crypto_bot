@@ -420,3 +420,12 @@ prefix SQL, real thread joins and synthetic network protocols; no keys/network,
 skip/xfail or weakened assertions. Test counters concern saved application
 messages, not unseen exchange traffic. Full Harness TH-11 and full-market
 latency remain FAIL independently of these implementation tests.
+
+TRN (2026-10-28): spec first;16 initial tests RED (4 failures/11 missing
+interface errors,1 preserving pass). Additional durable-reader cleanup,
+dead-thread readiness and source-freshness cases reproduced3 failures before
+repair. Final19 focused GREEN(2.371s). Full1050 first run had1 existing writer
+admission timeout; its24-test suite passed unchanged(6.010s), then full1050
+GREEN(245.543s). Synthetic app fixtures/real own audit journal; no credentials,
+network, skips/xfail or weakened assertions. Full Harness remains FAIL TH-11
+for the preexisting replay_backtest.py canonical evidence hash gap.
