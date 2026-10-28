@@ -32,12 +32,18 @@ def text(value):
 def rounded(value,step,up=False):
     return (value/step).to_integral_value(rounding=ROUND_UP if up else ROUND_DOWN)*step if step else value
 
+def is_usdt_symbol(value):
+    return (isinstance(value,str) and value.endswith('USDT') and 4<len(value)<=24
+        and value.isalnum() and value==value.upper())
 
-def execution_plan(info,bid,ask,average,*,owned='0',fill_price=None):
+
+def execution_plan(info,bid,ask,average,*,owned='0',fill_price=None,symbol='BTCUSDT'):
     with localcontext(Context(prec=50)):
         bid,ask,avg,owned=(amount(x) for x in (bid,ask,average,owned))
         if bid<=0 or ask<bid or avg<=0:fail('PILOT_INVALID')
-        if (info.get('symbol')!='BTCUSDT' or info.get('status')!='TRADING'
+        if (not is_usdt_symbol(symbol) or not isinstance(info.get('baseAsset'),str)
+            or info.get('symbol')!=symbol or info.get('quoteAsset')!='USDT'
+            or info.get('baseAsset')+'USDT'!=symbol or info.get('status')!='TRADING'
             or info.get('isSpotTradingAllowed') is not True or info.get('ocoAllowed') is not True
             or info.get('quoteOrderQtyMarketAllowed') is not True
             or not {'MARKET','LIMIT_MAKER','STOP_LOSS'}<=set(info.get('orderTypes',[]))):fail('PILOT_FILTER_UNSUPPORTED')
@@ -115,9 +121,7 @@ class MatchingGateway:
         query=sign_rest(signed,c._credentials.api_secret)
         response,*rest=c._transport_attempt(path,query,{'X-MBX-APIKEY':c._credentials.api_key},signed,
             True,deadline,uuid.uuid4().hex,0,method=method,transport=self.transport,matching_engine=True)
-        for key,value in response.headers.items():
-            if key.lower()=='x-mbx-used-weight-1m' and value.isdecimal():
-                c._shared_weight=max(c._shared_weight,int(value));c._shared_weight_expires_ns=c.clock.monotonic_ns()+60_000_000_000
+        c._observe_weight(response.headers,rest[3])
         if response.status in (418,429):c.cooldown_until_ns=c.clock.monotonic_ns()+60_000_000_000;fail('PILOT_QUERY_REQUIRED')
         data=_json(response.body)
         if response.status!=200:
@@ -129,7 +133,7 @@ class MatchingGateway:
             try:raw,_=self.client._request('/api/v3/orderList',{'origClientOrderId':params['listClientOrderId']},signed=True,weight=4);return raw
             except AdapterError:return None
         try:
-            query={'symbol':'BTCUSDT'}
+            query={'symbol':params['symbol']}
             if 'orderId' in params:query['orderId']=params['orderId']
             else:query['origClientOrderId']=params.get('newClientOrderId',params.get('origClientOrderId'))
             raw,_=self.client._request('/api/v3/order',query,signed=True,weight=4)
@@ -185,39 +189,41 @@ class PilotJournal:
         self._audit.append('DECISION',event);self._apply(event)
     def client_id(self,action,leg=''):return 'bq_'+_sha(dict(binding=self._binding,action=action,leg=leg))[:32]
     def _valid_response(self,item,data):
-        if not isinstance(data,dict) or data.get('symbol')!='BTCUSDT':return False
+        if not isinstance(data,dict) or data.get('symbol')!=item['params']['symbol']:return False
         p=item['params']
         if item['method']=='DELETE' and item['path']=='/api/v3/order':
             return data.get('orderId')==p['orderId'] and data.get('status') in ('CANCELED','FILLED','EXPIRED')
         if 'orderList' in item['path']:
             if data.get('listClientOrderId')!=p['listClientOrderId'] or type(data.get('orderListId')) is not int:return False
             rows=data.get('orders',[])
-            return len(rows)==2 and all(type(r.get('orderId')) is int for r in rows) and (item['method']=='DELETE' or
+            return len(rows)==2 and all(type(r.get('orderId')) is int and r.get('symbol',p['symbol'])==p['symbol'] for r in rows) and (item['method']=='DELETE' or
                 {r.get('clientOrderId') for r in rows}=={p['aboveClientOrderId'],p['belowClientOrderId']})
         return (data.get('clientOrderId')==p.get('newClientOrderId',p.get('origClientOrderId'))
                 and type(data.get('orderId')) is int and data.get('status') in {'NEW','PARTIALLY_FILLED','FILLED','CANCELED','EXPIRED','REJECTED'})
+    def _symbol_allowed(self,symbol,*,closing=False):return symbol=='BTCUSDT'
     def call(self,action,method,path,params,broker):
         with self._audit._lock:
             self._ready()
             if not self.enabled:fail('PILOT_DISABLED')
-            if (method,path) not in PAIRS or params.get('symbol')!='BTCUSDT':fail('PILOT_INVALID')
+            if (method,path) not in PAIRS:fail('PILOT_INVALID')
             old=self._actions.get(action)
             if old:
                 if any(old[k]!=v for k,v in dict(method=method,path=path,params=params).items()):fail('PILOT_ACTION_CONFLICT')
                 if old['state']=='ACKNOWLEDGED':return deepcopy(old['response'])
                 fail('PILOT_QUERY_REQUIRED')
+            if not self._symbol_allowed(params.get('symbol'),closing=method=='DELETE' or params.get('side')=='SELL'):fail('PILOT_INVALID')
             if method=='POST' and path=='/api/v3/order':
                 if params.get('type')!='MARKET' or params.get('side') not in ('BUY','SELL'):fail('PILOT_INVALID')
                 if params['side']=='BUY' and not 0<amount(params.get('quoteOrderQty'))<=30:fail('PILOT_RISK_LIMIT')
                 if params['newClientOrderId']!=self.client_id(action):fail('PILOT_INVALID')
-                if params['side']=='SELL' and not self.owned_order_ids():fail('PILOT_NOT_OWNED')
+                if params['side']=='SELL' and not self.owned_order_ids(params['symbol']):fail('PILOT_NOT_OWNED')
             if method=='DELETE':
                 if path=='/api/v3/order':
-                    if params.get('orderId') not in self.owned_order_ids():fail('PILOT_NOT_OWNED')
+                    if (params['symbol'],params.get('orderId')) not in self.owned_order_keys():fail('PILOT_NOT_OWNED')
                 else:
-                    ids={a['params'].get('listClientOrderId') for a in self._actions.values() if a['state']=='ACKNOWLEDGED' and a['method']=='POST' and 'orderList' in a['path']}
+                    ids={a['params'].get('listClientOrderId') for a in self._actions.values() if a['state']=='ACKNOWLEDGED' and a['method']=='POST' and 'orderList' in a['path'] and a['params']['symbol']==params['symbol']}
                     if params.get('listClientOrderId') not in ids:fail('PILOT_NOT_OWNED')
-            if method=='POST' and path=='/api/v3/orderList/oco' and not self.owned_order_ids():fail('PILOT_NOT_OWNED')
+            if method=='POST' and path=='/api/v3/orderList/oco' and not self.owned_order_ids(params['symbol']):fail('PILOT_NOT_OWNED')
             self._save('PREPARED',dict(action=action,method=method,path=path,params=params))
             self._save('START',dict(action=action))
             try:
@@ -233,14 +239,16 @@ class PilotJournal:
             response=broker.query_action(item['method'],item['path'],item['params'])
             if not self._valid_response(item,response):fail('PILOT_QUERY_REQUIRED')
             self._save('ACK',dict(action=action,response=response));return deepcopy(response)
-    def owned_order_ids(self):
+    def owned_order_keys(self):
         result=set()
         for item in self._actions.values():
             if item['state']!='ACKNOWLEDGED' or item['method']!='POST':continue
             r=item['response']
-            if 'orderList' in item['path']:result.update(x['orderId'] for x in r['orders'])
-            else:result.add(r['orderId'])
+            if 'orderList' in item['path']:result.update((r['symbol'],x['orderId']) for x in r['orders'])
+            else:result.add((r['symbol'],r['orderId']))
         return sorted(result)
+    def owned_order_ids(self,symbol=None):
+        return sorted({oid for pair,oid in self.owned_order_keys() if symbol is None or pair==symbol})
     def abandon_reviewed_local_refusal(self,action,*,network_audit,snapshot,blocked_adapter_sha256):
         """Operator-only migration of the reviewed 05ac2d4 pre-network refusal.
 

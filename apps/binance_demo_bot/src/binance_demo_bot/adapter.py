@@ -337,6 +337,8 @@ class DemoReadClient:
         self._reservations = deque()
         self._shared_weight = 0
         self._shared_weight_expires_ns = 0
+        self._native_weight_observations = deque()
+        self._native_weights_seen = False
         if audit is not None:
             from .interaction_audit import AuditJournal
             if not isinstance(audit, AuditJournal):
@@ -412,6 +414,23 @@ class DemoReadClient:
         if hasattr(self.transport, "close"):
             self.transport.close()
 
+    def _refresh_shared_weight(self):
+        now=self.clock.monotonic_ns()
+        while self._native_weight_observations and now-self._native_weight_observations[0][0]>=60_000_000_000:
+            self._native_weight_observations.popleft()
+        if self._native_weights_seen:
+            self._shared_weight=max((value+sum(w for t,w in self._reservations if t>=received)
+                for received,value in self._native_weight_observations),default=0)
+            self._shared_weight_expires_ns=max((t+60_000_000_000 for t,_ in self._native_weight_observations),default=0)
+        elif now>=self._shared_weight_expires_ns:self._shared_weight=0
+
+    def _observe_weight(self,headers,received_mono):
+        value=next((v for k,v in headers.items() if k.lower()=='x-mbx-used-weight-1m'),None)
+        if isinstance(value,str) and value.isascii() and value.isdecimal() and len(value)<=20:
+            self._native_weights_seen=True
+            self._native_weight_observations.append((received_mono,int(value)))
+            self._refresh_shared_weight()
+
     def _guard(self, weight):
         if not self.enabled:
             raise AdapterError("ADAPTER_DISABLED")
@@ -422,8 +441,7 @@ class DemoReadClient:
             raise AdapterError("RATE_LIMITED")
         while self._reservations and now - self._reservations[0][0] >= 60_000_000_000:
             self._reservations.popleft()
-        if now >= self._shared_weight_expires_ns:
-            self._shared_weight = 0
+        self._refresh_shared_weight()
         local_weight = sum(w for _, w in self._reservations)
         if max(local_weight, self._shared_weight) + weight > 1200:
             raise AdapterError("LOCAL_RATE_BUDGET")
@@ -495,10 +513,7 @@ class DemoReadClient:
                                for k, v in response.headers.items())):
                     raise AdapterError("SCHEMA_INVALID")
                 lower = {k.lower(): v for k, v in response.headers.items() if isinstance(k, str)}
-                weight_header = lower.get("x-mbx-used-weight-1m")
-                if isinstance(weight_header, str) and weight_header.isdecimal():
-                    self._shared_weight = max(self._shared_weight, int(weight_header))
-                    self._shared_weight_expires_ns = received_mono + 60_000_000_000
+                self._observe_weight(response.headers,received_mono)
                 if response.status in (429, 418):
                     try:
                         wait = int(lower.get("retry-after", "60"))

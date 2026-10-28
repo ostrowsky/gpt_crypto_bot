@@ -1,5 +1,15 @@
 # Independent Demo bot: P0-A tests
 
+All-USDT extension2026-10-28:54 dedicated scope/history/controller/native-gateway
+tests GREEN,57 pilot regressions GREEN,986 full GREEN (262.814s), root14 GREEN.
+Named USD-01..06 cases use native own SQLite/AuditJournal/MarketSnapshotStore,
+real adapter signing/parsing with synthetic transport, composite symbol IDs,
+Unicode identifiers, page verification and source-causal timestamps. Genuine
+missing-interface and boundary RED receipts are in own `.runtime/test-evidence`.
+Native history gaps/shortened candles and partial collection remain distinct
+from test success. No credentials or real exchange orders in automated tests.
+[Specification](../../../docs/specs/binance-demo-all-usdt-universe.md).
+
 2026-10-28 execution qualification:48 focused GREEN (7.212s), after genuine
 RED missing interfaces and permission/order-count/partial/unknown-recovery,
 protection and learning baseline/leakage failures. Native isolated SQLite/audit

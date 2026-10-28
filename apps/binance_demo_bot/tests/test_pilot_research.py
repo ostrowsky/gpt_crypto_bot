@@ -39,6 +39,10 @@ class ResearchTests(unittest.TestCase):
         rows=[dict(row,private_delivery_matched=False),dict(row,feature_end_ms=101),row]
         result=self.api.learning_handoff(rows,fit_cutoff_ms=1000)
         self.assertEqual(result['eligible_n'],1);self.assertEqual(result['excluded_n'],2)
+    def test_usd06_feature_received_after_origin_cannot_enter_learning(self):
+        row=dict(state='CLOSED',source_kind='ACTUAL_DEMO',features=[0]*4,origin_ms=100,
+            feature_end_ms=99,feature_available_at_ms=101,label_end_ms=200,label_available_at_ms=201,private_delivery_matched=True)
+        self.assertEqual(self.api.learning_handoff([row],fit_cutoff_ms=1000)['eligible_n'],0)
     def test_pil08_classifier_has_named_constant_baseline(self):
         result=self.api.fit_diagnostic(bars(500))
         self.assertIn('constant_baseline_brier',result)

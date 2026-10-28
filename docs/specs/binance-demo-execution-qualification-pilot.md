@@ -4,6 +4,12 @@ Date: 2026-10-28. Status: actual protected probe closed; bounded collection only
 execution today and obtain first actual results for a learning integration test
 on 2026-10-29 (Europe/Budapest). Parent: P0/P1/P3/P5 program contracts.
 
+Scope update2026-10-28: the subsequent user-authorized
+[all-USDT extension](binance-demo-all-usdt-universe.md) replaces the initial
+BTC-only candidate universe below while preserving the same original seed,
+account-wide budget/attempt limits, stop and expiry. BTC-only statements below
+describe the initial registration and evidence, not a second parallel budget.
+
 ## Scope and authority
 
 Separate application only, dedicated Binance Spot Demo account already attested.

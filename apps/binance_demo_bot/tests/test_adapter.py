@@ -496,6 +496,20 @@ class AdapterCase(unittest.TestCase):
         self.assert_reason("LOCAL_RATE_BUDGET", self.adapter.read_account)
         self.assertEqual(len(self.calls), 1)
 
+    def test_usd04_lower_headers_cannot_keep_old_floor_alive_forever(self):
+        self.adapter._observe_weight({'x-mbx-used-weight-1m':'900'},self.time.mono)
+        self.time.advance(30_000)
+        self.adapter._observe_weight({'x-mbx-used-weight-1m':'10'},self.time.mono)
+        self.assertGreaterEqual(self.adapter._shared_weight,900)
+        self.time.advance(30_001);self.adapter._refresh_shared_weight()
+        self.assertEqual(self.adapter._shared_weight,10)
+
+    def test_usd04_own_requests_after_native_header_stay_reserved(self):
+        self.adapter._observe_weight({'x-mbx-used-weight-1m':'100'},self.time.mono)
+        self.time.advance(1);self.adapter._guard(20)
+        self.adapter._observe_weight({'x-mbx-used-weight-1m':'50'},self.time.mono)
+        self.assertGreaterEqual(self.adapter._shared_weight,120)
+
     def test_rest07_deadline_response_cannot_establish_success(self):
         class LateTransport:
             def request(inner, *args):

@@ -38,6 +38,7 @@ class DemoMarketClient:
         self.clock = self.client.clock
 
     def _budget(self, weight):
+        self.client._refresh_shared_weight()
         now = self.clock.monotonic_ns()
         local = sum(w for t, w in self.client._reservations if 0 <= now-t < 60_000_000_000)
         shared = self.client._shared_weight if now < self.client._shared_weight_expires_ns else 0

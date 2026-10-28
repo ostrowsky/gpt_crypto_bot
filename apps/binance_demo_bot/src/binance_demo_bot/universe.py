@@ -65,7 +65,7 @@ class UniverseService:
             data = account["data"]
             if account.get("schema_version") != 1 or not set(data) <= {"permissions", "can_trade", "account_identity", "balances", "update_time_ms", "returned_assets", "coverage"}:
                 raise ValueError()
-            if _integer(data["update_time_ms"]) > now + 250:
+            if _integer(data["update_time_ms"]) > self.client.clock.timestamp_ms() + 250:
                 raise ValueError()
             token = data["account_identity"]
             if not isinstance(token, str) or len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
@@ -127,8 +127,11 @@ class UniverseService:
                 status = _text(source["status"])
                 reasons = []
                 groups = source.get("permissionSets")
-                known = (isinstance(groups, list) and bool(groups) and all(isinstance(g, list) and bool(g)
-                         and all(isinstance(p, str) and p in PERMISSIONS for p in g) for g in groups))
+                structure = (isinstance(groups,list) and bool(groups) and all(isinstance(g,list) and bool(g)
+                    and all(isinstance(p,str) and bool(p) for p in g) for g in groups))
+                known = structure and all(all(p in PERMISSIONS for p in g) or
+                    (permissions is not None and any(p in permissions for p in g)) for g in groups)
+                unknown_alternatives=sorted({p for g in groups for p in g if p not in PERMISSIONS}) if structure else []
                 if not known:
                     reasons.append("PERMISSIONS_UNVERIFIED")
                     if account is not None:
@@ -158,7 +161,8 @@ class UniverseService:
                                  metadata_extra={k:v for k,v in source.items() if k not in SYMBOL_FIELDS},
                                  source_fields=sorted(set(source)&set(SYMBOL_FIELDS)),
                                  monitored=True, metadata_entry_candidate=not reasons,
-                                 execution_certified=False, reasons=reasons))
+                                 execution_certified=False, reasons=reasons,
+                                 unknown_permission_alternatives=unknown_alternatives))
             previous = self.current(now)
             old = {r["symbol"]: r for r in previous["data"]["rows"]} if previous else {}
             transitions = []

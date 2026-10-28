@@ -82,6 +82,22 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.api.pilot_sleep_seconds({'phase':'OPEN','deadline_ms':100000},1000),30)
         self.assertEqual(self.api.pilot_sleep_seconds({'phase':'OPEN','deadline_ms':2000},1000),1)
         self.assertEqual(self.api.pilot_sleep_seconds({'phase':'RECOVERY_REQUIRED','reason':'MARKET_RATE_BUDGET'},1000),60)
+        self.assertEqual(self.api.pilot_sleep_seconds({'phase':'RECOVERY_REQUIRED','reason':'PILOT_QUERY_REQUIRED'},1000),10)
+
+    def test_usd04_rate_pause_in_flat_idle_does_not_permanently_halt_worker(self):
+        from binance_demo_bot.adapter import AdapterError
+        original=self.exchange.snapshot
+        def rate_pause():raise AdapterError('MARKET_RATE_BUDGET')
+        self.exchange.snapshot=rate_pause;state=self.service.tick()
+        self.assertEqual(state['phase'],'IDLE');self.assertFalse(state['entry_killed'])
+        self.exchange.snapshot=original;self.assertEqual(self.service.tick()['phase'],'OPEN')
+
+    def test_usd06_feature_receipt_after_decision_blocks_buy(self):
+        original=self.exchange.snapshot
+        def future_receipt():
+            s=original();s['feature_available_at_ms']=s['now_ms']+1;return s
+        self.exchange.snapshot=future_receipt;self.service.tick()
+        self.assertEqual(self.exchange.calls,[])
 
     def test_pil05_operator_resume_only_after_verified_closed_probe(self):
         self.service.tick();self.exchange.now+=61000;self.service.tick()

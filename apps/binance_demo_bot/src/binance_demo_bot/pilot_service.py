@@ -18,14 +18,25 @@ RATE_REASONS={'MARKET_RATE_BUDGET','LOCAL_RATE_BUDGET','RATE_LIMITED'}
 
 
 def pilot_sleep_seconds(state,now_ms):
-    if state['phase']=='RECOVERY_REQUIRED' and state.get('reason') in RATE_REASONS:return 60
+    if state['phase'] in ('IDLE','RECOVERY_REQUIRED') and state.get('reason') in RATE_REASONS:return 60
+    if state['phase']=='RECOVERY_REQUIRED':return 10
     if state['phase']=='OPEN':return min(30,max(.1,(state['deadline_ms']-now_ms)/1000))
     return 30
 
 class PilotService:
     def __init__(self,journal,gateway):self.book,self.gateway=journal,gateway
     def _rows(self):return self.gateway.fill_rows(self.book.owned_order_ids())
-    def _inventory(self):return fill_inventory(self._rows(),set(self.book.owned_order_ids()))
+    def _inventory(self,rows=None):return fill_inventory(self._rows() if rows is None else rows,set(self.book.owned_order_ids()))
+    def _equity(self,inventory,snapshot):
+        return Decimal('100')+Decimal(inventory['cash_delta'])+Decimal(inventory['base'])*(amount(snapshot['bid'])+amount(snapshot['ask']))/2
+    def _position_value(self,inventory,snapshot,*,ask=False):
+        return Decimal(inventory['base'])*amount(snapshot['ask' if ask else 'bid'])
+    def _foreign_orders(self,snapshot):
+        return any(o['order_id'] not in self.book.owned_order_ids() for o in snapshot['open_orders'])
+    def _plan(self,snapshot,*,owned='0',fill_price=None):
+        return execution_plan(snapshot['metadata'],snapshot['bid'],snapshot['ask'],snapshot['average'],
+            owned=owned,fill_price=fill_price,symbol=snapshot['metadata']['symbol'])
+    def _is_probe(self,state,snapshot):return not state.get('qualified')
     def _save(self,state):self.book.save_state(state);return self.book.state()
     def _account_agrees(self,snapshot,inventory):
         initial=self.book._binding['initial_balances'];current=snapshot['balances']
@@ -44,34 +55,36 @@ class PilotService:
             action=state['protection_action'];item=self.book.actions()[action]
             if item['state']!='ACKNOWLEDGED':
                 state.update(phase='RECOVERY_REQUIRED',entry_killed=True,reason='PROTECTION_UNKNOWN');return self._save(state)
-            params=dict(symbol='BTCUSDT',listClientOrderId=item['params']['listClientOrderId'])
+            params=dict(symbol=state.get('symbol','BTCUSDT'),listClientOrderId=item['params']['listClientOrderId'])
             result=self.gateway.query_action(item['method'],item['path'],item['params'])
             if result is None or result.get('listOrderStatus')!='ALL_DONE':
                 result=self.book.call('cancel-'+str(state['cycles']),'DELETE','/api/v3/orderList',params,self.gateway)
             if result.get('listOrderStatus')!='ALL_DONE':fail('PILOT_QUERY_REQUIRED')
-        rows=self._rows();inventory=fill_inventory(rows,set(self.book.owned_order_ids()))
+        rows=self._rows();inventory=self._inventory(rows)
         snapshot=self.gateway.snapshot();base=Decimal(inventory['base']);bid=amount(snapshot['bid'])
-        if any(o['order_id'] not in self.book.owned_order_ids() for o in snapshot['open_orders']):fail('PILOT_FOREIGN_ORDER')
+        if self._foreign_orders(snapshot):fail('PILOT_FOREIGN_ORDER')
         if not self._account_agrees(snapshot,inventory):fail('PILOT_BALANCE_MISMATCH')
         if emergency and bid<Decimal(state['fill_price'])*Decimal('.99'):fail('PILOT_EMERGENCY_SLIPPAGE')
         lot=next(r for r in snapshot['metadata']['filters'] if r['filterType']=='LOT_SIZE')
         quantity=rounded(base*Decimal('.998'),amount(lot['stepSize']))
         minimum=next(r for r in snapshot['metadata']['filters'] if r['filterType'] in ('NOTIONAL','MIN_NOTIONAL'))
-        free=amount(snapshot['balances'].get('BTC',{}).get('free','0'))
+        free=amount(snapshot['balances'].get(snapshot['metadata']['baseAsset'],{}).get('free','0'))
         if quantity*bid>=amount(minimum['minNotional']):
             if quantity>free:fail('PILOT_SELL_LOCKED')
             action='sell-'+str(state['cycles'])
-            p=dict(symbol='BTCUSDT',side='SELL',type='MARKET',quantity=text(quantity),
+            p=dict(symbol=state.get('symbol','BTCUSDT'),side='SELL',type='MARKET',quantity=text(quantity),
                 newClientOrderId=self.book.client_id(action),newOrderRespType='FULL')
             self.book.call(action,'POST','/api/v3/order',p,self.gateway)
-        rows=self._rows();inventory=fill_inventory(rows,set(self.book.owned_order_ids()));snapshot=self.gateway.snapshot()
+        rows=self._rows();inventory=self._inventory(rows);snapshot=self.gateway.snapshot()
         if not self._account_agrees(snapshot,inventory):fail('PILOT_BALANCE_MISMATCH')
         base=Decimal(inventory['base']);mid=(amount(snapshot['bid'])+amount(snapshot['ask']))/2
-        if base<0 or base*mid>2:fail('PILOT_DUST_OR_UNCLOSED_EXPOSURE')
+        if base<0 or self._position_value(inventory,snapshot,ask=True)>2:fail('PILOT_DUST_OR_UNCLOSED_EXPOSURE')
         delivered=self.gateway.private_matches(rows)
-        equity=Decimal('100')+Decimal(inventory['cash_delta'])+base*mid
+        equity=self._equity(inventory,snapshot)
         outcome=dict(state='CLOSED',cycle=state['cycles'],technical_probe=state.get('technical_probe',state['cycles']==1),
+            symbol=state.get('symbol','BTCUSDT'),
             origin_ms=state['origin_ms'],feature_end_ms=state['feature_end_ms'],features=state['features'],
+            feature_available_at_ms=state.get('feature_available_at_ms',state['origin_ms']),
             label_end_ms=snapshot['now_ms'],label_available_at_ms=snapshot['now_ms'],
             net_usdt=text(equity-Decimal(state['start_equity'])),exit_reason=reason,
             source_kind='ACTUAL_DEMO',private_delivery_matched=delivered,fees=inventory['fees'],
@@ -82,7 +95,7 @@ class PilotService:
             entry_killed=bool(state.get('entry_killed') or not delivered or emergency),
             last_equity=text(equity),peak_equity=text(max(equity,Decimal(state.get('peak_equity','100')))),
             next_entry_ms=state['origin_ms']+10800000,reason=reason,protection_action=None,
-            dust_usdt=text(base*mid))
+            dust_usdt=text(self._position_value(inventory,snapshot,ask=True)))
         return self._save(state)
     def tick(self):
         with localcontext(Context(prec=50)):
@@ -91,10 +104,10 @@ class PilotService:
             if state['phase'] in ('HALTED','FINISHED','RECOVERY_REQUIRED'):return state
             try:
                 snapshot=self.gateway.snapshot();now=snapshot['now_ms'];rows=self._rows()
-                inventory=fill_inventory(rows,set(self.book.owned_order_ids()))
+                inventory=self._inventory(rows)
                 if snapshot['account_identity']!=self.book._binding['account_identity']:fail('PILOT_ACCOUNT_CHANGED')
                 if not self._account_agrees(snapshot,inventory):fail('PILOT_BALANCE_MISMATCH')
-                if any(o['order_id'] not in self.book.owned_order_ids() for o in snapshot['open_orders']):fail('PILOT_FOREIGN_ORDER')
+                if self._foreign_orders(snapshot):fail('PILOT_FOREIGN_ORDER')
                 if state['phase']=='OPEN':
                     if now>=state['deadline_ms']:return self._close(state,snapshot,'PROBE_TIME' if state.get('technical_probe',state['cycles']==1) else 'TIME')
                     if not snapshot['open_orders'] and Decimal(inventory['base'])*amount(snapshot['bid'])<=2:
@@ -102,7 +115,7 @@ class PilotService:
                     return self._save(state)
                 if state['phase'] in ('BUY_PENDING','PROTECTION_PENDING'):return self._entry(state,snapshot)
                 if state['phase']!='IDLE':fail('PILOT_RECOVERY_REQUIRED')
-                equity=Decimal('100')+Decimal(inventory['cash_delta'])+Decimal(inventory['base'])*(amount(snapshot['bid'])+amount(snapshot['ask']))/2
+                equity=self._equity(inventory,snapshot)
                 if (now>=self.book._binding['expires_ms'] or state['cycles']>=8):
                     state.update(phase='FINISHED',reason='PILOT_LIMIT_REACHED');return self._save(state)
                 if (equity<99 or Decimal(state.get('peak_equity','100'))-equity>=1):
@@ -111,15 +124,19 @@ class PilotService:
                 if (stopped or state.get('entry_killed') or (state['cycles'] and not state.get('qualified') and not state.get('local_unsent_abandoned'))
                         or now<state['next_entry_ms'] or not snapshot['stream_ok']):
                     self.book.decision(dict(action='WAIT',reason='ENTRY_GUARD',cutoff_ms=now,snapshot_id=snapshot['snapshot_id']));return self._save(state)
-                if Decimal(inventory['base'])*amount(snapshot['bid'])>2:fail('PILOT_DUST_OR_UNCLOSED_EXPOSURE')
+                if self._position_value(inventory,snapshot,ask=True)>2:fail('PILOT_DUST_OR_UNCLOSED_EXPOSURE')
                 if amount(snapshot['balances']['USDT']['free'])<31:fail('PILOT_INSUFFICIENT_CASH')
-                execution_plan(snapshot['metadata'],snapshot['bid'],snapshot['ask'],snapshot['average'])
+                self._plan(snapshot)
                 if not self.gateway.preflight(snapshot):fail('PILOT_TRADE_PERMISSION')
                 now=snapshot['now_ms']
                 if now>=self.book._binding['expires_ms']:fail('PILOT_EXPIRED')
+                available=snapshot.get('feature_available_at_ms',now)
+                if (type(available) is not int or available>now or snapshot['feature_end_ms']>=now):fail('PILOT_FUTURE_FEATURE')
                 state.update(phase='BUY_PENDING',cycles=state['cycles']+1,origin_ms=now,
-                    technical_probe=not state.get('qualified'),local_unsent_abandoned=False,
+                    technical_probe=self._is_probe(state,snapshot),local_unsent_abandoned=False,
+                    symbol=snapshot['metadata']['symbol'],base_asset=snapshot['metadata']['baseAsset'],
                     feature_end_ms=snapshot['feature_end_ms'],features=snapshot['features'],
+                    feature_available_at_ms=available,
                     snapshot_id=snapshot['snapshot_id'],start_equity=text(equity))
                 if state['feature_end_ms']>=now:fail('PILOT_FUTURE_FEATURE')
                 self._save(state)
@@ -127,8 +144,13 @@ class PilotService:
                     snapshot_id=snapshot['snapshot_id'],features=state['features'],feature_end_ms=state['feature_end_ms']))
                 return self._entry(state,snapshot)
             except AdapterError as error:
+                if error.reason in RATE_REASONS and state['phase']=='IDLE':
+                    state['reason']=error.reason
+                    self.book.decision(dict(action='WAIT',reason=error.reason,cutoff_ms=time.time_ns()//1000000))
+                    return self._save(state)
                 buy=self.book.actions().get('buy-'+str(state['cycles']),{})
-                if (buy.get('state')=='ACKNOWLEDGED' and not state.get('protection_action')
+                if (state['phase'] in ('BUY_PENDING','PROTECTION_PENDING','OPEN') and buy.get('state')=='ACKNOWLEDGED'
+                        and buy['params']['symbol']==state.get('symbol','BTCUSDT') and not state.get('protection_action')
                         and state.get('fill_price') and error.reason not in ('PILOT_PARTIAL_BUY','PILOT_QUERY_REQUIRED')):
                     try:
                         state['entry_killed']=True
@@ -140,28 +162,28 @@ class PilotService:
                 return self._save(state)
 
     def _entry(self,state,snapshot):
+        if state.get('feature_available_at_ms',state['origin_ms'])>state['origin_ms']:fail('PILOT_FUTURE_FEATURE')
         action='buy-'+str(state['cycles'])
-        response=self.book.call(action,'POST','/api/v3/order',dict(symbol='BTCUSDT',side='BUY',type='MARKET',
+        response=self.book.call(action,'POST','/api/v3/order',dict(symbol=state.get('symbol','BTCUSDT'),side='BUY',type='MARKET',
             quoteOrderQty='30',newClientOrderId=self.book.client_id(action),newOrderRespType='FULL'),self.gateway)
-        rows=self._rows();inventory=fill_inventory(rows,set(self.book.owned_order_ids()))
+        rows=self._rows();inventory=self._inventory(rows)
         if response.get('status')=='PARTIALLY_FILLED':
             canceled=self.book.call('cancel-entry-'+str(state['cycles']),'DELETE','/api/v3/order',
-                dict(symbol='BTCUSDT',orderId=response['orderId']),self.gateway)
+                dict(symbol=state.get('symbol','BTCUSDT'),orderId=response['orderId']),self.gateway)
             if canceled.get('status') not in ('CANCELED','FILLED','EXPIRED'):fail('PILOT_QUERY_REQUIRED')
-            rows=self._rows();inventory=fill_inventory(rows,set(self.book.owned_order_ids()));state['entry_killed']=True
+            rows=self._rows();inventory=self._inventory(rows);state['entry_killed']=True
         elif response.get('status')!='FILLED':fail('PILOT_PARTIAL_BUY')
-        buys=[r for r in rows if r['order_id']==response['orderId'] and r['side']=='BUY']
+        buys=[r for r in rows if r['symbol']==state.get('symbol','BTCUSDT') and r['order_id']==response['orderId'] and r['side']=='BUY']
         gross=sum((amount(str(r['quantity'])) for r in buys),Decimal('0'))
         quote=sum((amount(str(r['quote_quantity'])) for r in buys),Decimal('0'))
         if gross<=0:fail('PILOT_PARTIAL_BUY')
         state['fill_price']=text(quote/gross)
         snapshot=self.gateway.snapshot()
         if not self._account_agrees(snapshot,inventory):fail('PILOT_BALANCE_MISMATCH')
-        if Decimal(inventory['base'])*amount(snapshot['ask'])>32:fail('PILOT_EXPOSURE_LIMIT')
-        plan=execution_plan(snapshot['metadata'],snapshot['bid'],snapshot['ask'],snapshot['average'],
-            owned=inventory['base'],fill_price=state['fill_price'])
+        if self._position_value(inventory,snapshot,ask=True)>32:fail('PILOT_EXPOSURE_LIMIT')
+        plan=self._plan(snapshot,owned=inventory['base'],fill_price=state['fill_price'])
         paction='protect-'+str(state['cycles'])
-        params=dict(symbol='BTCUSDT',side='SELL',quantity=plan['quantity'],listClientOrderId=self.book.client_id(paction),
+        params=dict(symbol=state.get('symbol','BTCUSDT'),side='SELL',quantity=plan['quantity'],listClientOrderId=self.book.client_id(paction),
             aboveClientOrderId=self.book.client_id(paction,'tp'),belowClientOrderId=self.book.client_id(paction,'sl'),
             aboveType='LIMIT_MAKER',abovePrice=plan['take_profit'],belowType='STOP_LOSS',belowStopPrice=plan['stop_loss'])
         state.update(phase='PROTECTION_PENDING',protection_action=paction);self._save(state)
@@ -227,12 +249,12 @@ class LiveGateway(MatchingGateway):
         pf=next(r for r in snapshot['metadata']['filters'] if r['filterType']=='PRICE_FILTER')
         validator=DemoTradeValidator(c,allow_order_validation=True)
         try:
-            validator.validate_limit('BTCUSDT',side='BUY',
+            validator.validate_limit(snapshot['metadata']['symbol'],side='BUY',
                 quantity=text(rounded(Decimal('30')/amount(snapshot['ask']),amount(lot['stepSize']))),
                 price=text(rounded(amount(snapshot['ask']),amount(pf['tickSize']))))
         finally:validator.close()
         fresh=self.snapshot();snapshot.clear();snapshot.update(fresh)
-        execution_plan(snapshot['metadata'],snapshot['bid'],snapshot['ask'],snapshot['average'])
+        execution_plan(snapshot['metadata'],snapshot['bid'],snapshot['ask'],snapshot['average'],symbol=snapshot['metadata']['symbol'])
         return all(c.capabilities()[k]['state']=='SUPPORTED' for k in
             ('USER_DATA_READ','ACCOUNT_SPOT_ALLOWED','KEY_TRADE_VALIDATED')) and snapshot['stream_ok']
     def snapshot(self):
@@ -271,13 +293,14 @@ class LiveGateway(MatchingGateway):
             result.extend(rows)
         return result
     def protection_ok(self,response,quantity):
-        rows=[self.client.read_order('BTCUSDT',o['orderId'])['data'] for o in response['orders']]
+        rows=[self.client.read_order(response['symbol'],o['orderId'])['data'] for o in response['orders']]
         return (len(rows)==2 and {r['type'] for r in rows}=={'LIMIT_MAKER','STOP_LOSS'} and
             all(r['status']=='NEW' and r['original_quantity']==Decimal(quantity)
                 and r['order_list_id']==response['orderListId'] for r in rows))
     def private_matches(self,rows):
         wire={(r['data']['symbol'],r['data']['trade_id']):r['data'] for r in self.evidence.fills()}
         return bool(rows) and all((r['symbol'],r['trade_id']) in wire and all(
+            wire[r['symbol'],r['trade_id']].get(k)==r.get(k) for k in ('order_id','side','commission_asset')) and all(
             Decimal(wire[r['symbol'],r['trade_id']][k])==Decimal(str(r[k]))
             for k in ('quantity','quote_quantity','commission_quantity')) for r in rows)
 

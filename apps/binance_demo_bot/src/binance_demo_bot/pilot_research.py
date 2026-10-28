@@ -66,7 +66,8 @@ def learning_handoff(rows,*,fit_cutoff_ms):
            and r['label_available_at_ms']<=fit_cutoff_ms and r.get('features') is not None
            and r.get('source_kind')=='ACTUAL_DEMO' and r.get('private_delivery_matched') is True
            and all(type(r.get(k)) is int for k in ('feature_end_ms','origin_ms','label_end_ms'))
-           and r['feature_end_ms']<r['origin_ms']<=r['label_end_ms']<=r['label_available_at_ms']]
+           and r['feature_end_ms']<r['origin_ms']<=r['label_end_ms']<=r['label_available_at_ms']
+           and ('feature_available_at_ms' not in r or (type(r['feature_available_at_ms']) is int and r['feature_available_at_ms']<=r['origin_ms']))]
     return dict(state='NOT_TRAINED',reason='INSUFFICIENT_CHRONOLOGICAL_ACTUAL_SAMPLE',
         eligible_n=len(valid),excluded_n=len(rows)-len(valid),rows_N=len(rows),promotion_allowed=False,
         daily_objective_eligible_n=sum(r.get('daily_objective_eligible') is True for r in valid),

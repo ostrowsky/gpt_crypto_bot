@@ -89,10 +89,7 @@ class DemoTradeValidator:
     def _rates(self,response,received_mono):
         client=self.client
         lower={k.lower():v for k,v in response.headers.items()}
-        weight=lower.get('x-mbx-used-weight-1m')
-        if weight is not None and weight.isascii() and weight.isdecimal() and len(weight)<=20:
-            client._shared_weight=max(client._shared_weight,int(weight))
-            client._shared_weight_expires_ns=received_mono+60000000000
+        client._observe_weight(response.headers,received_mono)
         if response.status in (429,418):
             retry=lower.get('retry-after','60')
             wait=int(retry) if retry.isascii() and retry.isdecimal() and len(retry)<=10 else 60
@@ -106,7 +103,7 @@ class DemoTradeValidator:
         try:
             self._audit_ready()
             if self._closed or not self._enabled:raise AdapterError('ORDER_VALIDATION_DISABLED')
-            if (not isinstance(symbol,str) or re.fullmatch('[A-Z0-9]{1,20}USDT',symbol) is None
+            if (not isinstance(symbol,str) or re.fullmatch(r'[^\W_]{1,20}USDT',symbol) is None or symbol!=symbol.upper()
                     or side not in ('BUY','SELL')):raise AdapterError('INVALID_PARAMETERS')
             params=dict(symbol=symbol,side=side,type='LIMIT',timeInForce='GTC',
                         quantity=_amount(quantity),price=_amount(price),newClientOrderId='bdv_'+uuid.uuid4().hex)

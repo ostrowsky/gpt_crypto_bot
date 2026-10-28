@@ -1,9 +1,30 @@
-# Independent Binance Demo bot — financial/data foundations and local OMS intents
+# Independent Binance Demo bot — USDT monitoring and bounded execution
+
+Current2026-10-28 scope: [all permitted USDT pairs](../../docs/specs/binance-demo-all-usdt-universe.md),
+native account permissions, metadata refresh15min and bulk quotes30s. The
+explicit `binance_demo_bot.usdt_service --enable-all-usdt-demo` entrypoint uses
+the original pilot journal/profile and one account-wide budget/position limit.
+It supports native MARKET BUY/SELL and OCO TP/SL, composite(symbol,order/trade)
+ownership, fee accounting and mature learning export. It is an execution
+qualification pilot; ordinary profit strategy/promotion remains disabled.
+Instrument eligibility additionally needs complete earliest-to-frozen-cutoff
+history, verified archive hashes, native filters and a fresh permission/quote.
+`binance_demo_bot.usdt_history --collect --workers 3` resumes own compressed
+SQLite pages for every discovered USDT pair. No incomplete history authorizes
+entry. Exact live coverage/readiness is in own `.runtime/pilot/status.json` and
+`.runtime/all-usdt/monitoring.json`; history progress is `history-status.json`.
+Credentials, archives and account state are uncommitted. The stop-entry marker
+remains `.runtime/pilot/stop-entries`; `.runtime/all-usdt/stop-worker` requests
+an orderly stop when flat. Monitoring continues after the trading pilot expires.
+Do not reset the seed, risk/attempt limits or expiry when switching symbols.
+
+The component descriptions below record the foundations and their individual
+release boundaries; they do not override the explicit pilot scope above.
 
 This separate application implements offline Decimal accounting, valuation,
 daily equity PnL, FIFO/fees, SQLite journal/outbox/recovery and initial isolation.
 P1-A adds an explicitly invoked read-only Demo REST adapter. The offline
-entrypoint starts no account client. No order sending or learning workers exist.
+entrypoint starts no account client. Explicit pilot workers are separate.
 P1-B implements private event collection, durable fill/cursor recovery and
 diagnostic comparison with the journal. Authenticated runtime verification,
 certified account readiness and the remaining P2-C–P7 services are pending.
@@ -21,8 +42,9 @@ Decimal amounts, idempotency/tombstones, epoch/CAS, persistent entry kill and
 uncertain-attempt recovery. Its dedicated `oms-intents.sqlite` is audit-backed
 WAL/FULL. Supplied allocations are uncertified seed budgets; pending BUYs cannot
 fund SELLs. Neither a reservation nor an attempt annotation authorizes I/O.
-No sender, exchange TP/SL or terminal fill/reconciliation integration exists yet.
-39 focused tests pass; actual trading remains disabled and no profit is claimed.
+That offline intent component itself does not send orders or place TP/SL.
+The separately audited pilot above owns bounded matching-engine interactions;
+the ordinary production strategy and profitability remain unqualified.
 
 Specifications: [financial contract](../../docs/specs/binance-demo-phase0-financial-contract.md),
 [application isolation](../../docs/specs/binance-demo-application-isolation.md),

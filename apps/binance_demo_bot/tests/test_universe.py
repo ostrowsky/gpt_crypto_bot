@@ -32,6 +32,25 @@ class UniverseTests(Fixture, unittest.TestCase):
         value = self.refresh([row], account=account_snapshot(["SPOT", "TRD_GRP_003"]))
         self.assertIs(value["data"]["rows"][0]["permitted"], True)
 
+    def test_usd01_verified_spot_satisfies_or_group_with_new_native_alternative(self):
+        value=self.refresh([pair(permissionSets=[['SPOT','TRD_GRP_271']])])['data']
+        self.assertTrue(value['rows'][0]['permitted'])
+        self.assertEqual(value['state'],'UNIVERSE_READY')
+        self.assertIn('TRD_GRP_271',value['rows'][0]['unknown_permission_alternatives'])
+
+    def test_usd01_unknown_and_group_still_blocks_spot(self):
+        value=self.refresh([pair(permissionSets=[['SPOT'],['TRD_GRP_271']])])['data']
+        self.assertIsNone(value['rows'][0]['permitted'])
+        self.assertEqual(value['state'],'UNIVERSE_INCOMPLETE')
+
+    def test_usd01_account_update_time_uses_validated_exchange_clock(self):
+        from _p1_support import source_hash
+        self.clock.observe(NOW+12000,NOW,NOW,self.mono,self.mono)
+        account=account_snapshot();account['data']['update_time_ms']=NOW+12000
+        account['source_sha256']=source_hash(account['data'])
+        value=self.refresh(account=account)['data']
+        self.assertEqual(value['state'],'UNIVERSE_READY');self.assertTrue(value['rows'][0]['permitted'])
+
     def test_P2A02_non_usdt_monitoring_not_shrunk_by_preview_scope(self):
         value = self.refresh([pair(), pair("BBB", "BTC")])["data"]
         rows = {r["symbol"]: r for r in value["rows"]}

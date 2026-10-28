@@ -1,7 +1,7 @@
 [project]
 name = "binance-demo-bot"
 version = "0.1.0"
-description = "Independent Binance Demo financial core; trading is not enabled"
+description = "Independent Binance Spot Demo monitoring and bounded execution"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "apsw==3.53.4.0",

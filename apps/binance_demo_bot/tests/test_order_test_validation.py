@@ -118,6 +118,12 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(evidence['tested_symbol'],'BTCUSDT')
         self.assertEqual(evidence['credential_generation'],'g1')
 
+    def test_usd01_unicode_native_symbol_preserves_exact_utf8_signature_input(self):
+        self.reply()
+        result=self.validator.validate_limit('\u5e01\u5b89\u4eba\u751fUSDT',side='BUY',quantity='1',price='10')
+        self.assertEqual(result['state'],'VALIDATED_NOT_SUBMITTED')
+        self.assertEqual(parse_qs(self.calls[0][2])['symbol'],['\u5e01\u5b89\u4eba\u751fUSDT'])
+
     def test_vld02_invalid_numeric_values_never_reach_post(self):
         for value in (True,0,1.25,'0','-1','NaN','Infinity','1e-19','1e19'):
             with self.subTest(value=value):self.reason('INVALID_PARAMETERS',self.validate,quantity=value)
