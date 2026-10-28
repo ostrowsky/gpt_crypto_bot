@@ -1,6 +1,7 @@
 # All-USDT Demo monitoring and execution scope
 
-Date:2026-10-28. Status: implemented; live expanded-scope canary pending.
+Date:2026-10-28. Status: implemented; live519-pair monitoring and one protected
+non-BTC execution cycle verified; historical collection remains partial.
 User authorizes monitoring and trading all Binance Spot Demo coins against
 USDT in the independent app. Production Binance, legacy workers, leverage and
 separate per-symbol budgets remain outside scope. Parent:P0/P1/P2/P3/P5 and
@@ -159,3 +160,17 @@ quarantine their replay windows and resume durable cursors without resetting
 the frozen cohort/cutoff. Full Harness remains FAIL TH-11 due the unchanged
 legacy replay source fingerprint. Staged change validation and live all-USDT
 monitoring/protected-canary evidence are separate release steps.
+
+Live rollout on2026-10-28: fresh bookTicker coverage519/519, structurally
+supported519/519, history-ready54/519 at the first expanded canary. The worker
+completed one0GUSDT BUY/native OCO/owned SELL cycle under the unchanged shared
+limits; REST/private fill delivery matched, frozen feature availability preceded
+the decision, and account reconciliation returned to IDLE. Protection receipt
+was6112ms after origin; the60s probe completed after69.567s including reads and
+execution. Historical collection continues automatically, with unverified pairs
+remaining monitor-only. These observations qualify this bounded execution path,
+not full P0/P1/P2 certification or a profitable trading policy. Actual learning
+handoff contains two mature outcomes and remains NOT_TRAINED. Outcome inventory
+fee maps/fill counts are cumulative journal context; do not sum those fields
+across cycles or describe them as incremental per-cycle fees. Detailed native
+evidence and account amounts remain only in the app's ignored runtime.
