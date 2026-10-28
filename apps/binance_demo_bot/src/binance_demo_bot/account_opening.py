@@ -147,6 +147,49 @@ def _valuation(balances, metadata, tickers, cutoff):
                 exchange_quote_age_unknown=True,liquidation_certified=False)
 
 
+def _build_observation(attestation,namespace,key,before,after,orders,lists,metadata,tickers,cutoff):
+    if attestation['declared_at_ms']>cutoff:_fail()
+    identity={k:v for k,v in namespace.items() if k!='schema_version'}
+    source_inputs=dict(account_before=(before,'account',30000,True),
+        account_after=(after,'account',30000,True),orders=(orders,'openOrders',30000,True),
+        order_lists=(lists,'openOrderList',30000,True),metadata=(metadata,'exchangeInfo',900000,False),
+        tickers=(tickers,'ticker/bookTicker',5000,False))
+    pins={name:_source(source,endpoint,cutoff,age,identity,private=private)
+          for name,(source,endpoint,age,private) in source_inputs.items()}
+    if len({r['credential_generation'] for r in (before,after,orders,lists)})!=1:_fail()
+    for source in (orders,lists,tickers):
+        if (before['received_at_ms']>source['request_started_at_ms']
+                or source['received_at_ms']>after['request_started_at_ms']
+                or before['received_monotonic_ns']>source['request_started_monotonic_ns']
+                or source['received_monotonic_ns']>after['request_started_monotonic_ns']):_fail()
+    if not isinstance(orders['data'],list) or not isinstance(lists['data'],list):_fail()
+    initial=_balances(before['data'],attestation['account_identity'])
+    final=_balances(after['data'],attestation['account_identity'])
+    reasons=[]
+    if initial!=final:reasons.append('BALANCES_CHANGED')
+    if any(Decimal(row['locked'])!=0 for row in final.values()):reasons.append('LOCKED_INVENTORY')
+    if orders['data']:reasons.append('OPEN_ORDERS_PRESENT')
+    if lists['data']:reasons.append('OPEN_ORDER_LISTS_PRESENT')
+    if any(r['data'].get('can_trade') is not True or not isinstance(r['data'].get('permissions'),list)
+           or 'SPOT' not in r['data']['permissions'] for r in (before,after)):
+        reasons.append('SPOT_PERMISSION_UNCONFIRMED')
+    held={asset:row for asset,row in final.items() if Decimal(row['free'])+Decimal(row['locked'])!=0}
+    valuation=_valuation(held,metadata['data'],tickers,cutoff)
+    if valuation['status']!='COMPLETE':reasons.append('VALUATION_INCOMPLETE')
+    lots=[]
+    if not reasons:
+        for asset,row in held.items():
+            quantity=Decimal(row['free'])+Decimal(row['locked'])
+            lots.append(dict(asset=asset,quantity=quantity,basis_usdt=quantity*valuation['marks'][asset],ownership='SEED'))
+    return dict(candidate_id=key,cutoff_ms=cutoff,attestation_sha256=attestation['manifest_sha256'],
+        credential_generation=before['credential_generation'],account_identity=attestation['account_identity'],
+        state='BLOCKED' if reasons else 'PROVISIONAL_OPENING',reasons=reasons,sources=pins,
+        balances=held,held_assets_N=len(held),returned_assets_N=len(final),
+        inventory_coverage='RETURNED_BALANCES_ONLY',seed_lots=lots,valuation=valuation,
+        managed_inventory={},exchange_reconciled=False,financial_episode_opened=False,
+        execution_authorized=False,daily_net_pnl_usdt=None,remaining_gates=GATES[:])
+
+
 class AccountOpeningManifest:
     """Immutable audit-backed candidates. No financial journal initialization."""
 
@@ -237,46 +280,7 @@ class AccountOpeningManifest:
             return self._save('CAPTURE',value)
 
     def _build(self,key,before,after,orders,lists,metadata,tickers,cutoff):
-        if self._attestation['declared_at_ms']>cutoff:_fail()
-        identity={k:v for k,v in self._journal.identity.items() if k!='schema_version'}
-        source_inputs=dict(account_before=(before,'account',30000,True),
-            account_after=(after,'account',30000,True),orders=(orders,'openOrders',30000,True),
-            order_lists=(lists,'openOrderList',30000,True),metadata=(metadata,'exchangeInfo',900000,False),
-            tickers=(tickers,'ticker/bookTicker',5000,False))
-        pins={name:_source(source,endpoint,cutoff,age,identity,private=private)
-              for name,(source,endpoint,age,private) in source_inputs.items()}
-        if len({r['credential_generation'] for r in (before,after,orders,lists)})!=1:_fail()
-        for source in (orders,lists,tickers):
-            if (before['received_at_ms']>source['request_started_at_ms']
-                    or source['received_at_ms']>after['request_started_at_ms']
-                    or before['received_monotonic_ns']>source['request_started_monotonic_ns']
-                    or source['received_monotonic_ns']>after['request_started_monotonic_ns']):_fail()
-        if not isinstance(orders['data'],list) or not isinstance(lists['data'],list):_fail()
-        initial=_balances(before['data'],self._attestation['account_identity'])
-        final=_balances(after['data'],self._attestation['account_identity'])
-        reasons=[]
-        if initial!=final:reasons.append('BALANCES_CHANGED')
-        if any(Decimal(row['locked'])!=0 for row in final.values()):reasons.append('LOCKED_INVENTORY')
-        if orders['data']:reasons.append('OPEN_ORDERS_PRESENT')
-        if lists['data']:reasons.append('OPEN_ORDER_LISTS_PRESENT')
-        if any(r['data'].get('can_trade') is not True or not isinstance(r['data'].get('permissions'),list)
-               or 'SPOT' not in r['data']['permissions'] for r in (before,after)):
-            reasons.append('SPOT_PERMISSION_UNCONFIRMED')
-        held={asset:row for asset,row in final.items() if Decimal(row['free'])+Decimal(row['locked'])!=0}
-        valuation=_valuation(held,metadata['data'],tickers,cutoff)
-        if valuation['status']!='COMPLETE':reasons.append('VALUATION_INCOMPLETE')
-        lots=[]
-        if not reasons:
-            for asset,row in held.items():
-                quantity=Decimal(row['free'])+Decimal(row['locked'])
-                lots.append(dict(asset=asset,quantity=quantity,basis_usdt=quantity*valuation['marks'][asset],ownership='SEED'))
-        return dict(candidate_id=key,cutoff_ms=cutoff,attestation_sha256=self._attestation['manifest_sha256'],
-            credential_generation=before['credential_generation'],account_identity=self._attestation['account_identity'],
-            state='BLOCKED' if reasons else 'PROVISIONAL_OPENING',reasons=reasons,sources=pins,
-            balances=held,held_assets_N=len(held),returned_assets_N=len(final),
-            inventory_coverage='RETURNED_BALANCES_ONLY',seed_lots=lots,valuation=valuation,
-            managed_inventory={},exchange_reconciled=False,financial_episode_opened=False,
-            execution_authorized=False,daily_net_pnl_usdt=None,remaining_gates=GATES[:])
+        return _build_observation(self._attestation,self._journal.identity,key,before,after,orders,lists,metadata,tickers,cutoff)
 
     def summary(self):
         with self._journal._lock:

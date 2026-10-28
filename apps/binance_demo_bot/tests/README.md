@@ -429,3 +429,15 @@ admission timeout; its24-test suite passed unchanged(6.010s), then full1050
 GREEN(245.543s). Synthetic app fixtures/real own audit journal; no credentials,
 network, skips/xfail or weakened assertions. Full Harness remains FAIL TH-11
 for the preexisting replay_backtest.py canonical evidence hash gap.
+
+FBO (2026-10-28):11 intended missing-module RED ->11 GREEN; finite scheduling
+and native GET bracket added4 missing-interface RED ->15 GREEN. Unknown long
+public-asset reason then reproduced1 RED before encoded reason-row repair.
+Original opening lease test reproduced1 RED before extracting the unchanged
+pure source validator and releasing that lease during waits. Final17 focused
+GREEN(3.113s). TRN native-startup follow-up:2 missing-interface RED ->21 total
+transport GREEN(2.535s). Final complete app1069 GREEN(160.551s), root13 Truth
+Harness tests GREEN. Own synthetic fixtures/native SQLite only; no network,
+credentials, skips/xfail or weakened assertions. Native first reviewed rollout
+refused lost private heartbeat; retained as failure. Full Harness FAIL TH-11
+remains distinct from staged validation and from these implementation tests.

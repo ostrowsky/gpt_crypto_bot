@@ -17,7 +17,7 @@ from .private_stream import PrivateEventReader
 from .universe import PERMISSIONS
 from .usdt_scope import UsdtPilotJournal,usdt_catalog,portfolio_inventory,portfolio_value,select_round_robin
 from .usdt_history import read_ready,verify_reference
-from .pilot_runtime import PrivateReaderSupervisor,resume_clock_halt
+from .pilot_runtime import PrivateReaderSupervisor,review_flat_clock_startup
 
 
 def forecast_features(state,bars,received_at_ms,*,now_ms):
@@ -253,12 +253,7 @@ def main():
         gateway=UsdtGateway(c,evidence,reader,book,paths);service=UsdtPilotService(book,gateway)
         supervisor=PrivateReaderSupervisor(gateway,book=book)
         if args.review_clock_halt and book.state().get('phase')=='HALTED':
-            gateway.refresh_catalog();gateway.poll_quotes();gateway.authorize()
-            for review_attempt in range(3):
-                try:resume_clock_halt(service,reviewed=True);break
-                except AdapterError as error:
-                    if error.reason not in CLOCK_REASONS|RATE_REASONS|{'PILOT_REVIEW_SOURCE_STALE'} or review_attempt==2:raise
-                    time.sleep(5)
+            reader=review_flat_clock_startup(service,supervisor)
         while True:
             try:
                 state=book.state();gateway.symbol=state.get('symbol','BTCUSDT')

@@ -136,4 +136,30 @@ class TransportRecoveryTests(unittest.TestCase):
         with self.assertRaises(AdapterError):supervisor.maintain()
         self.assertEqual(new.closes,1);self.assertFalse(new.health()['connected'])
 
+
+
+class ReviewedStartupTests(unittest.TestCase):
+    setUp=TransportRecoveryTests.setUp
+    runtime=TransportRecoveryTests.runtime
+    make_clock_client=TransportRecoveryTests.make_clock_client
+    halt=TransportRecoveryTests.halt
+    def test_trn03_reader_supervised_after_warmup_before_review_probes(self):
+        self.halt();clock_calls=self.make_clock_client();events=[]
+        self.exchange.refresh_catalog=lambda:events.append('catalog')
+        self.exchange.poll_quotes=lambda:events.append('quotes')
+        self.exchange.authorize=lambda:events.append('authorize')
+        self.exchange.reader=Reader()
+        def factory(*a,**kw):events.append('reader');return Reader()
+        supervisor=self.runtime().PrivateReaderSupervisor(self.exchange,factory=factory,book=self.book)
+        reader=self.runtime().review_flat_clock_startup(self.service,supervisor,sleep=lambda _:None)
+        self.assertEqual(events,['catalog','quotes','authorize','reader']);self.assertEqual(clock_calls,['clock']*3)
+        self.assertTrue(reader.health()['reader_alive']);self.assertEqual(self.book.state()['phase'],'IDLE')
+    def test_trn03_warmup_failure_never_clears_halt(self):
+        self.halt();self.make_clock_client()
+        def failure():raise AdapterError('MARKET_INTEGRITY_FAILED')
+        self.exchange.refresh_catalog=failure
+        supervisor=self.runtime().PrivateReaderSupervisor(self.exchange,book=self.book)
+        with self.assertRaises(AdapterError):self.runtime().review_flat_clock_startup(self.service,supervisor,sleep=lambda _:None)
+        self.assertEqual(self.book.state()['phase'],'HALTED')
+
 if __name__=='__main__':unittest.main()

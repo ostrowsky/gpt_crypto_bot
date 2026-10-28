@@ -1,5 +1,6 @@
 """Transport repair: preserve clock/risk guards and all financial uncertainty."""
 from decimal import Decimal
+import time
 from .adapter import AdapterError,_sha
 from .execution_pilot import fail
 from .pilot_service import CLOCK_REASONS,RATE_REASONS
@@ -93,3 +94,16 @@ def resume_clock_halt(service,*,reviewed=False):
     state.update(phase='IDLE',entry_killed=False,reason='CLOCK_REVIEWED',last_equity=str(equity),
         peak_equity=str(max(equity,Decimal(state.get('peak_equity','100')))))
     book.save_state(state);return book.state()
+
+
+def review_flat_clock_startup(service,supervisor,*,sleep=time.sleep):
+    gateway=service.gateway
+    gateway.refresh_catalog();gateway.poll_quotes();gateway.authorize()
+    for attempt in range(3):
+        try:
+            reader=supervisor.maintain()
+            resume_clock_halt(service,reviewed=True)
+            return reader
+        except AdapterError as error:
+            if error.reason not in CLOCK_REASONS|RATE_REASONS|{'PILOT_REVIEW_SOURCE_STALE'} or attempt==2:raise
+            sleep(5)

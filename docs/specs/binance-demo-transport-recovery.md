@@ -59,3 +59,14 @@ Verification2026-10-28:19 focused GREEN;1050 full GREEN(245.543s). First full
 run failed one existing group-writer admission timeout; unchanged24-test suite
 and full repeat passed. Retain failed evidence. RED/GREEN are own runtime
 records; native rollout is a separate operational check, not financial proof.
+
+TRN-03 native rollout extension, before test/code: first reviewed rollout
+refused PILOT_REVIEW_NOT_READY after a slow existing market-store verification
+outlasted private heartbeat health. Preserve that failed run. Supervise the
+private reader AFTER catalogue/storage warmup, BEFORE reviewed clock probes.
+Only existing transient reconnect rules apply; a warmup or source failure must
+not clear HALTED. No sends/limit changes are introduced by startup supervision.
+
+Startup follow-up verification:2 new RED ->21 transport GREEN(2.535s), final
+full1069 GREEN(160.551s). No threshold/budget/expiry change; failed native first
+run remains an incident. Reviewed-startup reconnect is not financial coverage.
