@@ -1,6 +1,6 @@
 # Demo execution qualification pilot and learning handoff
 
-Date: 2026-10-28. Status: implemented; actual launch qualification pending. User priority: start Demo
+Date: 2026-10-28. Status: actual protected probe closed; bounded collection only. User priority: start Demo
 execution today and obtain first actual results for a learning integration test
 on 2026-10-29 (Europe/Budapest). Parent: P0/P1/P3/P5 program contracts.
 
@@ -109,6 +109,18 @@ require certified P0 days; canary partial intervals stay integration diagnostics
 
 ## Test-first acceptance and rollout
 
+Rate-window recovery: do not hammer six recovery snapshots one second apart.
+Keep entry halt and native protection, wait for the60s local budget window to
+expire, then perform bounded ownership-aware reconciliation. OPEN polling is
+at most twice per minute, with the last sleep shortened to the position deadline.
+After a budget incident, automatic new entries remain killed until operator
+review of fills, balance and actual delivery; a protected position is never
+treated as closed merely because reads were unavailable. A normal IDLE wait
+must not replay every historical myTrades request once terminal fills are cached.
+An explicit operator resume may clear only that entry halt after CLOSED actual
+outcome/private match, unchanged account, empty orders, no uncertain mutation,
+same limits/expiry and fresh healthy snapshot; record the review decision.
+
 PIL-01 transport pinning/default off; PIL-02 exact Decimal/filter/risk bounds;
 PIL-03 immutable IDs, write-ahead state and unknown no-resend; PIL-04 filled
 BUY -> verified OCO -> cancel/race-safe SELL; PIL-05 foreign seed/order refusal,
@@ -168,3 +180,20 @@ without weakening the closed-audit check. Actual read-only migration confirmed
 unchanged seed/empty orders/lists; old buy-1 is REJECTED with durable proof,
 attempt count1 and original expiry retained. No matching request was sent in
 that refused attempt. Next actual startup still requires protected probe proof.
+
+Actual probe: BUY filled, native OCO verified, owned cancel and SELL completed;
+REST/private fills and per-asset balances agreed. Protection took6312ms. The
+software time exit exceeded the intended60s because local request budget
+prevented reads. This incident is retained; it is not a timing-SLA pass. The
+closed technical outcome reached learning_handoff (1/1 eligible,0 excluded),
+NOT_TRAINED and daily_objective_eligible=False. Monetary/account details stay
+only in own runtime. Operator stopped only the own IDLE entry-halted worker for
+update; interrupted WS/run history is not repaired into complete coverage.
+No ordinary strategy, financial COMPLETE day or profitable learning is claimed.
+
+Rate repair:3 new missing-interface RED cases,54 focused GREEN (9.237s),
+full923 GREEN (215.952s), root14 GREEN. OPEN uses deadline-aware max30s polls,
+budget recovery waits60s before bounded queries, and only explicit reviewed
+resume can clear the retained entry halt after verified closure. No rate/risk
+limit was raised. Next-day native automation reviews evidence and tests mature
+learning handoff on2026-10-29 at11:45 Europe/Budapest; no model promotion.

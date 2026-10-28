@@ -78,6 +78,25 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(self.exchange.calls),2)
         self.assertEqual(self.exchange.calls[1][1],'/api/v3/orderList/oco')
 
+    def test_pil05_open_polling_preserves_deadline_and_budget_window(self):
+        self.assertEqual(self.api.pilot_sleep_seconds({'phase':'OPEN','deadline_ms':100000},1000),30)
+        self.assertEqual(self.api.pilot_sleep_seconds({'phase':'OPEN','deadline_ms':2000},1000),1)
+        self.assertEqual(self.api.pilot_sleep_seconds({'phase':'RECOVERY_REQUIRED','reason':'MARKET_RATE_BUDGET'},1000),60)
+
+    def test_pil05_operator_resume_only_after_verified_closed_probe(self):
+        self.service.tick();self.exchange.now+=61000;self.service.tick()
+        state=self.book.state();incident=dict(state,phase='RECOVERY_REQUIRED',reason='MARKET_RATE_BUDGET')
+        self.book.save_state(incident)
+        state.update(entry_killed=True,recovery_phase='OPEN');self.book.save_state(state)
+        state=self.service.resume_after_budget_review(reviewed=True)
+        self.assertFalse(state['entry_killed']);self.assertEqual(state['cycles'],1)
+        self.assertEqual(state['next_entry_ms'],2000+10800000)
+
+    def test_pil05_operator_resume_cannot_clear_unknown_or_open_exposure(self):
+        self.service.tick()
+        from binance_demo_bot.adapter import AdapterError
+        with self.assertRaises(AdapterError):self.service.resume_after_budget_review(reviewed=True)
+
     def test_pil03_abandoned_local_attempt_keeps_next_actual_probe_short(self):
         self.book.save_state(dict(phase='IDLE',cycles=1,qualified=False,entry_killed=False,
             local_unsent_abandoned=True,peak_equity='100',last_equity='100',next_entry_ms=0))

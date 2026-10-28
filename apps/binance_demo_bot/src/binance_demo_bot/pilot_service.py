@@ -14,6 +14,13 @@ from .private_stream import PrivateEventReader
 from .pilot_research import learning_handoff
 from .order_validation import DemoTradeValidator
 
+RATE_REASONS={'MARKET_RATE_BUDGET','LOCAL_RATE_BUDGET','RATE_LIMITED'}
+
+
+def pilot_sleep_seconds(state,now_ms):
+    if state['phase']=='RECOVERY_REQUIRED' and state.get('reason') in RATE_REASONS:return 60
+    if state['phase']=='OPEN':return min(30,max(.1,(state['deadline_ms']-now_ms)/1000))
+    return 30
 
 class PilotService:
     def __init__(self,journal,gateway):self.book,self.gateway=journal,gateway
@@ -182,6 +189,32 @@ class PilotService:
             self._save(state);return self.tick()
         except AdapterError:return self.book.state()
 
+    def resume_after_budget_review(self,*,reviewed=False):
+        state=self.book.state();outcomes=self.book.outcomes()
+        if (reviewed is not True or state.get('phase')!='IDLE' or not state.get('qualified')
+            or not state.get('entry_killed') or state.get('recovery_phase')!='OPEN'
+            or not outcomes or outcomes[-1].get('state')!='CLOSED'
+            or outcomes[-1].get('private_delivery_matched') is not True
+            or any(a['state'] not in ('ACKNOWLEDGED','REJECTED') for a in self.book.actions().values())):
+            fail('PILOT_REVIEW_NOT_READY')
+        incident=False
+        for after in range(0,self.book._audit._last_seq,1000):
+            for row in self.book._audit.read(after_seq=after,limit=1000):
+                d=row['data'];v=d.get('value',{})
+                if (row['kind']=='DECISION' and d.get('operation')=='STATE' and
+                    v.get('cycles')==state['cycles'] and v.get('phase')=='RECOVERY_REQUIRED'
+                    and v.get('reason') in RATE_REASONS):incident=True
+        if not incident:fail('PILOT_REVIEW_NOT_READY')
+        snapshot=self.gateway.snapshot();inventory=self._inventory()
+        if (snapshot['account_identity']!=self.book._binding['account_identity'] or snapshot['open_orders']
+            or not snapshot['stream_ok'] or not self._account_agrees(snapshot,inventory)
+            or snapshot['now_ms']>=self.book._binding['expires_ms'] or state['cycles']>=8
+            or Decimal(state['last_equity'])<99
+            or Decimal(state['peak_equity'])-Decimal(state['last_equity'])>=1):fail('PILOT_REVIEW_NOT_READY')
+        self.book.decision(dict(action='OPERATOR_RESUME',reason='CLOSED_BUDGET_INCIDENT_REVIEWED',
+            cutoff_ms=snapshot['now_ms'],snapshot_id=snapshot['snapshot_id'],limits_changed=False))
+        state.update(entry_killed=False,reason='BUDGET_REVIEWED');return self._save(state)
+
 
 class LiveGateway(MatchingGateway):
     def __init__(self,client,evidence,reader):
@@ -292,13 +325,14 @@ def main():
             write_json(folder/'status.json',report);write_json(folder/'outcomes.json',book.outcomes())
             write_json(folder/'learning-handoff.json',learning_handoff(book.outcomes(),fit_cutoff_ms=time.time_ns()//1000000))
             if state['phase']=='RECOVERY_REQUIRED':
+                if state.get('reason') in RATE_REASONS:time.sleep(pilot_sleep_seconds(state,time.time_ns()//1000000))
                 for _ in range(6):
                     state=service.recover_once()
                     if state['phase']!='RECOVERY_REQUIRED':break
                     time.sleep(1)
                 write_json(folder/'status.json',dict(report,state=state))
             if args.once or state['phase'] in ('HALTED','RECOVERY_REQUIRED','FINISHED'):break
-            time.sleep(10 if state['phase']=='OPEN' else 30)
+            time.sleep(pilot_sleep_seconds(state,time.time_ns()//1000000))
     except AdapterError as error:
         write_json(folder/'status.json',dict(state={'phase':'RECOVERY_REQUIRED','reason':error.reason},checked_at_ms=time.time_ns()//1000000,
             mode='EXECUTION_QUALIFICATION',ordinary_strategy_enabled=False));raise SystemExit(error.reason) from None
