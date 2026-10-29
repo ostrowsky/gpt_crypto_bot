@@ -234,3 +234,7 @@ Leader mission re-audit: `docs/specs/leader-mission-reaudit.md` — complete cor
 Leader trend continuation: `docs/specs/leader-trend-continuation.md` — completed maximum-period causal soft-exit replay: held-time component gain, overall mission trade-off; production unchanged.
 
 Mission-aligned learning cycle: `docs/specs/mission-aligned-learning-cycle.md` — verified public universe transport and fresh collection; common mission targets, separated models, audited replay and bounded forward shadow.
+
+Feature-source financial ablation: `docs/specs/binance-demo-feature-source-ablation.md` — preregistered maximum BTC/ETH archive proxy-flow CatBoost comparison; daily shared-cash net PnL, research only, no live promotion.
+
+Forward public Spot flow dataset: `docs/specs/binance-demo-public-flow-dataset.md` — finite credential-free Demo aggTrades/top20 capture; no execution or profitability claim.
