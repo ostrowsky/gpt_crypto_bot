@@ -85,5 +85,22 @@ class RunnerContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'PREPARED_MANIFEST_HASH'):
             self.api.validate_prepared_manifest(manifest)
 
+    def test_RDE12_frozen_model_binding_rejects_replacement_on_resume(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'binding.json';value={'encoder':'a'*64}
+            first=self.api.freeze_model_binding(path,value)
+            self.assertEqual(first,self.api.freeze_model_binding(path,value))
+            with self.assertRaisesRegex(ValueError,'MODEL_BINDING_CHANGED'):
+                self.api.freeze_model_binding(path,{'encoder':'b'*64})
+
+    def test_RDE12_sealed_policy_cannot_impersonate_other_seed_or_gamma(self):
+        valid=dict(seed=11,gamma=1.,requested_steps=131072,actual_steps=131072)
+        self.api.validate_policy_identity(valid,seed=11,gamma=1)
+        for changed in (dict(valid,seed=23),dict(valid,gamma=0.),dict(valid,actual_steps=512)):
+            with self.assertRaisesRegex(ValueError,'POLICY_IDENTITY'):
+                self.api.validate_policy_identity(changed,seed=11,gamma=1)
+
 
 if __name__=='__main__':unittest.main()

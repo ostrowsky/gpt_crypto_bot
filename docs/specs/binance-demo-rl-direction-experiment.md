@@ -174,6 +174,10 @@ resume into same run; write stage/error/incomplete state.
 The canonical SHA of the prepared manifest excluding its own `data_sha256`
 must be recomputed before registration or loading; trusting its stored SHA and
 individually editable member hashes is insufficient.
+Frozen encoder and threshold bindings are immutable on resume. A policy loaded
+from an existing directory must match the requested seed, gamma and fixed
+requested/actual step budget; a sealed but different checkpoint is not an
+acceptable substitute. Bind each accepted policy manifest SHA immutably.
 Output tables,
 equity and same-origin frozen forecast-vs-actual graphs per predictive model;
 PPO charts actions/equity and explicitly shared GRU forecast. Missing/failed

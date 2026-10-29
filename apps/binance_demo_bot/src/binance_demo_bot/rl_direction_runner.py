@@ -253,6 +253,17 @@ def validate_prepared_manifest(manifest):
     return claimed
 
 
+def freeze_model_binding(path,value):
+    from .rl_direction_experiment import _immutable
+    return _immutable(path,value,'MODEL_BINDING_CHANGED')
+
+
+def validate_policy_identity(manifest,*,seed,gamma):
+    if (manifest.get('seed')!=seed or manifest.get('gamma')!=float(gamma)
+            or manifest.get('requested_steps')!=131072 or manifest.get('actual_steps')!=131072):
+        raise ValueError('POLICY_IDENTITY')
+
+
 def _write(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     temporary=path.with_suffix(path.suffix+'.next')
@@ -342,7 +353,7 @@ def execute_study(prepared,output):
             del x,y,provenance
         binding=dict(registration_sha256=registration_sha,encoder_sha256=bundle.encoder_sha256,
             predictor_manifest_sha256=bundle.artifact_manifest['manifest_sha256'],data_sha256=manifest['data_sha256'])
-        _write(output/'frozen-encoder.json',binding)
+        freeze_model_binding(output/'frozen-encoder.json',binding)
         cache=output/'features'
         if not cache.exists():
             status('FROZEN_FEATURE_CACHE')
@@ -375,7 +386,7 @@ def execute_study(prepared,output):
                 rows.append(row);tune_search.append(dict(model=kind,**row))
                 _write(output/'threshold-search.json',tune_search)
             thresholds[kind]=select_threshold(rows)
-        _write(output/'frozen-thresholds.json',dict(thresholds=thresholds,source='TUNE_ONLY',binding=binding))
+        freeze_model_binding(output/'frozen-thresholds.json',dict(thresholds=thresholds,source='TUNE_ONLY',binding=binding))
         policies={};training=[]
         for kind,gamma in (('MYOPIC',0),('PPO',1)):
             policies[kind]={}
@@ -395,6 +406,9 @@ def execute_study(prepared,output):
                         actual_steps=handle.manifest['actual_steps'])
                     _write(folder/'upstream.json',dict(binding=policy_binding,training=train_row))
                     env.close()
+                validate_policy_identity(handle.manifest,seed=seed,gamma=gamma)
+                freeze_model_binding(output/'policy-bindings'/f'{kind}-{seed}.json',
+                    dict(binding=policy_binding,policy_manifest_sha256=handle.manifest['manifest_sha256']))
                 training.append(train_row);policies[kind][seed]=handle
                 _write(output/'policy-training.json',training);bundle.assert_frozen()
         results=[]
