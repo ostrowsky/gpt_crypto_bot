@@ -48,5 +48,35 @@ class NumericalRunner(unittest.TestCase):
             self.assertEqual(env.invalid_episodes_n,0)
             env.close();tape.close()
 
+    def test_invalid_train_transition_raises_instead_of_positive_terminal(self):
+        from binance_demo_bot import rl_direction_runner as api
+        from binance_demo_bot.rl_direction_core import STEP
+        class Tape:
+            def candidate(self,at):return 'AAAUSDT'
+            def vector(self,*a):return [0.]*20
+            def bar(self,*a):return None
+        env=api.make_training_env(Tape(),0,16*STEP,11,episode_steps=8,allowed_starts=[0])
+        env.reset()
+        with self.assertRaisesRegex(ValueError,'INVALID_TRAINING_TRANSITION'):
+            env.step(2)
+        self.assertEqual(env.invalid_episodes_n,1)
+
+    def test_train_ranges_exclude_known_gaps_without_filtering_test_candidate(self):
+        import numpy as np
+        from binance_demo_bot import rl_direction_runner as api
+        from binance_demo_bot.rl_direction_data import STEP
+        class Tape:
+            manifest={'entries':{'AAA':{'first_ms':0}}}
+            screen={'symbols':['AAA'],'times_ms':np.arange(60)*STEP,'symbol_indices':np.zeros(60,dtype=int)}
+            def _files(self,symbol):
+                bars=np.tile([100.,100.,100.,100.,1000.,500.,10.],(60,1));bars[30]=np.nan
+                return bars,None,None
+        starts,counts=api.training_episode_starts(Tape(),0,40*STEP,episode_steps=8)
+        self.assertTrue(len(starts)>0)
+        for at in starts:
+            self.assertFalse(any(i<=30<i+16 for i in range(at//STEP,at//STEP+8)))
+        self.assertGreater(counts['excluded_starts_n'],0)
+        self.assertEqual(Tape.screen['symbol_indices'][30],0)
+
 
 if __name__=='__main__':unittest.main()

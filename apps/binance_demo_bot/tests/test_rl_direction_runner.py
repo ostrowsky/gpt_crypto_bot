@@ -76,5 +76,14 @@ class RunnerContracts(unittest.TestCase):
         self.assertEqual(row['policy_steps_per_seed'],131072)
         self.assertEqual(row['splits'][1][0],'tune')
 
+    def test_RDE12_manifest_payload_tamper_cannot_retain_claimed_hash(self):
+        from binance_demo_bot.rl_direction_data import _sha
+        manifest=dict(entries={'A':{'sha256':'a'*64}},symbols=['A'])
+        manifest['data_sha256']=_sha(manifest)
+        self.assertEqual(self.api.validate_prepared_manifest(manifest),manifest['data_sha256'])
+        manifest['entries']['A']['sha256']='b'*64
+        with self.assertRaisesRegex(ValueError,'PREPARED_MANIFEST_HASH'):
+            self.api.validate_prepared_manifest(manifest)
+
 
 if __name__=='__main__':unittest.main()

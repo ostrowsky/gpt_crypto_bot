@@ -5,7 +5,8 @@ Parent: phase6, competitive GAP review2026-10-29, TH-01..12. No policy promotion
 
 ## Question, scope and preregistration
 
-F15/F60 compare calibrated direction and return predictions. P compares shared
+F15/F60 compare probabilistic direction and return predictions. Raw probabilities
+are evaluated, not claimed post-hoc calibrated. P compares shared
 cash net daily equity PnL. R1 CatBoost, R2 GRU; R3 myopic actor-critic gamma0,
 R4 same PPO architecture gamma1; R5 common entry signals with fixed/trailing/
 learned exits. R3/R4 inherit SAME frozen GRU forecast heads, not independent
@@ -72,13 +73,14 @@ flat EXIT is WAIT; record invalid/veto counts. No same-bar exit/re-entry.
 Costs: base10bp fee +5bp adverse market slip; stress20bp+10bp. TP limit at
 target; stop/market fills adverse, gap stop worse open, stop first on same-bar
 TP/SL. Fixed stop.5%, TP.5%, maxhold16bars. Trailing arm uses prior-bar peak,
+activation.5%, trail.5%, replacing fixed TP. Learned R3/R4 and learned-exit
+mode retain hard stop/maxhold without a fixed TP/trail, so EXIT is learnable.
+
 Already-resting protection triggered at the execution OPEN precedes a
 discretionary EXIT: SL/TRAIL for open<=stop, fixed TP for open>=target.
 Subsequent bar high/low cannot preempt an EXIT completed at open; unresolved
 intrabar protection retains stop-first ordering. A favorable gap never improves
 a resting fixed TP beyond its target.
-activation.5%, trail.5%, replacing fixed TP. Learned R3/R4 and learned-exit
-mode retain hard stop/maxhold without a fixed TP/trail, so EXIT is learnable.
 R4-R3 isolates credit assignment under identical learned-mode exits; R4-R2
 is a combined-policy comparison. Fixed risk: interval peak drawdown/loss entry kill1USDT;
 exits/protection continue. Never reset seed/risk at calendar midnight.
@@ -107,8 +109,14 @@ No automatic promotion, no exchange credentials in trainer/environment.
 RDE07: Train PPO/myopic with seeds[11,23,37,53,71], MLP[32,32],131072steps
 each, rollout512,batch128,epochs5,lr.0003,gae_lambda.95,clip.2,entropy.01,
 vf.5,maxgrad.5,targetKL.03,CPU2threads. All seeds retained. Fixed TRAIN
-episode512 consecutive bars sampled deterministically from valid TRAIN ranges;
-no TEST data in reset selection. Report training episode population/coverage
+episode512 consecutive bars sampled deterministically from valid TRAIN ranges.
+Valid TRAIN episode starts are preregistered from TRAIN only: for every screen
+candidate inside the512bar episode, its possible16bar holding execution window
+must be complete/valid within TRAIN. Freeze start-set hash and coverage counts;
+this training-only completeness selection never screens TUNE/TEST candidates.
+Any unexpected invalid TRAIN transition raises immediately, preserves the error
+and cannot produce an accepted policy artifact, terminal reward or effect verdict.
+No TEST data in reset selection. Report training episode population/coverage
 and finite-budget limitation; never call non-improvement proof against all RL.
 Use full continuous tune/test account; no episodic test cash resets.
 
@@ -162,7 +170,11 @@ warrants. Power/PIT/receipt/execution parity remain uncertified; never promotion
 
 RDE12: Freeze registration before labels/models and save source/spec/data/
 split/normalizer/model/encoder/seeds/cost/signal hashes. Changed inputs cannot
-resume into same run; write stage/error/incomplete state. Output tables,
+resume into same run; write stage/error/incomplete state.
+The canonical SHA of the prepared manifest excluding its own `data_sha256`
+must be recomputed before registration or loading; trusting its stored SHA and
+individually editable member hashes is insufficient.
+Output tables,
 equity and same-origin frozen forecast-vs-actual graphs per predictive model;
 PPO charts actions/equity and explicitly shared GRU forecast. Missing/failed
 model means incomplete, never silent fallback or replacing PPO by rules.
@@ -182,6 +194,9 @@ authority remains unchanged. Full Truth Harness FAIL TH-11 stays FAIL. Complete
 focused/full tests, diff check/review, selective staged gate, commit and push.
 Prospective validation requires later issued forecasts and mature outcomes;
 this historical run alone cannot close that future dependency.
+TRAIN512bar remaining fraction versus continuous evaluation's whole-segment
+fraction is a registered horizon/distribution mismatch, limiting conclusions
+about RL. R5 is transferred joint-PPO exit, not dedicated exit-policy training.
 
 ## Reproduction and verification evidence
 

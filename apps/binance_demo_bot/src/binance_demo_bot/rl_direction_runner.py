@@ -168,10 +168,40 @@ def cache_predictions(manifest,screen,bundle,folder,progress=None):
     return manifest_out
 
 
-def make_training_env(tape,start,end,seed,episode_steps=512):
+def training_episode_starts(tape,start,end,episode_steps=512):
+    """Known TRAIN completeness population, never an evaluation candidate mask."""
+    import numpy as np
+    from .rl_direction_data import _valid_rows
+    count=(end-start)//STEP
+    if count<episode_steps:raise ValueError('TRAIN_EPISODE_TOO_SHORT')
+    bad=np.zeros(count,dtype=bool)
+    for ordinal,symbol in enumerate(tape.screen['symbols']):
+        selected=tape.screen['times_ms'][tape.screen['symbol_indices']==ordinal]
+        selected=selected[(selected>=start)&(selected<end)]
+        if not len(selected):continue
+        bars=tape._files(symbol)[0];first=tape.manifest['entries'][symbol]['first_ms']
+        local=(selected-first)//STEP;inside=(local>=0)&(local+16<=len(bars))&(selected+16*STEP<=end)
+        complete=np.zeros(len(local),dtype=bool)
+        valid=_valid_rows(bars);prefix=np.concatenate(([0],np.cumsum(valid,dtype=np.int64)))
+        ii=local[inside];complete[inside]=(prefix[ii+16]-prefix[ii])==16
+        bad[(selected[~complete]-start)//STEP]=True
+    prefix=np.concatenate(([0],np.cumsum(bad,dtype=np.int64)))
+    indices=np.arange(count-episode_steps+1)
+    allowed=indices[prefix[indices+episode_steps]-prefix[indices]==0]
+    starts=start+allowed*STEP
+    if not len(starts):raise ValueError('NO_VALID_TRAIN_EPISODES')
+    return starts,dict(requested_starts_N=len(indices),valid_starts_n=len(starts),
+        excluded_starts_n=len(indices)-len(starts),invalid_candidate_windows_n=int(bad.sum()),
+        source='TRAIN_ONLY_COMPLETENESS',future_evaluation_masked=False)
+
+
+def make_training_env(tape,start,end,seed,episode_steps=512,allowed_starts=None):
     import numpy as np
     import gymnasium as gym
     if end-start<episode_steps*STEP:raise ValueError('TRAIN_EPISODE_TOO_SHORT')
+    if allowed_starts is None:allowed_starts=training_episode_starts(tape,start,end,episode_steps)[0]
+    if not len(allowed_starts) or any(int(v)<start or int(v)+episode_steps*STEP>end for v in allowed_starts):
+        raise ValueError('TRAIN_EPISODE_STARTS_INVALID')
     class Environment(gym.Env):
         observation_space=gym.spaces.Box(-np.inf,np.inf,(27,),dtype=np.float32)
         action_space=gym.spaces.Discrete(4)
@@ -180,8 +210,8 @@ def make_training_env(tape,start,end,seed,episode_steps=512):
             self.visited_starts=set();self.account=None
         def reset(self,*,seed=None,options=None):
             super().reset(seed=seed)
-            i=self.rng.randrange((end-start)//STEP-episode_steps+1)
-            self.at=start+i*STEP;self.finish=self.at+episode_steps*STEP
+            self.at=int(allowed_starts[self.rng.randrange(len(allowed_starts))])
+            self.finish=self.at+episode_steps*STEP
             self.visited_starts.add(self.at);self.episodes_n+=1
             self.account=ResearchAccount(exit_mode='learned')
             return self._obs(),{}
@@ -191,7 +221,9 @@ def make_training_env(tape,start,end,seed,episode_steps=512):
         def step(self,action):
             result=self.account.step(self.at,tape.candidate(self.at),int(action),tape.bar)
             self.at+=STEP;terminal=self.at>=self.finish or not result['valid']
-            if not result['valid']:self.invalid_episodes_n+=1
+            if not result['valid']:
+                self.invalid_episodes_n+=1
+                raise ValueError('INVALID_TRAINING_TRANSITION:'+str(result['reason']))
             return self._obs(),result['reward'],terminal,False,dict(valid=result['valid'])
     return Environment()
 
@@ -211,6 +243,14 @@ def study_registration(manifest,sources,environment,attempt='RDE-1-MAX519-202610
         historical_receipts_certified=False,native_execution_parity_certified=False,
         forecast_heads='CatBoost,GRU;PPO inherits frozen GRU',
         contrasts=['R4-R3','R4-R2','R2-R1','learned-fixed','learned-trailing','R4-cash'])
+
+
+def validate_prepared_manifest(manifest):
+    from .rl_direction_data import _sha
+    claimed=manifest.get('data_sha256')
+    if claimed!=_sha({k:v for k,v in manifest.items() if k!='data_sha256'}):
+        raise ValueError('PREPARED_MANIFEST_HASH')
+    return claimed
 
 
 def _write(path,value):
@@ -270,6 +310,7 @@ def execute_study(prepared,output):
         _write(output/'status.json',row);print(json.dumps(row),flush=True)
     try:
         manifest=json.loads((Path(prepared)/'manifest.json').read_text(encoding='utf-8'))
+        validate_prepared_manifest(manifest)
         # The loader population is also bound to the collector's independent registration.
         reference=json.loads((Path(manifest['archive']).parent/'history-registration.json').read_text(encoding='utf-8'))
         if set(reference['symbols'])!=set(manifest['symbols']):raise ValueError('REGISTERED_POPULATION_MISMATCH')
@@ -312,6 +353,11 @@ def execute_study(prepared,output):
         for name,sha in cached['files'].items():
             if data._file_sha(cache/name)!=sha:raise ValueError('CACHE_HASH')
         tape=MarketTape(manifest,screen,cache)
+        status('TRAIN_EPISODE_POPULATION')
+        allowed_starts,episode_counts=training_episode_starts(tape,train[1]+33*STEP,train[2]-16*STEP)
+        np.save(output/'training-episode-starts.npy',allowed_starts)
+        policy_binding=dict(binding,train_episode_starts_sha256=data._file_sha(output/'training-episode-starts.npy'))
+        _write(output/'training-episodes.json',dict(episode_counts,binding=policy_binding))
         status('FORECAST_EVALUATION')
         forecasts={segment[0]:forecast_evaluation(tape,segment[1],segment[2]) for segment in (tune,test)}
         _write(output/'forecasts.json',forecasts)
@@ -339,15 +385,15 @@ def execute_study(prepared,output):
                 if folder.exists():
                     handle=models.load_policy(folder)
                     upstream=json.loads((folder/'upstream.json').read_text())
-                    if upstream['binding']!=binding:raise ValueError('POLICY_UPSTREAM_CHANGED')
+                    if upstream['binding']!=policy_binding:raise ValueError('POLICY_UPSTREAM_CHANGED')
                     train_row=upstream['training']
                 else:
-                    env=make_training_env(tape,train[1]+33*STEP,train[2]-16*STEP,seed)
+                    env=make_training_env(tape,train[1]+33*STEP,train[2]-16*STEP,seed,allowed_starts=allowed_starts)
                     handle=models.fit_policy(env,folder,seed=seed,gamma=gamma)
                     train_row=dict(model=kind,seed=seed,episodes_n=env.episodes_n,
                         distinct_episode_starts_n=len(env.visited_starts),invalid_episodes_n=env.invalid_episodes_n,
                         actual_steps=handle.manifest['actual_steps'])
-                    _write(folder/'upstream.json',dict(binding=binding,training=train_row))
+                    _write(folder/'upstream.json',dict(binding=policy_binding,training=train_row))
                     env.close()
                 training.append(train_row);policies[kind][seed]=handle
                 _write(output/'policy-training.json',training);bundle.assert_frozen()
@@ -433,6 +479,8 @@ def report_study(output,registration,results,comparisons,forecasts,training):
         'Current-survivor archive omits delisted universe. OHLC execution assumes zero publication latency, '
         'fractional sizes and declared adverse costs; no queue/native filter parity. '
         'Training budget131072steps/seed is finite, not a conclusion about all RL. '
+        'Remaining-time fraction differs between512bar TRAIN episodes and continuous evaluation. '
+        'Learned exits transfer a joint PPO; a dedicated exit learner was not tested. Probabilities are raw, not post-hoc calibrated. '
         'Any invalid training episode keeps study INCOMPLETE. All partial calendar days excluded with denominators in artifacts. '
         'Next: freeze prospective predictions/policies, collect later outcomes without promotion; assess power first.',
         '', 'Training diagnostics: '+json.dumps(training,sort_keys=True)]
