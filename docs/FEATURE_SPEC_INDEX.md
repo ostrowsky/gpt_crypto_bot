@@ -238,3 +238,5 @@ Mission-aligned learning cycle: `docs/specs/mission-aligned-learning-cycle.md` �
 Feature-source financial ablation: `docs/specs/binance-demo-feature-source-ablation.md` — preregistered maximum BTC/ETH archive proxy-flow CatBoost comparison; daily shared-cash net PnL, research only, no live promotion.
 
 Forward public Spot flow dataset: `docs/specs/binance-demo-public-flow-dataset.md` — finite credential-free Demo aggTrades/top20 capture; no execution or profitability claim.
+
+Demo ambiguous-send recovery: `docs/specs/binance-demo-ambiguous-recovery.md` — durable bounded GET retries, no unknown BUY resend and current-cycle protection/status ownership; no live restart or policy relaxation.

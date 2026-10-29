@@ -11,7 +11,7 @@ from .execution_pilot import amount,text,fail
 from .interaction_audit import AuditJournal
 from .isolation import AppPaths,load_demo_credentials
 from .market_store import MarketSnapshotStore
-from .pilot_service import PilotService,LiveGateway,RATE_REASONS,CLOCK_REASONS,pilot_sleep_seconds,write_json
+from .pilot_service import PilotService,LiveGateway,RATE_REASONS,CLOCK_REASONS,pilot_sleep_seconds,write_json,cycle_status
 from .pilot_research import learning_handoff
 from .private_stream import PrivateEventReader
 from .universe import PERMISSIONS
@@ -36,18 +36,18 @@ def forecast_features(state,bars,received_at_ms,*,now_ms):
     return features,last[6],received_at_ms
 
 
-def operational_report(state,monitor,*,pid,now_ms,expires_ms,actual_outcomes_n,stream,error=None):
+def operational_report(state,monitor,*,pid,now_ms,expires_ms,actual_outcomes_n,stream,error=None,actions=None):
     monitor=deepcopy(monitor);received=monitor.get('quotes_received_at_ms')
     fresh=type(received) is int and 0<=now_ms-received<=30000
     if not fresh:monitor['quote_ready_n']=None
     monitor['quote_status']='FRESH' if fresh else 'UNKNOWN_OR_STALE'
-    blocked=bool(state.get('entry_killed') or state.get('phase')=='HALTED')
+    blocked=bool(state.get('entry_killed') or state.get('phase') in ('HALTED','RECOVERY_REQUIRED'))
     private_ok=bool(stream.get('connected',stream.get('transport_healthy')) and stream.get('transport_healthy') and stream.get('reader_alive',True))
     wait_clock=bool(state.get('data_wait_reason'))
     trading=('EXPIRED' if now_ms>=expires_ms else 'BLOCKED' if blocked else 'WAIT_CLOCK' if wait_clock else
         'WAIT_PRIVATE' if not private_ok else state.get('phase','UNKNOWN'))
     operational='BLOCKED' if blocked and error is None else 'PAUSED' if error or not fresh or wait_clock or not private_ok else 'RUNNING'
-    return dict(mode='ALL_USDT_EXECUTION_QUALIFICATION',pid=pid,checked_at_ms=now_ms,state=deepcopy(state),
+    return dict(mode='ALL_USDT_EXECUTION_QUALIFICATION',pid=pid,checked_at_ms=now_ms,**cycle_status(state,actions or {}),
         monitoring=monitor,monitoring_enabled=True,monitoring_status='RUNNING' if fresh else 'PAUSED',
         trading_status=trading,operational_status=operational,
         last_error=error or state.get('data_wait_reason') or (state.get('reason') if blocked else None),
@@ -286,7 +286,7 @@ def main():
                 if now>=profile['expires_ms'] and state.get('phase')=='IDLE':
                     state.update(phase='FINISHED',reason='PILOT_LIMIT_REACHED');book.save_state(state)
                 report=operational_report(state,monitor,pid=os.getpid(),now_ms=time.time_ns()//1000000,
-                    expires_ms=profile['expires_ms'],actual_outcomes_n=len(book.outcomes()),stream=reader.health())
+                    expires_ms=profile['expires_ms'],actual_outcomes_n=len(book.outcomes()),stream=reader.health(),actions=book.actions())
                 write_json(folder/'status.json',report);write_json(folder/'outcomes.json',book.outcomes())
                 write_json(folder/'learning-handoff.json',learning_handoff(book.outcomes(),fit_cutoff_ms=time.time_ns()//1000000))
                 write_json(paths.runtime_path('all-usdt/monitoring.json'),monitor)

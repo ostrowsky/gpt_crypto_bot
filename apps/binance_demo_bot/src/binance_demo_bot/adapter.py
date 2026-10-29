@@ -36,8 +36,9 @@ def _body_limit(path):
 
 
 class AdapterError(Exception):
-    def __init__(self, reason):
+    def __init__(self, reason, *, api_code=None):
         self.reason = reason
+        self.api_code = api_code if type(api_code) is int else None
         super().__init__(reason)
 
 
@@ -543,7 +544,7 @@ class DemoReadClient:
                         resynced = True
                         continue
                     if response.status != 200 or (type(code) is int and code < 0):
-                        raise AdapterError("API_REJECTED")
+                        raise AdapterError("API_REJECTED", api_code=code)
                     return data, dict({"raw_body_sha256": hashlib.sha256(response.body).hexdigest()} if not signed else {},
                                       **(dict(audit_request_id=request_id,audit_attempt_id=attempt_id,
                                               audit_begin_event_id=audit_parent,audit_end_event_id=audit_end) if self.audit is not None else {}),

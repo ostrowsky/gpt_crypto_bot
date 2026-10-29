@@ -1,5 +1,6 @@
 """One capped execution-qualification worker; no profit-policy promotion."""
 import argparse,json,math,os,time,uuid
+from copy import deepcopy
 from decimal import Decimal,Context,localcontext
 from pathlib import Path
 
@@ -16,16 +17,47 @@ from .order_validation import DemoTradeValidator
 
 RATE_REASONS={'MARKET_RATE_BUDGET','LOCAL_RATE_BUDGET','RATE_LIMITED'}
 CLOCK_REASONS={'CLOCK_UNSYNCED','CLOCK_STALE','CLOCK_QUALITY','CLOCK_JUMP','TIMESTAMP_REJECTED'}
+POSITION_FIELDS={'fill_price','protected_quantity','take_profit','stop_loss','deadline_ms',
+    'unprotected_duration_ms','protection_action'}
+RECOVERY_FIELDS={'recovery_phase','recovery_attempts','recovery_last_checked_ms',
+    'recovery_next_query_ms','recovery_last_reason'}
+
+
+def cycle_status(state,actions):
+    """Project owned current-cycle fields; ACK does not certify live exposure."""
+    view=deepcopy(state);cycle=str(state.get('cycles',0));symbol=state.get('symbol','BTCUSDT')
+    phase=state.get('recovery_phase') if state.get('phase')=='RECOVERY_REQUIRED' else state.get('phase')
+    buy=actions.get('buy-'+cycle,{})
+    bought=(buy.get('state')=='ACKNOWLEDGED' and buy.get('method')=='POST'
+        and buy.get('path')=='/api/v3/order' and buy.get('params',{}).get('symbol')==symbol
+        and buy.get('params',{}).get('side')=='BUY')
+    protection=actions.get('protect-'+cycle,{})
+    protected=(bought and phase=='OPEN' and state.get('protection_action')=='protect-'+cycle
+        and protection.get('state')=='ACKNOWLEDGED' and protection.get('method')=='POST'
+        and protection.get('path')=='/api/v3/orderList/oco'
+        and protection.get('params',{}).get('symbol')==symbol)
+    for key in POSITION_FIELDS:view.pop(key,None)
+    active=phase in ('BUY_PENDING','PROTECTION_PENDING','OPEN')
+    if bought and active and 'fill_price' in state:view['fill_price']=state['fill_price']
+    if protected:
+        view.update({key:deepcopy(state[key]) for key in POSITION_FIELDS if key in state})
+    status=('CLOSED' if phase in ('IDLE','FINISHED') else 'PROTECTION_ACKNOWLEDGED' if protected
+        else 'PROTECTION_PENDING' if bought and active else 'UNVERIFIED')
+    return dict(state=view,position_status=status,current_exposure_status='UNKNOWN')
 
 
 def pilot_sleep_seconds(state,now_ms):
+    if state['phase']=='RECOVERY_REQUIRED' and state.get('recovery_next_query_ms'):
+        return min(300,max(.1,(state['recovery_next_query_ms']-now_ms)/1000))
     if state['phase'] in ('IDLE','RECOVERY_REQUIRED') and state.get('reason') in RATE_REASONS:return 60
     if state['phase']=='RECOVERY_REQUIRED':return 10
     if state['phase']=='OPEN':return min(30,max(.1,(state['deadline_ms']-now_ms)/1000))
     return 30
 
 class PilotService:
-    def __init__(self,journal,gateway):self.book,self.gateway=journal,gateway
+    def __init__(self,journal,gateway,*,clock_ms=None):
+        self.book,self.gateway=journal,gateway
+        self._clock_ms=clock_ms or (lambda:time.time_ns()//1000000)
     def _rows(self):return self.gateway.fill_rows(self.book.owned_order_ids())
     def _inventory(self,rows=None):return fill_inventory(self._rows() if rows is None else rows,set(self.book.owned_order_ids()))
     def _equity(self,inventory,snapshot):
@@ -55,7 +87,8 @@ class PilotService:
         if state.get('protection_action'):
             action=state['protection_action'];item=self.book.actions()[action]
             if item['state']!='ACKNOWLEDGED':
-                state.update(phase='RECOVERY_REQUIRED',entry_killed=True,reason='PROTECTION_UNKNOWN');return self._save(state)
+                state.update(recovery_phase=state['phase'],phase='RECOVERY_REQUIRED',entry_killed=True,
+                    reason='PROTECTION_UNKNOWN');return self._save(state)
             params=dict(symbol=state.get('symbol','BTCUSDT'),listClientOrderId=item['params']['listClientOrderId'])
             result=self.gateway.query_action(item['method'],item['path'],item['params'])
             if result is None or result.get('listOrderStatus')!='ALL_DONE':
@@ -134,6 +167,8 @@ class PilotService:
                 if now>=self.book._binding['expires_ms']:fail('PILOT_EXPIRED')
                 available=snapshot.get('feature_available_at_ms',now)
                 if (type(available) is not int or available>now or snapshot['feature_end_ms']>=now):fail('PILOT_FUTURE_FEATURE')
+                for key in POSITION_FIELDS|RECOVERY_FIELDS:state.pop(key,None)
+                state.pop('reason',None)
                 state.update(phase='BUY_PENDING',cycles=state['cycles']+1,origin_ms=now,
                     technical_probe=self._is_probe(state,snapshot),local_unsent_abandoned=False,
                     symbol=snapshot['metadata']['symbol'],base_asset=snapshot['metadata']['baseAsset'],
@@ -167,6 +202,10 @@ class PilotService:
     def _entry(self,state,snapshot):
         if state.get('feature_available_at_ms',state['origin_ms'])>state['origin_ms']:fail('PILOT_FUTURE_FEATURE')
         action='buy-'+str(state['cycles'])
+        if action not in self.book.actions():
+            if snapshot['now_ms']>=self.book._binding['expires_ms']:fail('PILOT_EXPIRED')
+            if state.get('entry_killed') or self.book._audit.path.parent.joinpath('stop-entries').exists():
+                fail('PILOT_ENTRY_BLOCKED')
         response=self.book.call(action,'POST','/api/v3/order',dict(symbol=state.get('symbol','BTCUSDT'),side='BUY',type='MARKET',
             quoteOrderQty='30',newClientOrderId=self.book.client_id(action),newOrderRespType='FULL'),self.gateway)
         rows=self._rows();inventory=self._inventory(rows)
@@ -207,12 +246,39 @@ class PilotService:
     def recover_once(self):
         state=self.book.state()
         if state.get('phase')!='RECOVERY_REQUIRED':return state
+        now=self._clock_ms()
+        if now<state.get('recovery_next_query_ms',0):return state
+        attempt=state.get('recovery_attempts',0)+1
+        delay=min(300000,10000*2**min(attempt-1,5))
+        state.update(entry_killed=True,recovery_attempts=attempt,recovery_last_checked_ms=now,
+            recovery_next_query_ms=now+delay)
+        self._save(state)
         try:
-            for action,item in self.book.actions().items():
-                if item['state'] in ('QUERY_REQUIRED','SEND_STARTED'):self.book.recover(action,self.gateway)
-            state.update(phase=state.get('recovery_phase','OPEN'),entry_killed=True)
-            self._save(state);return self.tick()
-        except AdapterError:return self.book.state()
+            phase=state.get('recovery_phase')
+            if phase not in ('BUY_PENDING','PROTECTION_PENDING','OPEN'):fail('PILOT_RECOVERY_PHASE_INVALID')
+            unknown=[a for a,item in self.book.actions().items() if item['state'] in ('QUERY_REQUIRED','SEND_STARTED')]
+            if unknown:
+                self.book.decision(dict(action='RECOVERY_QUERY',pending_action=unknown[0],
+                    attempt=attempt,cutoff_ms=now,next_query_ms=state['recovery_next_query_ms']))
+                self.book.recover(unknown[0],self.gateway)
+            if any(item['state'] in ('QUERY_REQUIRED','SEND_STARTED') for item in self.book.actions().values()):
+                fail('PILOT_QUERY_REQUIRED')
+            buy=self.book.actions().get('buy-'+str(state['cycles']),{})
+            if (buy.get('state')!='ACKNOWLEDGED' or buy.get('params',{}).get('symbol')!=state.get('symbol','BTCUSDT')
+                or buy.get('params',{}).get('side')!='BUY' or buy.get('method')!='POST'
+                or buy.get('path')!='/api/v3/order'):fail('PILOT_RECOVERY_ENTRY_UNVERIFIED')
+            state.update(phase=phase,recovery_last_reason='RESOLVED')
+            self.book.decision(dict(action='RECOVERY_RESOLVED',attempt=attempt,cutoff_ms=now))
+            self._save(state);result=self.tick()
+            if result['phase']!='RECOVERY_REQUIRED':result['recovery_next_query_ms']=0
+            else:result['recovery_last_reason']=result.get('reason','PILOT_QUERY_REQUIRED')
+            return self._save(result)
+        except AdapterError as error:
+            state['recovery_last_reason']=error.reason
+            if error.reason in RATE_REASONS:state['recovery_next_query_ms']=now+max(delay,60000)
+            self.book.decision(dict(action='RECOVERY_WAIT',reason=error.reason,attempt=attempt,
+                cutoff_ms=now,next_query_ms=state['recovery_next_query_ms']))
+            return self._save(state)
 
     def resume_after_budget_review(self,*,reviewed=False):
         state=self.book.state();outcomes=self.book.outcomes()
@@ -344,20 +410,14 @@ def main():
         reader=PrivateEventReader(c,evidence,process_instance_id=uuid.uuid4().hex,background=True);reader.start()
         gateway=LiveGateway(c,evidence,reader);service=PilotService(book,gateway)
         while True:
-            state=service.tick();report=dict(mode='EXECUTION_QUALIFICATION',pid=os.getpid(),checked_at_ms=time.time_ns()//1000000,
-                state=state,expires_ms=profile['expires_ms'],actual_outcomes_n=len(book.outcomes()),
+            state=service.recover_once() if book.state().get('phase')=='RECOVERY_REQUIRED' else service.tick()
+            report=dict(mode='EXECUTION_QUALIFICATION',pid=os.getpid(),checked_at_ms=time.time_ns()//1000000,
+                **cycle_status(state,book.actions()),expires_ms=profile['expires_ms'],actual_outcomes_n=len(book.outcomes()),
                 daily_net_pnl_usdt=None,financial_status='PENDING',ordinary_strategy_enabled=False,
                 replay_verdict=research['replay_verdict'],stream=reader.health())
             write_json(folder/'status.json',report);write_json(folder/'outcomes.json',book.outcomes())
             write_json(folder/'learning-handoff.json',learning_handoff(book.outcomes(),fit_cutoff_ms=time.time_ns()//1000000))
-            if state['phase']=='RECOVERY_REQUIRED':
-                if state.get('reason') in RATE_REASONS:time.sleep(pilot_sleep_seconds(state,time.time_ns()//1000000))
-                for _ in range(6):
-                    state=service.recover_once()
-                    if state['phase']!='RECOVERY_REQUIRED':break
-                    time.sleep(1)
-                write_json(folder/'status.json',dict(report,state=state))
-            if args.once or state['phase'] in ('HALTED','RECOVERY_REQUIRED','FINISHED'):break
+            if args.once or state['phase'] in ('HALTED','FINISHED'):break
             time.sleep(pilot_sleep_seconds(state,time.time_ns()//1000000))
     except AdapterError as error:
         write_json(folder/'status.json',dict(state={'phase':'RECOVERY_REQUIRED','reason':error.reason},checked_at_ms=time.time_ns()//1000000,

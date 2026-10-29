@@ -129,16 +129,19 @@ class MatchingGateway:
             fail('PILOT_QUERY_REQUIRED')
         return data
     def query_action(self,method,path,params):
-        if 'orderList' in path:
-            try:raw,_=self.client._request('/api/v3/orderList',{'origClientOrderId':params['listClientOrderId']},signed=True,weight=4);return raw
-            except AdapterError:return None
         try:
-            query={'symbol':params['symbol']}
-            if 'orderId' in params:query['orderId']=params['orderId']
-            else:query['origClientOrderId']=params.get('newClientOrderId',params.get('origClientOrderId'))
-            raw,_=self.client._request('/api/v3/order',query,signed=True,weight=4)
+            if 'orderList' in path:
+                raw,_=self.client._request('/api/v3/orderList',{'origClientOrderId':params['listClientOrderId']},signed=True,weight=4)
+            else:
+                query={'symbol':params['symbol']}
+                if 'orderId' in params:query['orderId']=params['orderId']
+                else:query['origClientOrderId']=params.get('newClientOrderId',params.get('origClientOrderId'))
+                raw,_=self.client._request('/api/v3/order',query,signed=True,weight=4)
             return raw
-        except AdapterError:return None
+        except AdapterError as error:
+            if error.reason=='API_REJECTED' and error.api_code==-2013:
+                raise AdapterError('PILOT_ORDER_NOT_FOUND',api_code=error.api_code) from None
+            raise
     def close(self):self.transport.close()
 
 
