@@ -16,7 +16,7 @@ OPEN, HIGH, LOW, CLOSE, QUOTE_VOLUME, TAKER_QUOTE, TRADE_COUNT = range(7)
 
 
 def _sha(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,allow_nan=False).encode()).hexdigest()
 
 
 def _file_sha(path):

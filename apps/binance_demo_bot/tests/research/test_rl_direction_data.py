@@ -17,7 +17,7 @@ STEP = 900_000
 
 
 def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,allow_nan=False).encode()).hexdigest()
 
 
 def raw_bar(index, price=100., quote=100., buy=50.):
@@ -70,6 +70,13 @@ class ArchiveTests(unittest.TestCase):
     def load(self, rows, **kwargs):
         archive(self.root / 'source.sqlite', rows, **kwargs)
         return self.api.stream_archive(self.root / 'source.sqlite', self.root / 'data', cutoff_ms=96 * STEP)
+
+    def test_RDE01_utf8_symbols_match_collector_manifest_hash_without_escaping(self):
+        symbol='\u5e01\u5b89\u4eba\u751fUSDT'
+        manifest=self.load({symbol:[raw_bar(i) for i in range(96)]})
+        self.assertEqual(manifest['symbols'],[symbol])
+        self.assertEqual(manifest['entries'][symbol]['regular_rows_n'],96)
+        self.assertEqual(self.api._sha({'symbol':symbol}),digest({'symbol':symbol}))
 
     def test_RDE01_every_symbol_kept_and_gap_short_row_not_fabricated(self):
         source = [raw_bar(i) for i in range(96) if i != 40]

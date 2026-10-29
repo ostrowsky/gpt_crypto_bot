@@ -16,6 +16,8 @@ Run RDE-1-MAX519-20261029 on every source-registered current-survivor USDT pair
 in own all-usdt/history.sqlite, earliest available through1793197800000
 (2026-10-28 14:30UTC). Read archive only, verify each compressed/source hash,
 page/order/schema, count shortened/gapped data. No all-pairs common-start filter,
+Source hashes use the collector's canonical UTF-8 JSON (`ensure_ascii=False`),
+including non-ASCII symbol names. Escaped ASCII serialization is not equivalent.
 no fabricated missing data, no dropping failed models/seeds. Archive universe
 and historical receipt latency are UNCERTIFIED; this is SIMULATION.
 Previous studies saw historical TEST: label RETROSPECTIVE_REUSED_HOLDOUT.
