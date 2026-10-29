@@ -240,3 +240,5 @@ Feature-source financial ablation: `docs/specs/binance-demo-feature-source-ablat
 Forward public Spot flow dataset: `docs/specs/binance-demo-public-flow-dataset.md` — finite credential-free Demo aggTrades/top20 capture; no execution or profitability claim.
 
 Demo ambiguous-send recovery: `docs/specs/binance-demo-ambiguous-recovery.md` — durable bounded GET retries, no unknown BUY resend and current-cycle protection/status ownership; no live restart or policy relaxation.
+
+RL direction/control experiment: `docs/specs/binance-demo-rl-direction-experiment.md` — max519 causal candidate screen,15/60m CatBoost/GRU forecasts and frozen-encoder myopic/PPO/exit ablations; research only, reused historical holdout, no promotion.
