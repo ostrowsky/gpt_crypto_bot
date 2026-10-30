@@ -242,3 +242,5 @@ Forward public Spot flow dataset: `docs/specs/binance-demo-public-flow-dataset.m
 Demo ambiguous-send recovery: `docs/specs/binance-demo-ambiguous-recovery.md` — durable bounded GET retries, no unknown BUY resend and current-cycle protection/status ownership; no live restart or policy relaxation.
 
 RL direction/control experiment: `docs/specs/binance-demo-rl-direction-experiment.md` — max519 causal candidate screen,15/60m CatBoost/GRU forecasts and frozen-encoder myopic/PPO/exit ablations; research only, reused historical holdout, no promotion.
+
+Native intrabar execution refinement: `docs/specs/binance-demo-intrabar-execution.md` — same-source1m/1s compatibility gate before frozen RDE-1 TP/SL replay; immutable evidence, no source substitution or promotion.
