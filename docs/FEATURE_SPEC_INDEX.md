@@ -246,3 +246,5 @@ RL direction/control experiment: `docs/specs/binance-demo-rl-direction-experimen
 Native intrabar execution refinement: `docs/specs/binance-demo-intrabar-execution.md` — same-source1m/1s compatibility gate before frozen RDE-1 TP/SL replay; immutable evidence, no source substitution or promotion.
 
 Historical trade resolution probe: `docs/specs/binance-demo-historical-trade-resolution.md` — bounded audited Demo aggTrades availability, guarded minute parity and first-touch diagnostics for three unresolved windows; no PnL repricing or promotion.
+
+Frozen execution-order sensitivity: `docs/specs/binance-demo-execution-order-sensitivity.md` — full168 TUNE/TEST portfolios under stop-first/target-first conventions with frozen RDE-1 policies, baseline parity and risk-lock equivalence; counterfactual research only.
