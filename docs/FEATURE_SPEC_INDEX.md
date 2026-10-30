@@ -244,3 +244,5 @@ Demo ambiguous-send recovery: `docs/specs/binance-demo-ambiguous-recovery.md` �
 RL direction/control experiment: `docs/specs/binance-demo-rl-direction-experiment.md` — max519 causal candidate screen,15/60m CatBoost/GRU forecasts and frozen-encoder myopic/PPO/exit ablations; research only, reused historical holdout, no promotion.
 
 Native intrabar execution refinement: `docs/specs/binance-demo-intrabar-execution.md` — same-source1m/1s compatibility gate before frozen RDE-1 TP/SL replay; immutable evidence, no source substitution or promotion.
+
+Historical trade resolution probe: `docs/specs/binance-demo-historical-trade-resolution.md` — bounded audited Demo aggTrades availability, guarded minute parity and first-touch diagnostics for three unresolved windows; no PnL repricing or promotion.
