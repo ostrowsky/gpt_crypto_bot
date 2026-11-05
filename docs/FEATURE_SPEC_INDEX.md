@@ -252,3 +252,5 @@ Frozen execution-order sensitivity: `docs/specs/binance-demo-execution-order-sen
 Complete intrabar ambiguity census: `docs/specs/binance-demo-intrabar-census.md` — all sealed EOS-1 cases, audited Demo1m and separately labelled checksum-verified official archive1s refinement; data diagnostic only, no PnL repricing or promotion.
 
 Public research request commitments: `docs/specs/binance-demo-public-request-commitments.md` — pre-redaction GET descriptor hashes for exact native/archive provenance with COOKIEUSDT; research-only, legacy failures preserved.
+
+Native-minute portfolio replay: `docs/specs/binance-demo-minute-portfolio-replay.md` — frozen full-history financial recomputation, native Demo1m, explicit within-minute scenarios and post-decision bounded data collection; no orders/training/promotion.
