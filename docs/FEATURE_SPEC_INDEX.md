@@ -248,3 +248,7 @@ Native intrabar execution refinement: `docs/specs/binance-demo-intrabar-executio
 Historical trade resolution probe: `docs/specs/binance-demo-historical-trade-resolution.md` — bounded audited Demo aggTrades availability, guarded minute parity and first-touch diagnostics for three unresolved windows; no PnL repricing or promotion.
 
 Frozen execution-order sensitivity: `docs/specs/binance-demo-execution-order-sensitivity.md` — full168 TUNE/TEST portfolios under stop-first/target-first conventions with frozen RDE-1 policies, baseline parity and risk-lock equivalence; counterfactual research only.
+
+Complete intrabar ambiguity census: `docs/specs/binance-demo-intrabar-census.md` — all sealed EOS-1 cases, audited Demo1m and separately labelled checksum-verified official archive1s refinement; data diagnostic only, no PnL repricing or promotion.
+
+Public research request commitments: `docs/specs/binance-demo-public-request-commitments.md` — pre-redaction GET descriptor hashes for exact native/archive provenance with COOKIEUSDT; research-only, legacy failures preserved.
