@@ -254,3 +254,9 @@ Complete intrabar ambiguity census: `docs/specs/binance-demo-intrabar-census.md`
 Public research request commitments: `docs/specs/binance-demo-public-request-commitments.md` — pre-redaction GET descriptor hashes for exact native/archive provenance with COOKIEUSDT; research-only, legacy failures preserved.
 
 Native-minute portfolio replay: `docs/specs/binance-demo-minute-portfolio-replay.md` — frozen full-history financial recomputation, native Demo1m, explicit within-minute scenarios and post-decision bounded data collection; no orders/training/promotion.
+
+Trade-aware execution repair: `docs/specs/binance-demo-trade-aware-replay.md` — separate MRP-2 trade-only price aggregation, empty-minute nonexecution, causal holding deadline and frozen full-history replay; completed forward-flow integrity audit; no live changes.
+
+Bounded flow audit: `docs/specs/binance-demo-flow-audit-streaming.md` — 64KiB decompression reads, bounded JSONL and retained incomplete-audit incidents; data diagnostics only.
+
+Memory-bounded replay continuation: `docs/specs/binance-demo-replay-memory-continuation.md` — verified prior results, no neural policy loading, cumulative native GET quota and explicit new read-only window; no trading changes.
