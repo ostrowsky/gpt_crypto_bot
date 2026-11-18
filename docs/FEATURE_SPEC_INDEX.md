@@ -260,3 +260,5 @@ Trade-aware execution repair: `docs/specs/binance-demo-trade-aware-replay.md` �
 Bounded flow audit: `docs/specs/binance-demo-flow-audit-streaming.md` — 64KiB decompression reads, bounded JSONL and retained incomplete-audit incidents; data diagnostics only.
 
 Memory-bounded replay continuation: `docs/specs/binance-demo-replay-memory-continuation.md` — verified prior results, no neural policy loading, cumulative native GET quota and explicit new read-only window; no trading changes.
+
+Receipt-time flow direction: `docs/specs/binance-demo-receipt-flow-direction.md` — causal Demo trade/book CatBoost ablation at5/10/30sec with gap masks, fixed chronological splits and calibrated diagnostic intervals; no financial or production claims.
