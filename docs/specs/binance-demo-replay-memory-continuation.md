@@ -52,3 +52,11 @@ EOF-only docs, incomplete report rejection, missing nonfixed source rejection
 and remaining tasks requiring zero neural policies. Full app tests, diff/staged
 harness/review, intended-only commit and push. Rollback: stop only own finite
 research continuation; no production behavior was changed.
+
+FM07: Per-request guards hash an immutable imported-file manifest instead of
+rehashing thousands of imported cache packets for every GET. Individual cache
+hashes remain in the before/final full input verification and in the sealed
+manifest; source/spec/root/journal files stay in the live guard. No weakening
+of wire/frame validation. A local pre-GET timeout with zero query plans/REST
+records is not a native attempt; retain it as an incomplete controller run.
+The network/child timeout and cumulative2000 quota are unchanged.

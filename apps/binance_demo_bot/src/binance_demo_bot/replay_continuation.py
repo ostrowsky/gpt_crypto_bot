@@ -60,6 +60,13 @@ def remaining_computations(plan,completed):
     return missing
 
 
+def request_guard_files(files,manifest_path):
+    manifest_path=Path(manifest_path).resolve()
+    _seal(manifest_path,dict(files=dict(files),verification='FULL_HASH_BEFORE_AND_AFTER_COMPUTATION'))
+    guard={name:digest for name,digest in files.items() if Path(name).parent.name not in ('frames','raw-frames','responses')}
+    guard[str(manifest_path)]=_bytes_sha(manifest_path);return guard
+
+
 def make_binding(old,scope_path,**fields):
     value=dict(old);value.update(fields);value['data_scope_sha256']=_bytes_sha(scope_path);return value
 
@@ -94,10 +101,13 @@ def prepare(folder,prior):
     for name in semantic:
         path=Path(__file__).with_name(name).resolve()
         if _bytes_sha(path)!=old['files'].get(str(path)):raise ValueError('ECONOMIC_SOURCE_CHANGED:'+name)
-    verify_files(binding_files)
+    # remap_inputs has already verified every full input hash.
     small=remap_inputs(old_scope['files'],snapshots['files'])
+    pin_cache={}
     def pin(path):
-        path=Path(path).resolve();digest=_bytes_sha(path);small[str(path)]=digest;binding_files[str(path)]=digest;return digest
+        path=Path(path).resolve()
+        if str(path) in pin_cache:return pin_cache[str(path)]
+        digest=_bytes_sha(path);pin_cache[str(path)]=digest;small[str(path)]=digest;binding_files[str(path)]=digest;return digest
     for name in ('registration.json','data-scope.json','native-data-audit.json','frozen-source.json','rest-audit.sqlite','golden-prior-evidence.json','status.json'):
         pin(prior/name)
     for name in ('replay_continuation.py',):pin(Path(__file__).with_name(name))
@@ -117,7 +127,9 @@ def prepare(folder,prior):
             if kind=='frames':frames_copied+=1
             else:raw_copied+=1
     del responses
-    scope=continuation_scope(old_scope,used,now_ms=int(datetime.now(timezone.utc).timestamp()*1000));scope['files']=small
+    scope=continuation_scope(old_scope,used,now_ms=int(datetime.now(timezone.utc).timestamp()*1000))
+    imports_path=folder/'imported-files.json';scope['files']=request_guard_files(small,imports_path)
+    binding_files[str(imports_path)]=_bytes_sha(imports_path)
     scope['imported_frames_n']=frames_copied;scope['protocol']='FMR-1-CUMULATIVE-READ-ONLY-CONTINUATION'
     _seal(folder/'data-scope.json',scope);binding_files[str(folder/'data-scope.json')]=_bytes_sha(folder/'data-scope.json')
     old_sha=_bytes_sha(prior/'registration.json');completed=[]

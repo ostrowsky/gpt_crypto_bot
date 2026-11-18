@@ -62,4 +62,19 @@ class ContinuationBindingTests(unittest.TestCase):
             new=make_binding(old,scope,protocol='continuation')
             self.assertEqual(new['data_scope_sha256'],_bytes_sha(scope));self.assertEqual(old['data_scope_sha256'],'a'*64)
 
+
+
+class RequestGuardTests(unittest.TestCase):
+    def test_FM07_imported_packets_are_manifest_bound_not_rehashed_per_request(self):
+        from binance_demo_bot.replay_continuation import request_guard_files
+        from binance_demo_bot.intrabar_probe import _read_sealed
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root);code=root/'controller.py';code.write_text('fixed source',encoding='utf-8')
+            files={str(root/'frames'/f'{i}.json'):'a'*64 for i in range(3000)}
+            files[str(code)]=_bytes_sha(code);original=dict(files);manifest=root/'imports.json'
+            guard=request_guard_files(files,manifest)
+            self.assertEqual(len(guard),2);self.assertEqual(guard[str(code)],_bytes_sha(code))
+            self.assertEqual(guard[str(manifest)],_bytes_sha(manifest));self.assertEqual(files,original)
+            self.assertEqual(_read_sealed(manifest)['files'],files)
+
 if __name__=='__main__':unittest.main()
