@@ -262,3 +262,5 @@ Bounded flow audit: `docs/specs/binance-demo-flow-audit-streaming.md` — 64KiB 
 Memory-bounded replay continuation: `docs/specs/binance-demo-replay-memory-continuation.md` — verified prior results, no neural policy loading, cumulative native GET quota and explicit new read-only window; no trading changes.
 
 Receipt-time flow direction: `docs/specs/binance-demo-receipt-flow-direction.md` — causal Demo trade/book CatBoost ablation at5/10/30sec with gap masks, fixed chronological splits and calibrated diagnostic intervals; no financial or production claims.
+
+Receipt-flow financial replay: `docs/specs/binance-demo-receipt-flow-portfolio.md` — shared-cash microprice/CatBoost portfolios, delayed as-of quote execution, Decimal accounting, complete calendar PnL and frozen risk/cost sensitivity; conditional simulation only.
