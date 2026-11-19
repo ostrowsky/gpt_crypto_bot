@@ -266,3 +266,5 @@ Receipt-time flow direction: `docs/specs/binance-demo-receipt-flow-direction.md`
 Receipt-flow financial replay: `docs/specs/binance-demo-receipt-flow-portfolio.md` — shared-cash microprice/CatBoost portfolios, delayed as-of quote execution, Decimal accounting, complete calendar PnL and frozen risk/cost sensitivity; conditional simulation only.
 
 Receipt-flow journal recovery: `docs/specs/binance-demo-receipt-flow-journal-recovery.md` — bounded durable gzip members, verified partial-write rollback and outcome-independent reuse of sealed portfolios after storage failure; economic policy unchanged.
+
+Receipt-flow bounded memory: `docs/specs/binance-demo-receipt-flow-memory.md` — lazy lossless forecast rows, one prediction vector and four-chunk quote cache with original financial engine and full journal parity; failed parents retained.
